@@ -1,0 +1,7 @@
+# Memorie — Winston — System Architect (Fase 3 Solutioning)
+
+_Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per voce, con data. Aggiornare via PR. Non duplicare `docs/project-context.md`._
+
+<!-- Esempio:
+- 2026-07-24 — <fatto appreso e perché conta>.
+-->
