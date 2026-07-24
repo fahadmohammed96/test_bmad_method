@@ -2,6 +2,5 @@
 
 _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per voce, con data. Aggiornare via PR. Non duplicare `docs/project-context.md`._
 
-<!-- Esempio:
-- 2026-07-24 — <fatto appreso e perché conta>.
--->
+- 2026-07-24 — Gate G1 (Project Brief) approvato da Fahad, PR #2 mergiata. Decisioni vincolanti per le fasi successive: (1) l'MVP deve coprire tutta la normativa necessaria per essere "in regola", non solo un sottoinsieme minimo; (2) il CIN (Codice Identificativo Nazionale) è incluso nel nucleo funzionale insieme ad Alloggiati Web, tassa di soggiorno e ISTAT/ROSS1000 (4 adempimenti, non più 3); (3) il caso del 3° immobile (soglia Legge di Bilancio 2026 — presunzione di imprenditorialità, obbligo Partita IVA) resta dentro lo scope pilota "1-3 unità" e va trattato secondo le norme italiane, non escluso come edge case. Dettaglio in `docs/project-brief.md` §"Rischi e assunzioni aperte".
+- 2026-07-24 — Le fonti della ricerca normativa nel brief sono editoriali di settore (blog di fornitori concorrenti come Chekin, Lodgify, Verto AI), non testi di legge primari: raccomandata verifica da commercialista/legale prima dell'implementazione delle funzionalità di compliance — non ancora fatta, da tenere presente nelle fasi successive.
