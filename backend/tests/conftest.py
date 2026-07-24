@@ -13,10 +13,13 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+
+TABELLE_DA_SVUOTARE = "outbox, job, sessione, host"
 
 DEFAULT_TEST_DB_URL = (
     "postgresql+psycopg://postgres:postgres@localhost:54329/hostpilot_test"
@@ -58,14 +61,41 @@ def pg_engine() -> Iterator[Engine]:
     engine.dispose()
 
 
+def _svuota_tabelle(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.execute(text(f"TRUNCATE TABLE {TABELLE_DA_SVUOTARE} CASCADE"))
+        conn.commit()
+
+
 @pytest.fixture
 def db_session(pg_engine: Engine) -> Iterator[Session]:
     with Session(pg_engine) as session:
         yield session
         session.rollback()
-    with pg_engine.connect() as conn:
-        conn.execute(text("TRUNCATE TABLE outbox, job"))
-        conn.commit()
+    _svuota_tabelle(pg_engine)
+
+
+@pytest.fixture
+def client(pg_engine: Engine) -> Iterator[TestClient]:
+    """TestClient dell'app con il database dei test al posto di quello reale."""
+    from app.core.db import get_db
+    from app.main import app
+
+    factory = sessionmaker(pg_engine)
+
+    def _get_test_db() -> Iterator[Session]:
+        with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _get_test_db
+    # base_url https: il cookie di sessione è Secure (AD-15) e il jar del
+    # client non lo invierebbe mai su http.
+    with TestClient(
+        app, base_url="https://testserver", raise_server_exceptions=False
+    ) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    _svuota_tabelle(pg_engine)
 
 
 @pytest.fixture

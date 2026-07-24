@@ -1,10 +1,11 @@
 """Base SQLAlchemy, PK UUIDv7 e sessioni (spine Consistency Conventions)."""
 
 import uuid
+from collections.abc import Iterator
 from functools import lru_cache
 
 from sqlalchemy import Engine, MetaData, create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import get_settings
 
@@ -34,3 +35,9 @@ def get_engine() -> Engine:
 @lru_cache
 def get_sessionmaker() -> sessionmaker:
     return sessionmaker(bind=get_engine())
+
+
+def get_db() -> Iterator[Session]:
+    """Dependency FastAPI: una sessione DB per richiesta."""
+    with get_sessionmaker()() as session:
+        yield session

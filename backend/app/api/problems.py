@@ -18,6 +18,24 @@ TYPE_VALIDATION = "urn:hostpilot:problem:validation-error"
 TYPE_INTERNAL = "urn:hostpilot:problem:internal-error"
 
 
+class DomainProblem(Exception):
+    """Errore di dominio con `type` RFC 9457 stabile (AD-14)."""
+
+    def __init__(
+        self,
+        *,
+        status: int,
+        title: str,
+        type_slug: str,
+        detail: str | None = None,
+    ) -> None:
+        super().__init__(title)
+        self.status = status
+        self.title = title
+        self.type = f"urn:hostpilot:problem:{type_slug}"
+        self.detail = detail
+
+
 def problem_response(
     *,
     status: int,
@@ -35,6 +53,14 @@ def problem_response(
 
 
 def register_problem_handlers(app: FastAPI) -> None:
+    @app.exception_handler(DomainProblem)
+    async def domain_problem_handler(
+        request: Request, exc: DomainProblem
+    ) -> JSONResponse:
+        return problem_response(
+            status=exc.status, title=exc.title, type_=exc.type, detail=exc.detail
+        )
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
         request: Request, exc: StarletteHTTPException

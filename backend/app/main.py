@@ -8,11 +8,14 @@ from fastapi import APIRouter, FastAPI
 
 from app.api.health import router as health_router
 from app.api.problems import register_problem_handlers
+from app.identity.api import auth_router, hosts_router
 
 API_PREFIX = "/api/v1"
 
 api_router = APIRouter(prefix=API_PREFIX)
 api_router.include_router(health_router)
+api_router.include_router(auth_router)
+api_router.include_router(hosts_router)
 
 app = FastAPI(
     title="HostPilot API",
