@@ -1,10 +1,11 @@
 ---
 title: 'Project Brief — HostPilot'
-status: draft
+status: approved
 created: 2026-07-24
 updated: 2026-07-24
 author: Mary — Business Analyst
 gate: G1
+gate_status: approved (Fahad, 2026-07-24, PR #2 merged)
 ---
 
 # Project Brief: HostPilot
@@ -76,7 +77,8 @@ Da confermare con l'umano in Fase 2 (obiettivi misurabili non sono nella compete
 **Nel pilota (MVP, ipotesi di lavoro — da confermare in PRD):**
 - Calendario unificato 1-3 strutture con sync iCal Airbnb/Booking e anti double-booking con finestra di riconciliazione.
 - Motore di regole di prezzo base (stagionalità, weekend, last-minute, soggiorno minimo).
-- Promemoria/assistenza per Alloggiati Web, tassa di soggiorno (configurabile per Comune), ROSS1000, CIN — grado di automazione (solo promemoria vs. invio assistito vs. invio automatico) è una decisione di prodotto aperta, vedi Rischi.
+- Copertura normativa **necessaria per essere in regola** su Alloggiati Web, tassa di soggiorno (configurabile per Comune), ROSS1000 e **CIN** — quattro adempimenti nel nucleo dell'MVP (deciso al gate G1, vedi Rischi). Il grado di automazione per singolo adempimento (promemoria vs. invio assistito vs. invio automatico) resta da specificare in Fase 2.
+- Trattamento del caso "3° immobile" (regime fiscale differenziato per soglia Legge di Bilancio 2026) come parte dello scope pilota, non come edge case escluso (deciso al gate G1).
 - Calendario pulizie e messaggistica automatica base agli ospiti.
 
 **Esplicitamente fuori scope pilota:**
@@ -128,9 +130,12 @@ Da confermare con l'umano in Fase 2 (obiettivi misurabili non sono nella compete
 
 ## Rischi e assunzioni aperte (per il gate umano)
 
-1. **Copertura normativa nell'MVP** — decisione di prodotto aperta: HostPilot deve limitarsi a *promemoria* delle scadenze (rischio più basso, valore più contenuto) o offrire *invio assistito/automatico* verso i portali istituzionali (valore più alto, ma introduce rischio legale/tecnico — es. automazione verso Alloggiati Web e ROSS1000 potrebbe richiedere integrazioni non documentate pubblicamente o accordi con le PA). Raccomandazione: partire da promemoria + compilazione assistita per il pilota, validare l'automazione end-to-end solo dopo. **Decisione dell'umano.**
-2. **Il CIN non era tra le 4 aree indicate dal leader ma è emerso come rischio normativo rilevante (sanzioni fino a 8.000€/immobile)** — proposta: includerlo nel nucleo dell'MVP. **Decisione dell'umano.**
-3. **La soglia dei tre immobili (Legge di Bilancio 2026)** rende il segmento "1-3 unità" eterogeneo dal punto di vista fiscale (1-2 unità: cedolare secca; 3 unità: Partita IVA e presunzione d'impresa). Va deciso se il prodotto tratta il caso "3 immobili" come standard o come edge case esplicitamente fuori scope pilota. **Decisione dell'umano.**
+> **Esito gate G1 (Fahad, 2026-07-24 — PR #2 merged):** i tre punti aperti sotto sono stati decisi dall'umano. Le decisioni sono riportate qui e vincolano la Fase 2 (PRD/UX) e la Fase 3 (Architettura).
+
+1. ✅ **DECISO — Copertura normativa nell'MVP**: l'MVP deve includere la copertura normativa *necessaria per essere in regola* (non solo promemoria "best effort"). Implicazione per John/Sally in Fase 2: gli adempimenti (Alloggiati Web, tassa di soggiorno, ROSS1000, CIN) sono requisiti di conformità del PRD, non funzionalità opzionali posticipabili — il livello di automazione (promemoria vs. invio assistito vs. invio automatico) resta da specificare nel PRD, ma il criterio guida è "MVP in regola", non il minimo indispensabile.
+2. ✅ **DECISO — Includere il CIN** (Codice Identificativo Nazionale) nel nucleo funzionale, insieme ad Alloggiati Web, tassa di soggiorno e ISTAT/ROSS1000. Il nucleo funzionale previsto passa quindi da 3 a 4 adempimenti italiani da coprire nell'MVP.
+3. ✅ **DECISO — Soglia dei tre immobili**: il caso del 3° immobile (presunzione di imprenditorialità, obbligo Partita IVA, Legge di Bilancio 2026) resta **dentro lo scope pilota** (1-3 unità) e va trattato secondo le norme italiane applicabili — non è un edge case fuori scope. Implicazione per Fase 2: il PRD deve prevedere che il prodotto rifletta correttamente il regime fiscale differenziato tra 1-2 immobili (cedolare secca) e 3 immobili (Partita IVA, aliquote progressive), non solo la parte operativa (calendario/prezzo).
+
 4. **Dati sensibili degli ospiti** (documenti d'identità per Alloggiati Web): nessuna indicazione di retention è stata reperita in questa ricerca. Prima del PRD serve una policy esplicita (base giuridica, minimizzazione, retention, cifratura at-rest) — coerente con `docs/project-context.md` §5, ma va reso concreto in Fase 2/3.
 5. **Fonti normative non primarie**: l'intera sezione normativa di questo brief è basata su articoli editoriali di settore (Chekin, Lodgify, Verto AI e simili), spesso essi stessi fornitori concorrenti con incentivo a semplificare o enfatizzare il rischio normativo per vendere il proprio prodotto. **Raccomandazione forte**: prima dell'implementazione delle funzionalità di compliance (non prima del PRD), commissionare una verifica da parte di un commercialista o consulente legale su Alloggiati Web, tassa di soggiorno, ROSS1000, CIN e soglia dei tre immobili.
 6. **Willingness to pay non validata**: la fascia di prezzo dei concorrenti (13-35€/mese) è un riferimento di mercato, non una conferma che l'host-tipo di HostPilot pagherebbe un abbonamento equivalente per un problema oggi gestito (male) gratis con Excel.
