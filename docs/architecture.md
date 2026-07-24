@@ -1,8 +1,8 @@
 ---
 title: 'Architecture Specification — HostPilot'
-status: draft
+status: approved
 gate: G3
-gate_status: 'in attesa di approvazione umana (Fahad) — Architettura + Epics/Stories + Readiness insieme'
+gate_status: 'approvata da Fahad al gate G3 (2026-07-24). Decisioni §10 [G3-1…5] ratificate; stack registrato in docs/project-context.md §6.'
 created: 2026-07-24
 updated: 2026-07-24
 author: Winston — System Architect

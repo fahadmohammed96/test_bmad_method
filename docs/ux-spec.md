@@ -1,8 +1,8 @@
 ---
 title: 'UX Specification — HostPilot'
-status: draft
+status: approved
 gate: G2
-gate_status: 'in attesa di approvazione umana (Fahad) — PRD + UX Spec insieme'
+gate_status: 'approvata da Fahad al gate G3 (2026-07-24). Target di usabilità proposti (§6) adottati come baseline (esito G2-E, PRD §14).'
 created: 2026-07-24
 updated: 2026-07-24
 author: Sally — UX Designer

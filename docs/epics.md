@@ -1,8 +1,8 @@
 ---
 title: 'Epics & Stories — HostPilot'
-status: draft
+status: approved
 gate: G3
-gate_status: 'in attesa di approvazione umana (Fahad) — Architettura + Epics/Stories + Readiness insieme'
+gate_status: 'approvato da Fahad al gate G3 (2026-07-24). Esiti G2-A…E e G3-1…5 registrati (PRD §14, project-context §6). Fase 4 aperta ad Amelia.'
 created: 2026-07-24
 updated: 2026-07-24
 author: John — Product Manager (leader squad)
