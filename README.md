@@ -32,13 +32,19 @@ Le regole complete e vincolanti per gli agenti sono in [`docs/project-context.md
 ## Struttura del repo
 
 ```
+backend/                  API FastAPI + worker outbox/job (Python 3.14) — vedi backend/AGENTS.md
+frontend/                 App Next.js 16 (TypeScript, Tailwind 4) — vedi frontend/AGENTS.md
 docs/                     Artefatti BMAD (brief, PRD, UX spec, architettura, epics/stories)
   project-context.md      Costituzione del progetto (regole per gli agenti)
+  stories/                Story file di implementazione (Fase 4)
 _bmad/                    Configurazione BMAD e memoria sidecar degli agenti
   bmm/config.yaml         Config del modulo BMM
   _memory/<ruolo>-sidecar/ Memoria persistente per agente (memories, instructions, knowledge)
+.github/workflows/ci.yml  CI: lint, typecheck, test, build + verifica contratto API
 ```
 
 ## Stato
 
-Fase 0 — Bootstrap. Lo **stack tecnologico non è ancora deciso**: la scelta spetta a Winston in Fase 3 (Solutioning).
+Fase 4 — Implementation (gate G3 approvato il 2026-07-24). Stack ratificato:
+FastAPI/Python 3.14 · PostgreSQL 18 · Next.js 16.2/Node 24 — dettagli in
+`docs/project-context.md` §6 e nello spine (`docs/architecture/`).
