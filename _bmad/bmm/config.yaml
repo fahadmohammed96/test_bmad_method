@@ -1,0 +1,52 @@
+# BMAD Method v6 — modulo BMM (Build-Measure-Master)
+# Config di progetto per HostPilot. Consumato dalle skill BMAD all'avvio.
+
+project_name: HostPilot
+bmad_version: v6
+module: bmm
+
+# Lingua
+user_name: Fahad
+communication_language: it        # comunicazione con l'umano
+document_output_language: it      # contenuto degli artefatti
+
+# Percorsi (relativi alla root del repo)
+output_folder: docs                # dove vengono scritti gli artefatti
+planning_artifacts: docs           # brief, PRD, UX spec, architettura, epics/stories
+project_knowledge: docs            # contesto aggiuntivo per lo scanning
+
+# Gate di fase (umani)
+human_gates: true
+delivery: pull_request             # consegne via PR verso main; merge solo umano
+never_push_to_main: true
+
+# Fasi e owner
+phases:
+  - id: 0
+    name: Bootstrap
+    owner: John — Product Manager
+    gate: G0
+  - id: 1
+    name: Analysis
+    owner: Mary — Business Analyst
+    gate: G1
+  - id: 2
+    name: Planning
+    owner: John — Product Manager + Sally — UX Designer
+    gate: G2
+  - id: 3
+    name: Solutioning
+    owner: Winston — System Architect
+    gate: G3
+  - id: 4
+    name: Implementation
+    owner: Amelia — Senior Software Engineer
+    gate: null
+  - id: cross
+    name: Documentation
+    owner: Paige — Technical Writer
+    gate: null
+  - id: tea
+    name: Test Architecture (modulo TEA)
+    owner: Murat — Master Test Architect
+    gate: null

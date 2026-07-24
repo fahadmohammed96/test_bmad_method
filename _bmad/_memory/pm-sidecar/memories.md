@@ -1,0 +1,7 @@
+# Memorie — John — Product Manager (Fase 2 Planning, leader squad)
+
+_Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per voce, con data. Aggiornare via PR. Non duplicare `docs/project-context.md`._
+
+<!-- Esempio:
+- 2026-07-24 — <fatto appreso e perché conta>.
+-->

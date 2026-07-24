@@ -1,0 +1,20 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies / build (lo stack sarà deciso in Fase 3)
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
