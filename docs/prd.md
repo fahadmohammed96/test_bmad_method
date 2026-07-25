@@ -2,9 +2,9 @@
 title: 'PRD — HostPilot'
 status: approved
 gate: G2
-gate_status: 'approvato da Fahad al gate G3 (2026-07-24), insieme a UX Spec, Architettura, Epics/Stories e Readiness. Esiti [DECISIONE G2] registrati in §14.'
+gate_status: 'approvato da Fahad al gate G3 (2026-07-24), insieme a UX Spec, Architettura, Epics/Stories e Readiness. Esiti [DECISIONE G2] registrati in §14. Ultimi punti aperti (set G2-B, owner R-5) chiusi da Fahad il 2026-07-25 — §14.1.'
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-25
 author: John — Product Manager
 phase: '2 · Planning'
 depends_on:
@@ -403,8 +403,8 @@ _Le metriche numeriche e le finestre temporali sono **decisioni di prodotto** (b
 
 _Da portare al gate umano; ereditati e affinati dal brief (§Rischi)._
 
-1. **Fonti normative non primarie (rischio alto):** tutta la base normativa (termini Alloggiati Web, sanzioni, aliquote, soglie, Cassazione 23/01/2026) proviene da articoli editoriali di settore, spesso di concorrenti. **Verifica di un commercialista/legale obbligatoria prima dell'implementazione delle funzionalità di compliance** (non prima del PRD). Mitigazione di design: tutto ciò che è normativo è **configurabile** (NFR-4), così una correzione non richiede rilascio di codice.
-2. **Copertura Comuni/Regioni:** la tassa di soggiorno varia su 1.000+ Comuni e ISTAT/ROSS1000 per Regione. Coprirle tutte al lancio non è realistico → serve decidere il perimetro iniziale ([DECISIONE G2-B]) e degradare in modo sicuro (promemoria manuale) dove la configurazione non c'è (FR-2, FR-12, FR-13).
+1. **Fonti normative non primarie (rischio alto):** tutta la base normativa (termini Alloggiati Web, sanzioni, aliquote, soglie, Cassazione 23/01/2026) proviene da articoli editoriali di settore, spesso di concorrenti. **Verifica di un commercialista/legale obbligatoria prima del rilascio delle funzionalità di compliance** (non prima del PRD, non prima dello sviluppo). Mitigazione di design: tutto ciò che è normativo è **configurabile** (NFR-4), così una correzione non richiede rilascio di codice. **Owner assegnato il 2026-07-25: il commercialista di Fahad** (§14.1, R-5); risposta attesa entro la fine dell'Epic 2. Rischio residuo: la retention documenti (G2-D) è materia GDPR e potrebbe richiedere un **parere privacy separato** — il mandato obbliga il commercialista a segnalarlo.
+2. **Copertura Comuni/Regioni:** la tassa di soggiorno varia su 1.000+ Comuni e ISTAT/ROSS1000 per Regione. Coprirle tutte al lancio non è realistico → perimetro iniziale deciso ([DECISIONE G2-B], §14.1: **6 Comuni**, criterio vincolante, costruzione delegata a Mary) e degrado sicuro (promemoria manuale) dove la configurazione non c'è (FR-2, FR-12, FR-13). Rischio residuo dopo la decisione: la **qualità** del perimetro dipende dalla leggibilità dei regolamenti comunali — un Comune ad alta densità con regolamento caotico si scarta, quindi il set finale potrebbe non coincidere con i Comuni commercialmente più attesi.
 3. **Livello di automazione "in regola":** l'Invio automatico end-to-end è tecnicamente/legamente sostenibile solo per alcuni Adempimenti (Alloggiati Web ha un web service; tassa di soggiorno e ISTAT sono portali eterogenei). Rischio: promettere automazione che non regge → raccomandazione di partire da promemoria + compilazione assistita ([DECISIONE G2-A]).
 4. **Willingness-to-pay non validata:** la fascia concorrenti (13-35€/mese) è un riferimento, non conferma che l'host paghi per un problema oggi gestito (male) gratis con Excel. Impatta SM-4.
 5. **Percezione del rischio sanzionatorio:** se l'host non sente il rischio come urgente ("non mi hanno mai controllato"), la value proposition primaria si sposta da compliance a produttività — da validare con interviste host.
@@ -419,7 +419,7 @@ _Da portare al gate umano; ereditati e affinati dal brief (§Rischi)._
 2. Canale di invio dei Messaggi automatici e disponibilità dei contatti Ospite dai Feed (FR-19).
 3. Assegnazione dei Turni di pulizia a collaboratori esterni: MVP o v2? (FR-18, §9.2).
 4. Formato esatto di esportazione prezzi (FR-10).
-5. Perimetro iniziale di Comuni/Regioni supportati — collegata a [DECISIONE G2-B].
+5. ~~Perimetro iniziale di Comuni/Regioni supportati — collegata a [DECISIONE G2-B].~~ **Chiusa il 2026-07-25** (§14.1): criterio e cap decisi da Fahad, lista in costruzione da Mary.
 
 ---
 
@@ -429,12 +429,12 @@ _Bivi di prodotto che, per `project-context.md` §2, **non decido io**. Per cias
 
 > **Esito gate G3 — 2026-07-24 (approvazione di Fahad):**
 > - **G2-A** → **adottata Opz. 2** (Promemoria + Compilazione assistita per tutti e 4; Invio automatico come fast-follow dove sostenibile — candidato Alloggiati Web via WS_ALLOGGIATI).
-> - **G2-B** → **approccio adottato** (perimetro ristretto ad alta densità + degrado sicuro `configurazione_non_disponibile`), ma il **set iniziale concreto di Comuni/Regioni resta da indicare da Fahad** prima del rilascio delle feature Tassa di soggiorno/ISTAT (Epic 3, Story 3.6/3.7). **Punto ancora aperto.**
+> - **G2-B** → **approccio adottato** (perimetro ristretto ad alta densità + degrado sicuro `configurazione_non_disponibile`); il **set iniziale concreto di Comuni/Regioni è stato sciolto da Fahad il 2026-07-25** — delega a Mary con criterio vincolante e cap di 6 Comuni. Vedi **§14.1**. **Punto chiuso.**
 > - **G2-C** → **adottata Opz. 1** (avviso informativo + rimando al commercialista, niente calcoli d'imposta).
-> - **G2-D** → **default adottato N=30 giorni dopo `completato` / M=90 giorni dal check-out** (= G3-3), **come valore iniziale in attesa della conferma legale** (vedi Readiness R-5, ancora da chiudere). Parametro di configurazione, modificabile senza rilascio.
+> - **G2-D** → **default adottato N=30 giorni dopo `completato` / M=90 giorni dal check-out** (= G3-3), **come valore iniziale in attesa della conferma legale**. L'owner della verifica (Readiness R-5) è assegnato dal 2026-07-25 — §14.1 — con l'obbligo esplicito di segnalare se sul punto retention serve un **parere privacy separato** (è GDPR, non materia fiscale). Parametro di configurazione, modificabile senza rilascio.
 > - **G2-E** → **adottati** i target proposti (SM-1=0, SM-2≥90%, SM-3≥70%, SM-5≥50%; SM-4 senza target finché la WTP non è validata) e i target di usabilità proposti da Sally (onboarding ≤10 min, riconciliazione ≤3 interazioni, Alloggiati ≤2 min) come baseline.
 > - **Decisioni architetturali G3-1…5** ratificate (vedi `docs/architecture.md` §10 e `docs/project-context.md` §6).
-> - **Ancora da Fahad prima del rilascio compliance:** il set G2-B e l'assegnazione dell'owner della verifica legale (Readiness R-5). Non bloccano Epic 1/2.
+> - **Nessun punto del gate G2/G3 resta aperto:** il set G2-B e l'owner della verifica legale (Readiness R-5) sono stati sciolti il **2026-07-25** (issue **MYL-33**) — vedi **§14.1**. Restano da produrre gli **esiti** delle due deleghe (lista Comuni di Mary; risposta del commercialista), non le decisioni.
 
 - **[DECISIONE G2-A] — Livello di automazione degli Adempimenti nell'MVP.**
   - Opz. 1: solo Promemoria. *Trade-off:* rapido, basso rischio legale; ma poco differenziante e non "in regola" nello spirito della decisione G1.
@@ -449,6 +449,34 @@ _Bivi di prodotto che, per `project-context.md` §2, **non decido io**. Per cias
   - Raccomandazione: retention minima legata alla prova dell'avvenuta comunicazione, con default cautelativo breve, **da confermare col legale in Fase 3**. Serve una policy concreta al gate, non un rinvio.
 - **[DECISIONE G2-E] — Target numerici delle Metriche di successo (§10).**
   - Raccomandazione: adottare i target proposti (SM-1=0 incidenti, SM-2≥90%, SM-3≥70%, SM-5≥50%) e lasciare SM-4 (conversione) senza target finché la WTP non è validata (§12.4).
+
+### 14.1 Decisioni del supervisore — 2026-07-25 (issue MYL-33)
+
+_Registrate verbatim nella sostanza. Chiudono i due punti che il gate G3 aveva lasciato aperti; entrambe erano bloccanti per l'**Epic 3 — Adempimenti italiani**, nessuna delle due per l'Epic 2._
+
+**[DECISIONE G2-B] — Perimetro iniziale Comuni/Regioni: DELEGA A MARY, cap 6 Comuni.**
+
+La lista non la sceglie Fahad né John: la costruisce **Mary (Business Analyst)** dai dati, con un **criterio vincolante** in tre punti — tutti e tre devono valere, non è una media pesata:
+
+1. **Massima densità di host privati 1-3 unità** — il target del prodotto, **non il turismo generico**. Un Comune con molti pernottamenti ma dominato da strutture alberghiere o da property manager multi-unità non qualifica.
+2. **Regolamento comunale della tassa di soggiorno pubblicato e leggibile.** Se il regolamento è caotico, **il Comune si scarta anche se è "ovvio"** che debba esserci — e lo scarto **va documentato** con il motivo.
+3. **Le Regioni corrispondenti devono coprire almeno 3-4 sistemi ISTAT regionali diversi** — il perimetro serve anche a mettere alla prova la varietà dei tracciati ISTAT/ROSS1000, non solo le aliquote.
+
+**Esito atteso:** lista motivata dei **6 Comuni + Regioni** (con i Comuni scartati e il perché), in `docs/`, consegnata via PR. Alimenta `config_normativa` (FR-2, FR-12, FR-13) e le Story 3.6/3.7. Il degrado sicuro `configurazione_non_disponibile` resta il comportamento per tutto ciò che è fuori perimetro.
+
+**[R-5 — Readiness] — Owner della verifica legale: il commercialista di Fahad.**
+
+**Mandato esplicito** — deve validare:
+
+- **termini Alloggiati Web** (24h / 6h);
+- **regole della tassa di soggiorno** dei Comuni scelti (esiti di G2-B);
+- **obblighi ISTAT/ROSS1000**;
+- **CIN**;
+- **regime fiscale e soglia dei 3 immobili** (FR-17).
+
+Sul punto **retention dei documenti d'identità Ospiti** (G2-D, 30/90 giorni) deve **segnalare esplicitamente se serve un parere privacy separato**: è materia **GDPR, non fiscale**, e una risposta rassicurante data fuori competenza vale meno del silenzio.
+
+**Ingaggio:** a cura di Fahad. **Risposta attesa entro la fine dell'Epic 2.** Il gate resta di **RILASCIO** per le feature di compliance (Epic 3 — Story 3.9), **non di sviluppo**: l'Epic 3 si può sviluppare, non si può rilasciare a un Host reale senza la validazione.
 
 ---
 
