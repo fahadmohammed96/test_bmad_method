@@ -157,6 +157,37 @@ class TestExecution:
         db_session.refresh(job)
         assert job.status is JobStatus.FAILED
 
+    def test_handler_che_scrive_e_poi_solleva_non_lascia_scritture_parziali(
+        self, db_session: Session, test_catalog: Catalog
+    ) -> None:
+        # G-1 (AD-1/AD-10): atomicità per-item. L'handler schedula un altro
+        # job e POI fallisce: con at-least-once e retry, senza SAVEPOINT la
+        # scrittura parziale verrebbe committata → effetti collaterali doppi.
+        handlers = JobHandlers()
+
+        @handlers.register("promemoria.invia")
+        def handler_scrivi_e_solleva(session: Session, payload: dict) -> None:
+            schedule(
+                session,
+                "promemoria.invia",
+                {"adempimento_id": str(uuid.uuid4())},
+                due_at=utcnow(),
+                catalog=test_catalog,
+            )
+            raise RuntimeError("boom dopo la scrittura")
+
+        job = _schedule_due_now(db_session, test_catalog, max_attempts=3)
+        db_session.commit()
+
+        run_due_jobs(db_session, handlers)
+        db_session.commit()
+
+        righe = db_session.scalars(select(Job)).all()
+        assert len(righe) == 1  # solo il job originale: niente orfani
+        db_session.refresh(job)
+        assert job.status is JobStatus.PENDING  # riprova con backoff
+        assert job.attempts == 1
+
     def test_job_senza_handler_registrato_fallisce_con_motivo(
         self, db_session: Session, test_catalog: Catalog
     ) -> None:

@@ -119,6 +119,33 @@ class TestDelivery:
         assert evento.delivered_at is None
         assert evento.attempts == 1
 
+    def test_handler_che_scrive_e_poi_solleva_non_lascia_scritture_parziali(
+        self, db_session: Session, test_catalog: Catalog
+    ) -> None:
+        # G-1 (AD-1/AD-10): atomicità per-item. L'handler scrive nella
+        # sessione e POI fallisce: la scrittura parziale non deve essere
+        # committata insieme al bookkeeping del fallimento.
+        subscribers = EventSubscribers()
+
+        def handler_scrivi_e_solleva(
+            session: Session, name: str, payload: dict
+        ) -> None:
+            emit(session, "struttura.creata", _payload(), catalog=test_catalog)
+            raise RuntimeError("boom dopo la scrittura")
+
+        subscribers.subscribe("struttura.creata", handler_scrivi_e_solleva)
+        emit(db_session, "struttura.creata", _payload(), catalog=test_catalog)
+        db_session.commit()
+
+        consegnati = deliver_pending(db_session, subscribers)
+        db_session.commit()
+
+        assert consegnati == 0
+        eventi = db_session.scalars(select(OutboxEvent)).all()
+        assert len(eventi) == 1  # solo l'evento originale: niente orfani
+        assert eventi[0].delivered_at is None
+        assert eventi[0].attempts == 1  # il bookkeeping del tentativo resta
+
     def test_claim_concorrente_skip_locked(
         self,
         db_session: Session,
