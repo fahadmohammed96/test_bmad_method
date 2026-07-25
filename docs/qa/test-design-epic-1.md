@@ -130,16 +130,16 @@ Legenda stato: ✅ coperto nella consegna · ⚠️ coperto ma con gap (vedi §4
 | `struttura.host_id` NOT NULL + scoping repository (tenancy) | AD-2 | integration | P0 | ✅ (PR #14, G-3 chiuso) |
 | Flusso guidato passo-passo, skippabile | UX-DR3 | e2e | P2 | ✅ (PR #14, wizard 3 passi e2e) |
 
-### Story 1.5 — Comune/Regione + config normativa, degrado sicuro (da consegnare)
+### Story 1.5 — Comune/Regione + config normativa, degrado sicuro (consegnata, PR #16)
 
 | AC (sintesi) | AD/FR | Livello | Prio | Stato |
 | --- | --- | --- | :---: | :---: |
-| `comune_config`/`regione_config` a validità temporale (`valido_dal/al`) | AD-9 | integration | P0 | ⛔ |
-| Anagrafica seedata da codici ISTAT; update solo via endpoint interni auditati | AD-9 | integration | P0 | ⛔ |
-| Cambio Comune ricarica config Tassa senza perdere storico versamenti | FR-2 | integration | P0 | ⛔ |
-| Comune non configurato → stato `configurazione_non_disponibile`, mai default inventati | AD-9/FR-2 | integration | P0 | ⛔ |
-| Tono informativo, non errore-colpa | UX §5.1 | e2e | P1 | ⛔ |
-| Aliquote/periodicità/termini = dati, aggiornabili senza rilascio | NFR-4 | integration | P0 | ⛔ |
+| `comune_config`/`regione_config` a validità temporale (`valido_dal/al`) | AD-9 | integration | P0 | ✅ (PR #16; determinismo di pari data → F-2, chiuso in #18) |
+| Anagrafica seedata da codici ISTAT; update solo via endpoint interni auditati | AD-9 | integration | P0 | ✅ (PR #16, token di servizio + `config_audit`) |
+| Cambio Comune ricarica config Tassa senza perdere storico versamenti | FR-2 | integration | P0 | ✅ (PR #16, risoluzione alla lettura) |
+| Comune non configurato → stato `configurazione_non_disponibile`, mai default inventati | AD-9/FR-2 | integration | P0 | ✅ (PR #16, `parametri: null` per area) |
+| Tono informativo, non errore-colpa | UX §5.1 | e2e | P1 | ✅ (PR #16, test anti-parole-di-colpa) |
+| Aliquote/periodicità/termini = dati, aggiornabili senza rilascio | NFR-4 | integration | P0 | ✅ (PR #16) |
 
 ### Story 1.6 — Regime fiscale derivato (da consegnare)
 
@@ -160,9 +160,21 @@ Rilievi emersi dalla review retroattiva 1.1 e cross-review 1.2. Sono **proposte 
 correzione** ad Amelia (le entità applicative restano di sua competenza); i test/fixture/CI
 li porto io. Priorità indicata.
 
-**Stato:** G-1, G-2, G-4 **chiusi** dal fix-batch FIX-FORWARD (PR #12, mergiata da Fahad
-il 2026-07-25, verdetto APPROVA di Murat) — red→green verificato. **G-3 e C1 chiusi** dalla
-Story 1.4 (PR #14). Restano aperti: **G-5** (P2) e **F-1** (P2, nuovo dalla review di 1.4).
+**Stato:** G-1, G-2, G-4 **chiusi** dal fix-batch FIX-FORWARD (PR #12). **G-3 e C1 chiusi**
+dalla Story 1.4 (PR #14). **F-2 chiuso** dal secondo fix-batch (PR #18). Restano aperti,
+come P2 parcheggiati per decisione umana: **G-5**, **F-1**, **F-3**.
+
+- **F-2 ✅ CHIUSO (PR #18) — (P1, correttezza AD-9/NFR-4) — Delibera ri-emessa con la stessa
+  `valido_dal`.** Due periodi restavano aperti e la risoluzione dipendeva dall'ordine di
+  Postgres (nessun tiebreaker, nessun UNIQUE). **Esito:** chiusura anche delle aperte di pari
+  decorrenza (`valido_dal <=`) che si chiudono a `valido_dal - 1` — intervallo vuoto, mai
+  vigente, resta nello storico — più tiebreaker `creato_il DESC` come difesa in profondità.
+  Vale per Comune e Regione; 3 test nuovi. Verificato retroattivamente (PR mergiata prima del
+  verdetto): il caso normale a date distinte non regredisce.
+
+- **F-3 (P2, robustezza) — `compare_digest` solleva `TypeError` su header non-ASCII.** Le
+  intestazioni HTTP sono decodificate latin-1: un `X-Admin-Token` con un byte non-ASCII
+  produce **500** invece di 403. Nessun leak né bypass. → Confrontare i byte (`.encode()`).
 
 - **G-1 ✅ CHIUSO (PR #12) — (P1, correttezza AD-1/AD-10) — Atomicità per-item degli handler.** In
   `deliver_pending` e `run_due_jobs` un handler che *scrive e poi solleva* lascia le sue
@@ -253,6 +265,60 @@ Una Story è candidabile al merge umano quando:
 
 Il verdetto di gate (PASS / CONCERNS / FAIL / WAIVED) è una **raccomandazione**: la
 decisione di rilascio resta all'umano (Fahad).
+
+---
+
+## 7. Matrice di tracciabilità — chiusura Epic 1
+
+Controllo di chiusura complessivo dell'Epic: ogni requisito coperto dall'Epic 1 risale a una
+Story, a un livello di test e a un'evidenza eseguibile. Compilata da Murat al termine
+dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
+
+### 7.1 Requisiti funzionali
+
+| Req | Story | Livello di verifica | Evidenza (suite) | Stato |
+| --- | --- | --- | --- | :---: |
+| **FR-1** Registrazione Strutture, cap 3 | 1.4 | integration + e2e | `test_strutture.py`, `flusso-strutture.spec.ts` | ✅ |
+| **FR-2** Anagrafica Comune/Regione, degrado sicuro | 1.5 | integration + e2e | `test_config_normativa.py` | ✅ |
+| **FR-17** Segnalazione Regime fiscale | 1.6 | unit + integration + e2e | `test_regime_fiscale.py`, `regime-fiscale.spec.ts` | ⏳ PR #19 |
+| **FR-20** Account / preferenze notifica (UX-DR15) | 1.3 | integration + component | `test_identity_account.py` | ✅ |
+
+### 7.2 Invarianti architetturali (AD) esercitati nell'Epic 1
+
+| AD | Invariante | Story | Presidio di test | Stato |
+| --- | --- | --- | --- | :---: |
+| AD-1 | Outbox transazionale, effetti asincroni | 1.1, 1.4, 1.6 | `test_outbox.py` + SAVEPOINT per item (G-1) | ✅ |
+| AD-2 | Tenancy per `host_id` | 1.2, 1.4 | **guardia strutturale** `test_tenancy_convention.py` (G-3) | ✅ |
+| AD-3 | Semantica temporale unica | 1.1 | `test_date_range.py` | ✅ |
+| AD-9 | Parametri normativi = dati versionati | 1.5 | `test_config_normativa.py` (+ F-2) | ✅ |
+| AD-10 | Scheduling durevole, no timer in-memory | 1.1 | `test_jobs.py` (SKIP LOCKED, backoff) | ✅ |
+| AD-12 | Regime fiscale derivato, mai persistito | 1.6 | test che **vieta colonne** `regime*`/`fiscal*` | ⏳ PR #19 |
+| AD-14 | Contratto API unico e tipizzato | 1.1→1.6 | job CI `api-contract` (OpenAPI ↔ client TS) | ✅ |
+| AD-15 | Sessione server-side, argon2id | 1.2, 1.3 | **guardia strutturale** `test_auth_convention.py` | ✅ |
+| AD-17 | Catalogo unico eventi/job, payload minimi | 1.1, 1.4, 1.6 | `test_events.py` + validazione payload | ✅ |
+| AD-18 | Un solo modulo scrittore per entità | 1.2→1.6 | struttura a strati api/service/repository | ✅ |
+| AD-20 | Archiviare, mai distruggere | 1.4 | `test_strutture.py` (archiviazione idempotente) | ✅ |
+
+### 7.3 Requisiti non funzionali
+
+| NFR | Presidio | Stato |
+| --- | --- | :---: |
+| **NFR-4** Configurabilità normativa senza rilascio | soglia/aliquote da `config_normativa`; test che abbassa la soglia e cambia l'esito | ⏳ PR #19 |
+| **NFR-8** Accessibilità WCAG 2.1 AA | job CI e2e con **axe serious/critical = 0** su 4+ superfici (C1) | ✅ |
+| **NFR-9** Localizzazione it-IT | `lib/formati.ts` centralizzato + copy per feature | ✅ |
+| **NFR-14** Controllo accessi Host proprietario | guardia tenancy + test cross-tenant (404 su risorse altrui) | ✅ |
+| **NFR-16** Nessun dato reale nei test | fixture su dominio `example.com`, codici ISTAT sintetici marcati | ✅ |
+
+### 7.4 Debiti aperti alla chiusura dell'Epic (tutti P2, decisione umana)
+
+| ID | Sintesi | Origine |
+| --- | --- | --- |
+| **G-5** | Sessioni scadute mai raccolte; nessun rate-limit sul login | review 1.2 |
+| **F-1** | Cap "3 attive" non atomico (TOCTOU) | review 1.4 |
+| **F-3** | `compare_digest` → 500 su header non-ASCII | review 1.5 |
+
+Nessun debito P0/P1 resta aperto: i quattro emersi (G-1, G-2, G-4, F-2) più G-3 e C1 sono
+stati chiusi e verificati entro l'Epic.
 
 ---
 
