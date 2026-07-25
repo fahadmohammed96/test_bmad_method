@@ -115,20 +115,20 @@ Legenda stato: ✅ coperto nella consegna · ⚠️ coperto ma con gap (vedi §4
 | UI it-IT + formati italiani (gg/mm/aaaa, €, virgola) | NFR-9/UX-DR11 | e2e + unit(format) | P0 | ✅ (PR #13) |
 | Pannello Account / preferenze notifica | UX-DR15 | e2e + integration | P1 | ✅ (PR #13) |
 | Layout responsive mobile-first, densità 1–3 Strutture | UX-DR12 | e2e | P1 | ✅ (PR #13) |
-| a11y baseline WCAG 2.1 AA sui flussi critici | NFR-8 | e2e (axe) | P0 | ⚠️ (C1: axe e2e non in #13 — arriva con la 1.4/PR #14) |
+| a11y baseline WCAG 2.1 AA sui flussi critici | NFR-8 | e2e (axe) | P0 | ✅ (C1 chiuso in PR #14: axe in CI su 4 superfici) |
 
-### Story 1.4 — Strutture con cap 3 (da consegnare)
+### Story 1.4 — Strutture con cap 3 (consegnata, PR #14)
 
 | AC (sintesi) | AD/FR | Livello | Prio | Stato |
 | --- | --- | --- | :---: | :---: |
-| Creazione richiede nome+Comune+Regione; CIN opzionale | FR-1 | integration | P0 | ⛔ |
-| CIN assente → indicatore non bloccante "CIN mancante" | FR-1/UJ-1 | integration+e2e | P1 | ⛔ |
-| 4ª Struttura **attiva** rifiutata; cap imposto nel service (unico punto) | FR-1/AD-12 | integration | P0 | ⛔ |
-| Cap "3 attive" ≠ soglia fiscale (parametri distinti) | AD-12 | unit/integration | P0 | ⛔ |
-| Struttura con dati collegati → `archiviata`, mai cancellata; audit append-only | AD-20 | integration | P0 | ⛔ |
-| Struttura archiviata esce da conteggio attive e da Regime fiscale | AD-20/AD-12 | integration | P0 | ⛔ |
-| `struttura.host_id` NOT NULL + scoping repository (tenancy) | AD-2 | integration | P0 | ⛔ |
-| Flusso guidato passo-passo, skippabile | UX-DR3 | e2e | P2 | ⛔ |
+| Creazione richiede nome+Comune+Regione; CIN opzionale | FR-1 | integration | P0 | ✅ (PR #14) |
+| CIN assente → indicatore non bloccante "CIN mancante" | FR-1/UJ-1 | integration+e2e | P1 | ✅ (PR #14, derivato server-side) |
+| 4ª Struttura **attiva** rifiutata; cap imposto nel service (unico punto) | FR-1/AD-12 | integration | P0 | ✅ (PR #14) — vedi F-1 (atomicità) |
+| Cap "3 attive" ≠ soglia fiscale (parametri distinti) | AD-12 | unit/integration | P0 | ✅ (PR #14, `max_strutture_attive`) |
+| Struttura con dati collegati → `archiviata`, mai cancellata; audit append-only | AD-20 | integration | P0 | ✅ (PR #14, idempotente) |
+| Struttura archiviata esce da conteggio attive e da Regime fiscale | AD-20/AD-12 | integration | P0 | ✅ (PR #14, conteggio solo `ATTIVA`) |
+| `struttura.host_id` NOT NULL + scoping repository (tenancy) | AD-2 | integration | P0 | ✅ (PR #14, G-3 chiuso) |
+| Flusso guidato passo-passo, skippabile | UX-DR3 | e2e | P2 | ✅ (PR #14, wizard 3 passi e2e) |
 
 ### Story 1.5 — Comune/Regione + config normativa, degrado sicuro (da consegnare)
 
@@ -161,8 +161,8 @@ correzione** ad Amelia (le entità applicative restano di sua competenza); i tes
 li porto io. Priorità indicata.
 
 **Stato:** G-1, G-2, G-4 **chiusi** dal fix-batch FIX-FORWARD (PR #12, mergiata da Fahad
-il 2026-07-25, verdetto APPROVA di Murat) — red→green verificato. G-3 pianificato con la
-Story 1.4; G-5 resta proposta P2 aperta.
+il 2026-07-25, verdetto APPROVA di Murat) — red→green verificato. **G-3 e C1 chiusi** dalla
+Story 1.4 (PR #14). Restano aperti: **G-5** (P2) e **F-1** (P2, nuovo dalla review di 1.4).
 
 - **G-1 ✅ CHIUSO (PR #12) — (P1, correttezza AD-1/AD-10) — Atomicità per-item degli handler.** In
   `deliver_pending` e `run_due_jobs` un handler che *scrive e poi solleva* lascia le sue
@@ -184,12 +184,30 @@ Story 1.4; G-5 resta proposta P2 aperta.
   mai 500. **Esito:** `try/except IntegrityError` sul flush → rollback → 409 problem+json;
   test di gara con pre-check `by_email` accecato (decide il vincolo UNIQUE del DB).
 
-- **G-3 (P0, tenancy) — Guardia strutturale sullo scoping `host_id`.** La guardia auth
+- **G-3 ✅ CHIUSO (PR #14) — (P0, tenancy) — Guardia strutturale sullo scoping `host_id`.** La guardia auth
   (`test_auth_convention.py`) verifica che ogni endpoint abbia una sessione, ma **non** che
   ogni query su tabella tenant-owned passi dal repository filtrando `host_id`. Dalla Story
   1.4 (prima tabella con `host_id`) serve un meta-test gemello che fallisca se un modulo
   interroga una tabella tenant-owned senza filtro tenant. È il moltiplicatore di rischio più
   alto di tutto l'Epic (R-A). → Da introdurre con la Story 1.4.
+  **Esito:** `tests/test_tenancy_convention.py` — (1) ogni tabella dati fuori allowlist ha
+  `host_id` NOT NULL + FK verso `host`; (2) ogni metodo pubblico dei repository di dominio
+  richiede `host_id` in firma; (3) test anti-svuotamento della guardia.
+
+- **C1 ✅ CHIUSO (PR #14) — (P0, test-coverage) — a11y/e2e non automatizzati in CI.**
+  Emerso dalla review di Story 1.3: la prima UI reale non aveva copertura a11y/e2e in CI.
+  **Esito:** job CI `e2e` full-stack (Playwright avvia backend reale con migrazioni + frontend
+  buildato), baseline **axe serious/critical = 0** su accesso/registrazione/dashboard/strutture,
+  flusso registrazione→prima Struttura, su chromium + mobile.
+
+- **F-1 (P2, robustezza) — Il cap "3 attive" non è atomico (TOCTOU).** Emerso dalla review
+  di Story 1.4. `conta_attive(host_id) >= 3` e l'insert non sono atomici né serializzati:
+  due `POST /strutture` concorrenti dello stesso Host possono passare entrambi il controllo
+  → 4 attive. Stessa classe di G-2, ma impatto minore (cap di prodotto morbido, nessuna
+  violazione di tenancy o dati; il Regime fiscale della 1.6 deriva da `count`, quindi non si
+  corrompe) e probabilità minore (tenant a utente singolo). → Proposta: serializzare per host
+  (`SELECT … FOR UPDATE` sulla riga `host` o `pg_advisory_xact_lock`) + test di gara sul
+  modello di G-2. Non blocca il pilota; decisione di dispatch all'umano.
 
 - **G-4 ✅ CHIUSO (PR #12) — (P1, igiene sicurezza NFR-6) — La 422 riflette la password.** Il gestore di
   `RequestValidationError` restituisce `exc.errors()`, che in Pydantic v2 include il campo
