@@ -6,7 +6,7 @@ sections_completed: ['product', 'method_and_gates', 'roster_and_scope', 'deliver
 existing_patterns_found: 0
 bmad_module: 'bmm'
 bmad_version: 'v6'
-status: 'Fase 3 chiusa — gate G3 approvato (2026-07-24); stack ratificato (§6). Fase 4 (Implementation) aperta.'
+status: 'Fase 4 (Implementation) — gate G3 approvato il 2026-07-24, stack ratificato'
 ---
 
 # Project Context for AI Agents — HostPilot
@@ -78,23 +78,17 @@ Questi punti richiedono **ricerca normativa accurata in Fase Analysis** e non va
 
 ## 6. Technology Stack & Versions
 
-**Ratificato al gate G3 (2026-07-24)** — decisione G3-1 dell'Architettura (`docs/architecture.md` §1.2, spine *Stack*). Fonte di verità per le versioni: la tabella *Stack* di `ARCHITECTURE-SPINE.md` (verificate sul web il 2026-07-24).
+**Ratificato al gate G3 (2026-07-24, decisioni G3-1 e G3-4).** Fonte di verità delle versioni: tabella *Stack* dello spine (`docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`).
 
-| Livello | Scelta | Versione |
-| --- | --- | --- |
-| Backend | Python + FastAPI + SQLAlchemy 2 + Alembic + Pydantic v2 | Python 3.14 · FastAPI ≥ 0.136 · SQLAlchemy 2.x · Alembic 1.18+ · Pydantic ≥ 2.12 |
-| Database | PostgreSQL (dati + coda job + outbox + audit) | 18 (`uuidv7()` nativo) |
-| Frontend | Next.js (App Router) + TypeScript | 16.2 LTS (patch ≥ 16.2.11) · Node 24 LTS |
-| UI | Tailwind CSS + shadcn/ui + TanStack Query | Tailwind 4.x · TanStack Query 5.x |
-| Worker | Stesso codebase backend, processo dedicato | — |
-
-- **Struttura del repo:** monorepo applicativo (decisione **G3-4**): `backend/` + `frontend/` accanto a `docs/`.
-- **Base:** template di squadra `frontend-next` e `backend-fastapi` (boring technology).
-- **Regole vincolanti** (spine, envelope operativo): confini di modulo via interfacce di service/outbox; job durevoli in Postgres (niente broker esterno nell'MVP); contratto API `/api/v1` tipizzato (OpenAPI → client TS generato); regione UE per ogni componente che tocca dati personali; migrazioni Alembic forward-only; CI GitHub Actions (lint/typecheck/test/build).
-- **Vincolo di consegna invariato:** lo scaffolding applicativo (lockfile, scelte di framework) si crea **solo in Fase 4**, via PR, mai push diretto su `main`.
+- **Monorepo applicativo**: `backend/` + `frontend/` accanto a `docs/` (G3-4). Init dai template di squadra `backend-fastapi` / `frontend-next` (repo `test-multica`), adattati allo spine.
+- **Backend**: Python **3.14** · FastAPI ≥ 0.136 · SQLAlchemy 2.x · Alembic 1.18+ (migrazioni **forward-only**) · Pydantic v2 (≥ 2.12) · driver psycopg3. Gestione dipendenze: **uv** (`pyproject.toml` + `uv.lock`).
+- **Database**: PostgreSQL **18** (uuidv7 nativo).
+- **Frontend**: Next.js **16.2 LTS** (App Router, TypeScript, patch ≥ 16.2.11) · Node **24 LTS** · Tailwind CSS 4 + shadcn/ui (seed UI) · TanStack Query 5. Package manager: **npm**.
+- **Contratto API**: OpenAPI generato da FastAPI sotto `/api/v1`; il frontend consuma SOLO il client TypeScript generato (`frontend/lib/api/`, rigenerare con `npm run generate:api`); errori RFC 9457 `application/problem+json` (AD-14).
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`) — lint, typecheck, test, build su ogni PR + verifica di allineamento del contratto API committato.
 
 ## 7. Critical Implementation Rules
 
-- Nessuna regola di codice applicabile al bootstrap (repo senza stack). Da popolare in Fase 3/4 con: convenzioni di naming, struttura moduli, error handling, pattern di test (test-first per Amelia), coverage attese.
+- Il contratto vincolante di implementazione è lo **spine** (AD-1…AD-20 + Consistency Conventions): naming di dominio in italiano verbatim, PK UUIDv7, importi in centesimi interi, enum di stato con literal del Glossario, mutazioni solo nei service del modulo proprietario, eventi/job solo dal catalogo `core/events.py`. Le convenzioni operative per package sono in `backend/AGENTS.md` e `frontend/AGENTS.md`.
 - **Segreti**: mai committare `.env` o credenziali; usare `.env.example`. Nessun dato reale di ospiti nei fixture/test.
 - **Memoria sidecar**: ogni agente legge la propria `_bmad/_memory/<ruolo>-sidecar/` all'avvio e la aggiorna **via PR** quando impara qualcosa di importante (vedi `_bmad/_memory/README.md`).

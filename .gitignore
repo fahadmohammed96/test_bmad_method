@@ -10,11 +10,22 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Dependencies / build (lo stack sarà deciso in Fase 3)
-node_modules/
-dist/
-build/
+# Python (backend)
 __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js (frontend)
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
