@@ -21,7 +21,10 @@ def require_admin_token(
     atteso = get_settings().admin_token
     if not atteso or not x_admin_token:
         raise _accesso_negato()
-    if not secrets.compare_digest(x_admin_token, atteso):
+    # Confronto sui BYTE: le intestazioni HTTP sono decodificate latin-1 e
+    # `compare_digest` su stringhe non-ASCII solleverebbe TypeError — un
+    # token malformato deve restare un accesso negato, non un 500 (F-3).
+    if not secrets.compare_digest(x_admin_token.encode(), atteso.encode()):
         raise _accesso_negato()
 
 

@@ -6,16 +6,36 @@ i repository dei moduli di dominio.
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.date_range import utcnow
 from app.strutture.models import RegimeLettura, StatoStruttura, Struttura
 
+# Namespace applicativo dei lock consultivi: distingue questo lock da
+# qualunque altro uso futuro di pg_advisory_xact_lock nel prodotto.
+NAMESPACE_LOCK_CAP_STRUTTURE = 1001
+
 
 class StrutturaRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
+
+    def blocca_creazioni_dell_host(self, host_id: uuid.UUID) -> None:
+        """Serializza le creazioni concorrenti dello stesso Host (F-1).
+
+        Conteggio e insert non sono atomici: senza serializzazione due
+        richieste simultanee possono superare entrambe il cap. Il lock è
+        consultivo e legato alla TRANSAZIONE (si rilascia da solo al
+        commit o al rollback) e non tocca tabelle di altri moduli.
+
+        Una collisione di hash fra Host diversi serializzerebbe due
+        creazioni non correlate: un costo trascurabile, mai un errore.
+        """
+        self._db.execute(
+            text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:chiave))"),
+            {"namespace": NAMESPACE_LOCK_CAP_STRUTTURE, "chiave": str(host_id)},
+        )
 
     def by_id(self, host_id: uuid.UUID, struttura_id: uuid.UUID) -> Struttura | None:
         return self._db.scalars(

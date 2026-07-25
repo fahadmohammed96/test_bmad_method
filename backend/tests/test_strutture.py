@@ -94,6 +94,66 @@ class TestCapTreAttive:
         assert _crea(client, nome="B1").status_code == 201
 
 
+class TestCapAtomico:
+    """F-1: il cap dev'essere atomico, non un TOCTOU (conteggio + insert)."""
+
+    def test_creazioni_concorrenti_non_superano_il_cap(
+        self, client: TestClient, pg_engine
+    ) -> None:
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from sqlalchemy.orm import Session as SessionType
+
+        from app.identity.models import Host
+        from app.strutture import service
+        from app.strutture.models import StatoStruttura, Struttura
+
+        _accedi(client)
+        _crea(client, nome="Prima")
+        _crea(client, nome="Seconda")
+
+        with SessionType(pg_engine) as db:
+            host_id = db.scalars(select(Host)).one().id
+
+        # Più richieste che partono INSIEME quando resta un solo posto:
+        # una sola può creare la terza Struttura, le altre devono vedere
+        # il cap. Il barrier allinea la partenza sulla finestra critica.
+        CONCORRENTI = 8
+        barriera = threading.Barrier(CONCORRENTI, timeout=10)
+
+        def crea_in_gara(nome: str) -> str:
+            with SessionType(pg_engine) as db:
+                barriera.wait()
+                try:
+                    service.crea_struttura(
+                        db,
+                        host_id,
+                        service.DatiStruttura(
+                            nome=nome, comune="Testopoli", regione="Emilia-Romagna"
+                        ),
+                    )
+                except service.CapStruttureAttiveError:
+                    return "cap"
+                return "creata"
+
+        with ThreadPoolExecutor(max_workers=CONCORRENTI) as esecutore:
+            esiti = list(
+                esecutore.map(
+                    crea_in_gara, [f"In gara {n}" for n in range(CONCORRENTI)]
+                )
+            )
+
+        assert esiti.count("creata") == 1
+        assert esiti.count("cap") == CONCORRENTI - 1
+
+        with SessionType(pg_engine) as db:
+            attive = db.scalars(
+                select(Struttura).where(Struttura.stato == StatoStruttura.ATTIVA)
+            ).all()
+        assert len(attive) == 3  # mai 4, nemmeno sotto concorrenza
+
+
 class TestArchiviazione:
     def test_archivia_mai_distrugge(
         self, client: TestClient, db_session: Session
