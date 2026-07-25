@@ -13,7 +13,6 @@ export const accountCopy = {
   canaleInApp: "In-app",
   preferenzeSalvate: "Preferenze salvate.",
   sezioneStrutture: "Strutture",
-  struttureInArrivo:
-    "La registrazione delle Strutture (fino a 3 attive) arriva con il prossimo aggiornamento.",
+  gestisciStrutture: "Gestisci le tue Strutture (fino a 3 attive)",
   esci: "Esci",
 } as const;

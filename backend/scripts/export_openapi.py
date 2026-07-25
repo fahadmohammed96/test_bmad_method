@@ -7,11 +7,17 @@ siano allineati al codice.
 """
 
 import json
+import sys
 from pathlib import Path
 
-from app.main import app
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+# Lo script gira anche quando il progetto non è installato nel venv
+# (CI: `uv sync --no-install-project`, vedi .github/workflows/ci.yml).
+sys.path.insert(0, str(BACKEND_DIR))
 
-OUTPUT = Path(__file__).resolve().parents[1] / "openapi.json"
+from app.main import app  # noqa: E402
+
+OUTPUT = BACKEND_DIR / "openapi.json"
 
 
 def main() -> None:

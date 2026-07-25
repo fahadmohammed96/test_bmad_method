@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # Origin del frontend ammessa dal CORS (cookie con credentials, AD-14/15).
     frontend_origin: str = "http://localhost:3000"
 
+    # Cap di prodotto del pilota (FR-1): max Strutture ATTIVE per Host.
+    # Parametro DISTINTO dalla soglia fiscale, che vive in config_normativa
+    # (AD-12) e arriva con la Story 1.6.
+    max_strutture_attive: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:

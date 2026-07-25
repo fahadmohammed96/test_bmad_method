@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
@@ -129,7 +130,12 @@ export default function AccountPage() {
         <h2 id="titolo-strutture" className="font-semibold">
           {navCopy.strutture}
         </h2>
-        <p className="mt-1 text-sm text-muted">{accountCopy.struttureInArrivo}</p>
+        <Link
+          href="/strutture"
+          className="mt-1 inline-block text-sm underline-offset-2 hover:underline"
+        >
+          {accountCopy.gestisciStrutture}
+        </Link>
       </section>
 
       <div>

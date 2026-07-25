@@ -1,6 +1,14 @@
 # CI (AR-11): lint, typecheck, test e build su ogni PR.
 # Il contratto API committato (openapi.json + client TS generato) è
 # verificato contro il codice dal job api-contract (AD-14).
+#
+# Postura supply-chain della pipeline:
+# - action di terze parti pinnate al commit SHA (il tag è mutabile);
+# - installazioni da lockfile (`uv sync --locked`, `npm ci`) senza
+#   esecuzione di script di terze parti (`--no-build`, `--ignore-scripts`);
+# - il progetto locale non si installa in CI (`--no-install-project`):
+#   i comandi girano dalla directory del backend, quindi
+#   `uv run --no-sync --no-build` (nessun re-sync, nessuna build implicita).
 name: CI
 
 on:
@@ -32,17 +40,17 @@ jobs:
       HOSTPILOT_TEST_DB_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Install
-        run: uv sync --group dev
+        run: uv sync --locked --no-build --no-install-project --group dev
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --no-sync --no-build ruff check .
       - name: Format check
-        run: uv run ruff format --check .
+        run: uv run --no-sync --no-build ruff format --check .
       - name: Typecheck
-        run: uv run mypy
+        run: uv run --no-sync --no-build mypy
       - name: Test
-        run: uv run pytest
+        run: uv run --no-sync --no-build pytest
 
   frontend:
     runs-on: ubuntu-latest
@@ -57,7 +65,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Lint
         run: npm run lint
       - name: Typecheck
@@ -67,24 +75,69 @@ jobs:
       - name: Build
         run: npm run build
 
-  api-contract:
+  e2e:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hostpilot_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      E2E_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/hostpilot_e2e
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install backend
-        run: uv sync --group dev
-        working-directory: backend
-      - name: Export OpenAPI
-        run: uv run python scripts/export_openapi.py
+        run: uv sync --locked --no-build --no-install-project
         working-directory: backend
       - name: Install frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
+        working-directory: frontend
+      - name: Install browsers
+        # `npm exec --no`: usa il Playwright del lockfile, senza installare
+        # pacchetti on-demand (a differenza di `npx`).
+        run: npm exec --no --ignore-scripts -- playwright install --with-deps chromium
+        working-directory: frontend
+      - name: E2E + a11y (axe)
+        run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+
+  api-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend
+        run: uv sync --locked --no-build --no-install-project
+        working-directory: backend
+      - name: Export OpenAPI
+        run: uv run --no-sync --no-build python scripts/export_openapi.py
+        working-directory: backend
+      - name: Install frontend
+        run: npm ci --ignore-scripts
         working-directory: frontend
       - name: Generate TS client
         run: npm run generate:api
