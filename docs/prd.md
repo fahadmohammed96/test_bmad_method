@@ -323,6 +323,7 @@ _Sistemici, non legati a una singola feature. Il dettaglio implementativo (stack
 - **NFR-7 — Osservabilità degli esiti di compliance:** ogni Adempimento ha uno stato tracciato e verificabile; il sistema mantiene lo storico (audit dell'host) di cosa è stato comunicato e quando.
 - **NFR-8 — Accessibilità:** target da definire in UX Spec (`[ASSUNZIONE: WCAG 2.1 AA come riferimento, da confermare con Sally]`).
 - **NFR-9 — Localizzazione:** UI e contenuti in italiano; date, valute e formati italiani.
+- **NFR-17 — Politica di uscita di rete sui contenuti scaricati dall'Host:** ogni URL fornito dall'Host e dereferenziato dal server (oggi: i Feed iCal, FR-3) è **input non fidato**. Sono ammessi i soli schemi `http`/`https`; l'indirizzo effettivamente risolto va validato e rifiutato se ricade su loopback, reti private, link-local o endpoint di metadati d'istanza; la validazione si ripete **dopo ogni redirect**. Il fetch ha timeout e un limite di dimensione della risposta, espressi come **configurazione** e non come costanti di codice (coerente con NFR-4). Un URL rifiutato è un errore d'uso per l'Host, non un canale di scoperta della rete interna: il messaggio non rivela l'esito della risoluzione. `[Requisito di hardening accolto dal supervisore su proposta del Test Architect (MYL-39); in attesa di ratifica di Fahad. La scelta fra denylist — qui adottata — e allowlist dei domini OTA resta una decisione aperta di Fahad: l'allowlist è più stretta ma rompe portali minori e channel manager.]`
 
 ---
 
@@ -516,7 +517,7 @@ Il **numero** resta quindi da confermare a **R-5** (estensione del mandato, sopr
 ## 15. Riepilogo requisiti (indice FR/NFR)
 
 - **Feature:** Onboarding/Strutture (FR-1, FR-2) · Calendario & anti double-booking (FR-3…FR-7) · Prezzi (FR-8…FR-10) · Adempimenti (FR-11…FR-16) · Regime fiscale (FR-17) · Operatività (FR-18, FR-19) · Account e preferenze (FR-20).
-- **NFR trasversali:** NFR-1…NFR-9. **Privacy/GDPR:** NFR-10…NFR-16.
+- **NFR trasversali:** NFR-1…NFR-9, NFR-17. **Privacy/GDPR:** NFR-10…NFR-16.
 
 ## 16. Indice delle assunzioni (`[ASSUNZIONE]`)
 
