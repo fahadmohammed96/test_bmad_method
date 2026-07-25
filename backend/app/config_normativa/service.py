@@ -173,6 +173,10 @@ def aggiorna_comune_config(
 
     config_repo = ConfigRepository(db)
     # Una nuova delibera chiude il periodo precedente: lo storico resta.
+    # A PARI decorrenza (delibera ri-emessa per correggere un importo) la
+    # riga precedente si chiude a `valido_dal - 1`: un intervallo vuoto,
+    # cioè "sostituita prima di produrre effetti" — resta nello storico e
+    # non è mai vigente, così la risoluzione ha una sola risposta.
     for aperta in config_repo.comune_config_aperte_dal(comune_codice_istat, valido_dal):
         aperta.valido_al = valido_dal - timedelta(days=1)
 
