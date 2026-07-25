@@ -141,16 +141,16 @@ Legenda stato: ✅ coperto nella consegna · ⚠️ coperto ma con gap (vedi §4
 | Tono informativo, non errore-colpa | UX §5.1 | e2e | P1 | ✅ (PR #16, test anti-parole-di-colpa) |
 | Aliquote/periodicità/termini = dati, aggiornabili senza rilascio | NFR-4 | integration | P0 | ✅ (PR #16) |
 
-### Story 1.6 — Regime fiscale derivato (da consegnare)
+### Story 1.6 — Regime fiscale derivato (consegnata, PR #19)
 
 | AC (sintesi) | AD/FR | Livello | Prio | Stato |
 | --- | --- | --- | :---: | :---: |
-| Regime **sempre derivato** da `count(Strutture non archiviate)` alla lettura, mai persistito | AD-12 | unit + integration | P0 | ⛔ |
-| Soglia e parametri fiscali in `config_normativa`, mai costanti nel codice | AD-12 | integration | P0 | ⛔ |
-| 1–2 Strutture → cedolare (informativo); alla 3ª → evento + pannello schermo intero | FR-17/UX-DR14 | integration(evento)+e2e | P0 | ⛔ |
-| Pannello Regime persistente con disclaimer sempre visibile | UX-DR14 | e2e | P1 | ⛔ |
-| Ridiscesa a 2 (archiviazione 3ª) → stato 1–2, nessuna notifica residua | UJ-4 edge | integration | P0 | ⛔ |
-| Contenuto informativo con disclaimer, mai calcolo d'imposta | Non-Goal | e2e | P1 | ⛔ |
+| Regime **sempre derivato** da `count(Strutture non archiviate)` alla lettura, mai persistito | AD-12 | unit + integration | P0 | ✅ (PR #19, test che vieta colonne `regime*`/`fiscal*`) |
+| Soglia e parametri fiscali in `config_normativa`, mai costanti nel codice | AD-12 | integration | P0 | ✅ (PR #19, soglia abbassata → esito cambia) |
+| 1–2 Strutture → cedolare (informativo); alla 3ª → evento + pannello schermo intero | FR-17/UX-DR14 | integration(evento)+e2e | P0 | ✅ (PR #19, evento solo alla transizione) |
+| Pannello Regime persistente con disclaimer sempre visibile | UX-DR14 | e2e | P1 | ✅ (PR #19) |
+| Ridiscesa a 2 (archiviazione 3ª) → stato 1–2, nessuna notifica residua | UJ-4 edge | integration | P0 | ✅ (PR #19, il rientro azzera la conferma di lettura) |
+| Contenuto informativo con disclaimer, mai calcolo d'imposta | Non-Goal | e2e | P1 | ✅ (PR #19, test che vieta campi di importo) |
 
 ---
 
@@ -280,7 +280,7 @@ dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
 | --- | --- | --- | --- | :---: |
 | **FR-1** Registrazione Strutture, cap 3 | 1.4 | integration + e2e | `test_strutture.py`, `flusso-strutture.spec.ts` | ✅ |
 | **FR-2** Anagrafica Comune/Regione, degrado sicuro | 1.5 | integration + e2e | `test_config_normativa.py` | ✅ |
-| **FR-17** Segnalazione Regime fiscale | 1.6 | unit + integration + e2e | `test_regime_fiscale.py`, `regime-fiscale.spec.ts` | ⏳ PR #19 |
+| **FR-17** Segnalazione Regime fiscale | 1.6 | unit + integration + e2e | `test_regime_fiscale.py`, `regime-fiscale.spec.ts` | ✅ |
 | **FR-20** Account / preferenze notifica (UX-DR15) | 1.3 | integration + component | `test_identity_account.py` | ✅ |
 
 ### 7.2 Invarianti architetturali (AD) esercitati nell'Epic 1
@@ -292,7 +292,7 @@ dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
 | AD-3 | Semantica temporale unica | 1.1 | `test_date_range.py` | ✅ |
 | AD-9 | Parametri normativi = dati versionati | 1.5 | `test_config_normativa.py` (+ F-2) | ✅ |
 | AD-10 | Scheduling durevole, no timer in-memory | 1.1 | `test_jobs.py` (SKIP LOCKED, backoff) | ✅ |
-| AD-12 | Regime fiscale derivato, mai persistito | 1.6 | test che **vieta colonne** `regime*`/`fiscal*` | ⏳ PR #19 |
+| AD-12 | Regime fiscale derivato, mai persistito | 1.6 | test che **vieta colonne** `regime*`/`fiscal*` | ✅ |
 | AD-14 | Contratto API unico e tipizzato | 1.1→1.6 | job CI `api-contract` (OpenAPI ↔ client TS) | ✅ |
 | AD-15 | Sessione server-side, argon2id | 1.2, 1.3 | **guardia strutturale** `test_auth_convention.py` | ✅ |
 | AD-17 | Catalogo unico eventi/job, payload minimi | 1.1, 1.4, 1.6 | `test_events.py` + validazione payload | ✅ |
@@ -303,7 +303,7 @@ dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
 
 | NFR | Presidio | Stato |
 | --- | --- | :---: |
-| **NFR-4** Configurabilità normativa senza rilascio | soglia/aliquote da `config_normativa`; test che abbassa la soglia e cambia l'esito | ⏳ PR #19 |
+| **NFR-4** Configurabilità normativa senza rilascio | soglia/aliquote da `config_normativa`; test che abbassa la soglia e cambia l'esito | ✅ |
 | **NFR-8** Accessibilità WCAG 2.1 AA | job CI e2e con **axe serious/critical = 0** su 4+ superfici (C1) | ✅ |
 | **NFR-9** Localizzazione it-IT | `lib/formati.ts` centralizzato + copy per feature | ✅ |
 | **NFR-14** Controllo accessi Host proprietario | guardia tenancy + test cross-tenant (404 su risorse altrui) | ✅ |
