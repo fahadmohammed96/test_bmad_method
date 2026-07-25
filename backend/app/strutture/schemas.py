@@ -12,6 +12,7 @@ class StrutturaInput(BaseModel):
     comune: str = Field(min_length=1, max_length=120)
     regione: str = Field(min_length=1, max_length=80)
     cin: str | None = Field(default=None, max_length=30)
+    comune_codice_istat: str | None = Field(default=None, max_length=6)
 
 
 class StrutturaUpdate(BaseModel):
@@ -19,6 +20,7 @@ class StrutturaUpdate(BaseModel):
     comune: str | None = Field(default=None, min_length=1, max_length=120)
     regione: str | None = Field(default=None, min_length=1, max_length=80)
     cin: str | None = Field(default=None, max_length=30)
+    comune_codice_istat: str | None = Field(default=None, max_length=6)
 
 
 class StrutturaOutput(BaseModel):
@@ -28,6 +30,8 @@ class StrutturaOutput(BaseModel):
     regione: str
     cin: str | None
     stato: StatoStruttura
+    comune_codice_istat: str | None
+    regione_codice_istat: str | None
 
     model_config = {"from_attributes": True}
 

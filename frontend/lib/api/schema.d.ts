@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/comuni": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Comuni */
+        get: operations["comuni_api_v1_comuni_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -126,6 +143,60 @@ export interface paths {
         patch: operations["aggiorna_preferenze_api_v1_hosts_me_preferenze_patch"];
         trace?: never;
     };
+    "/api/v1/interno/comuni/{codice_istat}/configurazione": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Configura Comune */
+        put: operations["configura_comune_api_v1_interno_comuni__codice_istat__configurazione_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interno/regioni/{codice_istat}/configurazione": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Configura Regione */
+        put: operations["configura_regione_api_v1_interno_regioni__codice_istat__configurazione_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/regioni": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Regioni
+         * @description Anagrafica pubblica: serve anche prima dell'accesso (form di onboarding).
+         */
+        get: operations["regioni_api_v1_regioni_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/strutture": {
         parameters: {
             query?: never;
@@ -178,10 +249,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strutture/{struttura_id}/configurazione-normativa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Configurazione Normativa
+         * @description Configurazione applicabile alla Struttura, con degrado sicuro (AD-9).
+         */
+        get: operations["configurazione_normativa_api_v1_strutture__struttura_id__configurazione_normativa_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AreaIstatOutput */
+        AreaIstatOutput: {
+            /** Messaggio */
+            messaggio: string;
+            motivo: components["schemas"]["Motivo"] | null;
+            parametri: components["schemas"]["ParametriIstatOutput"] | null;
+            /** Promemoria Manuale */
+            promemoria_manuale: boolean;
+            stato: components["schemas"]["StatoConfigurazione"];
+        };
+        /** AreaTassaOutput */
+        AreaTassaOutput: {
+            /** Messaggio */
+            messaggio: string;
+            motivo: components["schemas"]["Motivo"] | null;
+            parametri: components["schemas"]["ParametriTassaOutput"] | null;
+            /** Promemoria Manuale */
+            promemoria_manuale: boolean;
+            stato: components["schemas"]["StatoConfigurazione"];
+        };
         /** CambioPasswordInput */
         CambioPasswordInput: {
             /** Password Attuale */
@@ -195,6 +306,56 @@ export interface components {
          * @enum {string}
          */
         CanaleNotifica: "in_app" | "email";
+        /** ComuneConfigInput */
+        ComuneConfigInput: {
+            /** Attore */
+            attore: string;
+            /** Esenzione Eta Max */
+            esenzione_eta_max?: number | null;
+            /** Esenzione Notti Oltre */
+            esenzione_notti_oltre?: number | null;
+            /** Tassa Importo Cent */
+            tassa_importo_cent: number;
+            tassa_periodicita: components["schemas"]["Periodicita"];
+            /** Valido Al */
+            valido_al?: string | null;
+            /**
+             * Valido Dal
+             * Format: date
+             */
+            valido_dal: string;
+        };
+        /** ComuneOutput */
+        ComuneOutput: {
+            /** Codice Istat */
+            codice_istat: string;
+            /** Nome */
+            nome: string;
+            /** Provincia */
+            provincia: string;
+            /** Regione Codice Istat */
+            regione_codice_istat: string;
+        };
+        /** ConfigSalvataOutput */
+        ConfigSalvataOutput: {
+            /** Valido Al */
+            valido_al: string | null;
+            /**
+             * Valido Dal
+             * Format: date
+             */
+            valido_dal: string;
+        };
+        /** ConfigurazioneNormativaOutput */
+        ConfigurazioneNormativaOutput: {
+            /**
+             * Alla Data
+             * Format: date
+             */
+            alla_data: string;
+            istat: components["schemas"]["AreaIstatOutput"];
+            tassa_soggiorno: components["schemas"]["AreaTassaOutput"];
+        };
         /** CredenzialiInput */
         CredenzialiInput: {
             /**
@@ -221,10 +382,63 @@ export interface components {
              */
             id: string;
         };
+        /**
+         * Motivo
+         * @enum {string}
+         */
+        Motivo: "comune_non_riconosciuto" | "comune_non_configurato" | "regione_non_riconosciuta" | "regione_non_configurata";
+        /** ParametriIstatOutput */
+        ParametriIstatOutput: {
+            periodicita: components["schemas"]["Periodicita"];
+            /** Tracciato */
+            tracciato: string;
+        };
+        /** ParametriTassaOutput */
+        ParametriTassaOutput: {
+            /** Esenzione Eta Max */
+            esenzione_eta_max: number | null;
+            /** Esenzione Notti Oltre */
+            esenzione_notti_oltre: number | null;
+            /** Importo Cent */
+            importo_cent: number;
+            periodicita: components["schemas"]["Periodicita"];
+        };
+        /**
+         * Periodicita
+         * @enum {string}
+         */
+        Periodicita: "mensile" | "trimestrale" | "semestrale" | "annuale";
         /** PreferenzeInput */
         PreferenzeInput: {
             canale_notifica_preferito: components["schemas"]["CanaleNotifica"];
         };
+        /** RegioneConfigInput */
+        RegioneConfigInput: {
+            /** Attore */
+            attore: string;
+            istat_periodicita: components["schemas"]["Periodicita"];
+            /** Istat Tracciato */
+            istat_tracciato: string;
+            /** Valido Al */
+            valido_al?: string | null;
+            /**
+             * Valido Dal
+             * Format: date
+             */
+            valido_dal: string;
+        };
+        /** RegioneOutput */
+        RegioneOutput: {
+            /** Codice Istat */
+            codice_istat: string;
+            /** Nome */
+            nome: string;
+        };
+        /**
+         * StatoConfigurazione
+         * @enum {string}
+         */
+        StatoConfigurazione: "configurata" | "configurazione_non_disponibile";
         /**
          * StatoStruttura
          * @description Una Struttura si archivia, mai si distrugge (AD-20).
@@ -237,6 +451,8 @@ export interface components {
             cin?: string | null;
             /** Comune */
             comune: string;
+            /** Comune Codice Istat */
+            comune_codice_istat?: string | null;
             /** Nome */
             nome: string;
             /** Regione */
@@ -250,6 +466,8 @@ export interface components {
             readonly cin_mancante: boolean;
             /** Comune */
             comune: string;
+            /** Comune Codice Istat */
+            comune_codice_istat: string | null;
             /**
              * Id
              * Format: uuid
@@ -259,6 +477,8 @@ export interface components {
             nome: string;
             /** Regione */
             regione: string;
+            /** Regione Codice Istat */
+            regione_codice_istat: string | null;
             stato: components["schemas"]["StatoStruttura"];
         };
         /** StrutturaUpdate */
@@ -267,6 +487,8 @@ export interface components {
             cin?: string | null;
             /** Comune */
             comune?: string | null;
+            /** Comune Codice Istat */
+            comune_codice_istat?: string | null;
             /** Nome */
             nome?: string | null;
             /** Regione */
@@ -365,6 +587,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    comuni_api_v1_comuni_get: {
+        parameters: {
+            query: {
+                ricerca: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComuneOutput"][];
                 };
             };
             /** @description Validation Error */
@@ -484,6 +737,100 @@ export interface operations {
             };
         };
     };
+    configura_comune_api_v1_interno_comuni__codice_istat__configurazione_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-token"?: string | null;
+            };
+            path: {
+                codice_istat: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComuneConfigInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSalvataOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configura_regione_api_v1_interno_regioni__codice_istat__configurazione_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-token"?: string | null;
+            };
+            path: {
+                codice_istat: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegioneConfigInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSalvataOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regioni_api_v1_regioni_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegioneOutput"][];
+                };
+            };
+        };
+    };
     lista_api_v1_strutture_get: {
         parameters: {
             query?: never;
@@ -590,6 +937,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrutturaOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configurazione_normativa_api_v1_strutture__struttura_id__configurazione_normativa_get: {
+        parameters: {
+            query?: {
+                alla_data?: string | null;
+            };
+            header?: never;
+            path: {
+                struttura_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigurazioneNormativaOutput"];
                 };
             };
             /** @description Validation Error */

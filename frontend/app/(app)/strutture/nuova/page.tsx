@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { CampiLuogo, type ValoriLuogo } from "@/components/CampiLuogo";
 import { useCreaStruttura } from "@/lib/api/hooks";
 import { struttureCopy } from "@/lib/copy/strutture";
 
@@ -17,16 +18,20 @@ export default function NuovaStrutturaPage() {
   const crea = useCreaStruttura();
   const [passo, setPasso] = useState(1);
   const [nome, setNome] = useState("");
-  const [comune, setComune] = useState("");
-  const [regione, setRegione] = useState("");
+  const [luogo, setLuogo] = useState<ValoriLuogo>({
+    comune: "",
+    comuneCodiceIstat: null,
+    regione: "",
+  });
   const [cin, setCin] = useState("");
 
   function registra(conCin: boolean) {
     crea.mutate(
       {
         nome,
-        comune,
-        regione,
+        comune: luogo.comune,
+        regione: luogo.regione,
+        comune_codice_istat: luogo.comuneCodiceIstat,
         cin: conCin && cin.trim() !== "" ? cin.trim() : null,
       },
       { onSuccess: () => router.push("/strutture") },
@@ -76,26 +81,7 @@ export default function NuovaStrutturaPage() {
             setPasso(3);
           }}
         >
-          <label className="flex flex-col gap-1 text-sm">
-            {struttureCopy.comuneEtichetta}
-            <input
-              required
-              maxLength={120}
-              value={comune}
-              onChange={(evento) => setComune(evento.target.value)}
-              className="rounded border px-2 py-2"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {struttureCopy.regioneEtichetta}
-            <input
-              required
-              maxLength={80}
-              value={regione}
-              onChange={(evento) => setRegione(evento.target.value)}
-              className="rounded border px-2 py-2"
-            />
-          </label>
+          <CampiLuogo valori={luogo} onChange={setLuogo} />
           <details className="text-sm text-muted">
             <summary className="cursor-pointer">
               {struttureCopy.comuneAiutoTitolo}
