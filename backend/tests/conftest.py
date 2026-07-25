@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
 
-TABELLE_DA_SVUOTARE = "outbox, job, sessione, host"
+TABELLE_DA_SVUOTARE = "outbox, job, struttura, sessione, host"
 
 DEFAULT_TEST_DB_URL = (
     "postgresql+psycopg://postgres:postgres@localhost:54329/hostpilot_test"

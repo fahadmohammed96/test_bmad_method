@@ -100,6 +100,164 @@
         "title": "PreferenzeInput",
         "type": "object"
       },
+      "StatoStruttura": {
+        "description": "Una Struttura si archivia, mai si distrugge (AD-20).",
+        "enum": [
+          "attiva",
+          "archiviata"
+        ],
+        "title": "StatoStruttura",
+        "type": "string"
+      },
+      "StrutturaInput": {
+        "properties": {
+          "cin": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cin"
+          },
+          "comune": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Comune",
+            "type": "string"
+          },
+          "nome": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Nome",
+            "type": "string"
+          },
+          "regione": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Regione",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nome",
+          "comune",
+          "regione"
+        ],
+        "title": "StrutturaInput",
+        "type": "object"
+      },
+      "StrutturaOutput": {
+        "properties": {
+          "cin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cin"
+          },
+          "cin_mancante": {
+            "readOnly": true,
+            "title": "Cin Mancante",
+            "type": "boolean"
+          },
+          "comune": {
+            "title": "Comune",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nome": {
+            "title": "Nome",
+            "type": "string"
+          },
+          "regione": {
+            "title": "Regione",
+            "type": "string"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoStruttura"
+          }
+        },
+        "required": [
+          "id",
+          "nome",
+          "comune",
+          "regione",
+          "cin",
+          "stato",
+          "cin_mancante"
+        ],
+        "title": "StrutturaOutput",
+        "type": "object"
+      },
+      "StrutturaUpdate": {
+        "properties": {
+          "cin": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cin"
+          },
+          "comune": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comune"
+          },
+          "nome": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nome"
+          },
+          "regione": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regione"
+          }
+        },
+        "title": "StrutturaUpdate",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -364,6 +522,166 @@
         "summary": "Aggiorna Preferenze",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/api/v1/strutture": {
+      "get": {
+        "operationId": "lista_api_v1_strutture_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StrutturaOutput"
+                  },
+                  "title": "Response Lista Api V1 Strutture Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Lista",
+        "tags": [
+          "strutture"
+        ]
+      },
+      "post": {
+        "operationId": "crea_api_v1_strutture_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrutturaInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrutturaOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Crea",
+        "tags": [
+          "strutture"
+        ]
+      }
+    },
+    "/api/v1/strutture/{struttura_id}": {
+      "patch": {
+        "operationId": "aggiorna_api_v1_strutture__struttura_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "struttura_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Struttura Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrutturaUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrutturaOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aggiorna",
+        "tags": [
+          "strutture"
+        ]
+      }
+    },
+    "/api/v1/strutture/{struttura_id}/archivia": {
+      "post": {
+        "operationId": "archivia_api_v1_strutture__struttura_id__archivia_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "struttura_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Struttura Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrutturaOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archivia",
+        "tags": [
+          "strutture"
         ]
       }
     }

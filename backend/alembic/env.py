@@ -12,6 +12,7 @@ from app.core import outbox as _outbox  # noqa: F401
 from app.core.config import get_settings
 from app.core.db import Base
 from app.identity import models as _identity_models  # noqa: F401
+from app.strutture import models as _strutture_models  # noqa: F401
 
 target_metadata = Base.metadata
 

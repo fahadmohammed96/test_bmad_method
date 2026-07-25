@@ -113,3 +113,7 @@ class Catalog:
 # Catalogo di produzione: i tipi si dichiarano qui, Story per Story,
 # nel momento in cui il modulo proprietario li emette per la prima volta.
 catalog = Catalog()
+
+# strutture (Story 1.4) — proprietario: modulo `strutture`.
+catalog.register_event("struttura.creata", payload_keys=("struttura_id", "host_id"))
+catalog.register_event("struttura.archiviata", payload_keys=("struttura_id", "host_id"))
