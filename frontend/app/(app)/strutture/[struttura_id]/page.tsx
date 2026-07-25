@@ -15,17 +15,15 @@ export default function ModificaStrutturaPage() {
   const struttura = (strutture ?? []).find((s) => s.id === params.struttura_id);
 
   if (!struttura) {
-    return (
-      <p className="text-muted" role="status">
-        Caricamento…
-      </p>
-    );
+    return <output className="text-muted">Caricamento…</output>;
   }
   // key: rimonta il form se si naviga tra Strutture diverse.
   return <FormModifica key={struttura.id} struttura={struttura} />;
 }
 
-function FormModifica({ struttura }: { struttura: StrutturaOutput }) {
+function FormModifica({
+  struttura,
+}: Readonly<{ struttura: StrutturaOutput }>) {
   const router = useRouter();
   const aggiorna = useAggiornaStruttura();
   const [nome, setNome] = useState(struttura.nome);

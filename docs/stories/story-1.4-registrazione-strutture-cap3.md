@@ -53,6 +53,23 @@ So that gestisca i miei appartamenti in un unico posto senza superare lo scope d
 - Migrazione 0004: `create_table` crea da sé il tipo enum Postgres — niente `.create()` esplicito (il doppione fa fallire l'upgrade).
 - shadcn/ui: valutato per il wizard; i componenti nativi + token bastano ancora (form lineari). Resta il seed ratificato, si attiva al primo bisogno reale (dialog/combobox della 1.5 è il nuovo candidato).
 
+### Correzioni post-consegna (CI GitHub + SonarQube)
+
+Segnalate da Fahad sulla PR #14, risolte sullo stesso branch:
+
+**CI GitHub — 3 job rossi (`frontend`, `e2e`, `api-contract`)**: `npm ci` falliva con `EUSAGE` perché `package-lock.json` non era in sync col `package.json` dopo l'aggiunta di `@axe-core/playwright` (voci `@emnapi/*` mancanti/disallineate: dipendenze opzionali multipiattaforma risolte diversamente in locale). Lockfile **rigenerato da zero** e verificato con `npm ci` pulito.
+
+**SonarQube — Quality Gate "C Security Rating on New Code"**: 6 vulnerabilità MAJOR, tutte nel nuovo job `e2e` del workflow. Mitigazioni (estese per coerenza a tutti i job):
+- `githubactions:S7637` — `astral-sh/setup-uv` pinnata al **commit SHA** `d4b2f3b…` (il tag è mutabile); le action `actions/*` restano su tag come da prassi GitHub-owned.
+- `githubactions:S8541` / `S8544` — `uv sync` → **`uv sync --locked --no-build --no-install-project`**: installa solo dal lockfile, senza costruire sdist di terze parti né il progetto locale. I comandi diventano `uv run --no-sync …` (nessun re-sync implicito). `scripts/export_openapi.py` ora aggiunge la dir backend a `sys.path`, così gira anche senza progetto installato.
+- `githubactions:S6505` — `npm ci` → **`npm ci --ignore-scripts`** (niente lifecycle script di terze parti; i browser Playwright si installano in uno step esplicito).
+- `githubactions:S6505` / `S8543` — `npx playwright install` → **`npm exec --no -- playwright install`**: usa la versione del lockfile, senza installazioni on-demand.
+
+**Code smell risolti** (9): `response_model` ridondante sui 4 endpoint `strutture` (duplicava il return type; contratto OpenAPI **invariato**, verificato), `role="status"` → elemento nativo `<output>` (3), props marcate `Readonly` (2).
+
+Verifica dopo le correzioni: backend **108 passed** + ruff/mypy puliti, contratto invariato; frontend **18 passed** + lint/typecheck; **e2e 8 passed** (chromium + mobile) con `npm ci --ignore-scripts` e `npm exec --no` — cioè esattamente i comandi della CI.
+
 ### Change log
 
 - 2026-07-25 — Story creata, implementata test-first e consegnata in PR (branch `story/1.4-strutture`).
+- 2026-07-25 — Correzioni CI/Sonar sullo stesso branch (lockfile, hardening supply-chain del workflow, code smell).

@@ -25,7 +25,7 @@ def _non_trovata() -> DomainProblem:
     )
 
 
-@router.post("", response_model=StrutturaOutput, status_code=201)
+@router.post("", status_code=201)
 def crea(dati: StrutturaInput, db: DbSession, host: CurrentHost) -> StrutturaOutput:
     try:
         struttura = service.crea_struttura(
@@ -48,14 +48,14 @@ def crea(dati: StrutturaInput, db: DbSession, host: CurrentHost) -> StrutturaOut
     return StrutturaOutput.model_validate(struttura)
 
 
-@router.get("", response_model=list[StrutturaOutput])
+@router.get("")
 def lista(db: DbSession, host: CurrentHost) -> list[StrutturaOutput]:
     return [
         StrutturaOutput.model_validate(s) for s in service.lista_strutture(db, host.id)
     ]
 
 
-@router.patch("/{struttura_id}", response_model=StrutturaOutput)
+@router.patch("/{struttura_id}")
 def aggiorna(
     struttura_id: uuid.UUID,
     modifiche: StrutturaUpdate,
@@ -71,7 +71,7 @@ def aggiorna(
     return StrutturaOutput.model_validate(struttura)
 
 
-@router.post("/{struttura_id}/archivia", response_model=StrutturaOutput)
+@router.post("/{struttura_id}/archivia")
 def archivia(
     struttura_id: uuid.UUID, db: DbSession, host: CurrentHost
 ) -> StrutturaOutput:

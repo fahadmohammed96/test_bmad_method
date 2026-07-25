@@ -13,9 +13,7 @@ export default function StrutturePage() {
 
   if (isPending) {
     return (
-      <p className="text-muted" role="status">
-        Caricamento…
-      </p>
+      <output className="text-muted">Caricamento…</output>
     );
   }
 
@@ -31,9 +29,9 @@ export default function StrutturePage() {
           <p className="text-sm text-muted">{struttureCopy.sottotitolo}</p>
         </div>
         {capRaggiunto ? (
-          <p className="max-w-sm text-sm text-muted" role="status">
+          <output className="max-w-sm text-sm text-muted">
             {struttureCopy.capRaggiunto}
-          </p>
+          </output>
         ) : (
           <Link
             href="/strutture/nuova"

@@ -5,11 +5,11 @@ export function BadgeStato({
   icona,
   testo,
   tono,
-}: {
+}: Readonly<{
   icona: string;
   testo: string;
   tono: "ok" | "avviso" | "neutro";
-}) {
+}>) {
   const toni = {
     ok: "border-primary/40 text-primary",
     avviso: "border-danger/40 text-danger",

@@ -27,8 +27,10 @@ export default defineConfig({
   ],
   webServer: [
     {
+      // `--no-sync`: l'ambiente è già sincronizzato dal job CI (o in
+      // locale da `uv sync`), qui non si reinstalla né si builda nulla.
       command:
-        "uv run alembic upgrade head && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000",
+        "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn app.main:app --host 127.0.0.1 --port 8000",
       cwd: "../backend",
       url: "http://localhost:8000/api/v1/health",
       reuseExistingServer: !process.env.CI,
