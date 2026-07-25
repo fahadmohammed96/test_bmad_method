@@ -86,6 +86,10 @@ def _emetti_transizione_regime(
 
 def crea_struttura(db: Session, host_id: uuid.UUID, dati: DatiStruttura) -> Struttura:
     repo = StrutturaRepository(db)
+    # Il cap è un invariante, non un controllo ottimistico: conteggio e
+    # insert vanno serializzati per Host, altrimenti due richieste
+    # simultanee lo superano entrambe (F-1).
+    repo.blocca_creazioni_dell_host(host_id)
     conteggio_prima = repo.conta_attive(host_id)
     if conteggio_prima >= get_settings().max_strutture_attive:
         raise CapStruttureAttiveError()

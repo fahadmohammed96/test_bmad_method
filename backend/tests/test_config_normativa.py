@@ -364,6 +364,25 @@ class TestEndpointInterniAuditati:
         )
         assert risposta.status_code == 403
 
+    def test_token_non_ascii_e_403_non_500(
+        self, client: TestClient, anagrafica: None
+    ) -> None:
+        # F-3: le intestazioni HTTP sono decodificate latin-1; un token con
+        # un byte non-ASCII non deve far esplodere il confronto — resta un
+        # accesso negato, non un errore del server.
+        risposta = client.put(
+            f"/api/v1/interno/comuni/{COMUNE_A['codice_istat']}/configurazione",
+            headers={"X-Admin-Token": "tokèn-non-ascii".encode()},
+            json={
+                "attore": "ignoto",
+                "tassa_importo_cent": 100,
+                "tassa_periodicita": "annuale",
+                "valido_dal": "2026-01-01",
+            },
+        )
+        assert risposta.status_code == 403
+        assert risposta.headers["content-type"].startswith(PROBLEM)
+
     def test_comune_sconosciuto_e_404(self, client: TestClient) -> None:
         assert _configura_comune(client, "Z99999").status_code == 404
 
