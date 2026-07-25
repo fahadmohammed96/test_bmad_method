@@ -28,12 +28,14 @@ class DomainProblem(Exception):
         title: str,
         type_slug: str,
         detail: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(title)
         self.status = status
         self.title = title
         self.type = f"urn:hostpilot:problem:{type_slug}"
         self.detail = detail
+        self.headers = headers
 
 
 def problem_response(
@@ -43,13 +45,19 @@ def problem_response(
     type_: str = "about:blank",
     detail: str | None = None,
     extra: dict | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body: dict = {"type": type_, "title": title, "status": status}
     if detail is not None:
         body["detail"] = detail
     if extra:
         body.update(extra)
-    return JSONResponse(body, status_code=status, media_type=PROBLEM_CONTENT_TYPE)
+    return JSONResponse(
+        body,
+        status_code=status,
+        media_type=PROBLEM_CONTENT_TYPE,
+        headers=headers,
+    )
 
 
 def register_problem_handlers(app: FastAPI) -> None:
@@ -58,7 +66,11 @@ def register_problem_handlers(app: FastAPI) -> None:
         request: Request, exc: DomainProblem
     ) -> JSONResponse:
         return problem_response(
-            status=exc.status, title=exc.title, type_=exc.type, detail=exc.detail
+            status=exc.status,
+            title=exc.title,
+            type_=exc.type,
+            detail=exc.detail,
+            headers=exc.headers,
         )
 
     @app.exception_handler(StarletteHTTPException)

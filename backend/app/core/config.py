@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     # Origin del frontend ammessa dal CORS (cookie con credentials, AD-14/15).
     frontend_origin: str = "http://localhost:3000"
 
+    # Freno ai tentativi di login (G-5): finestra temporale, mai lockout
+    # permanente. Due limiti complementari: per account (Host preso di
+    # mira) e per origine (spraying su molti account).
+    login_max_tentativi_account: int = 5
+    login_max_tentativi_origine: int = 20
+    login_finestra_minuti: int = 15
+
+    # Ogni quanto gira il purge delle sessioni scadute (job durevole).
+    purge_sessioni_intervallo_minuti: int = 60
+
     # Token degli endpoint interni di configurazione normativa (AD-9).
     # Vive nel secret manager dell'ambiente; se vuoto, gli endpoint sono
     # chiusi (nessun accesso di default).
