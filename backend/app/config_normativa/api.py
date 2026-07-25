@@ -13,6 +13,7 @@ from app.config_normativa.schemas import (
     ComuneConfigInput,
     ComuneOutput,
     ConfigSalvataOutput,
+    ParametriFiscaliInput,
     RegioneConfigInput,
     RegioneOutput,
 )
@@ -69,6 +70,30 @@ def configura_comune(
             type_slug="comune-not-found",
         ) from None
     return ConfigSalvataOutput(valido_dal=config.valido_dal, valido_al=config.valido_al)
+
+
+@interno_router.put("/parametri-fiscali")
+def configura_parametri_fiscali(
+    dati: ParametriFiscaliInput,
+    db: DbSession,
+    _: AdminToken,
+) -> ConfigSalvataOutput:
+    """Soglia e testi del Regime fiscale: dati, non costanti (AD-12)."""
+    parametro = service.aggiorna_parametri_fiscali(
+        db,
+        attore=dati.attore,
+        soglia_strutture=dati.soglia_strutture,
+        regime_sotto_soglia=dati.regime_sotto_soglia,
+        regime_da_soglia=dati.regime_da_soglia,
+        testo_sotto_soglia=dati.testo_sotto_soglia,
+        testo_da_soglia=dati.testo_da_soglia,
+        aliquote_citate=dati.aliquote_citate,
+        valido_dal=dati.valido_dal,
+        valido_al=dati.valido_al,
+    )
+    return ConfigSalvataOutput(
+        valido_dal=parametro.valido_dal, valido_al=parametro.valido_al
+    )
 
 
 @interno_router.put("/regioni/{codice_istat}/configurazione")

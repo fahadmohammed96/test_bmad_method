@@ -18,9 +18,15 @@ from app.core.date_range import today_rome
 from app.core.db import get_db
 from app.identity.deps import CurrentHost
 from app.strutture import service
-from app.strutture.schemas import StrutturaInput, StrutturaOutput, StrutturaUpdate
+from app.strutture.schemas import (
+    RegimeFiscaleOutput,
+    StrutturaInput,
+    StrutturaOutput,
+    StrutturaUpdate,
+)
 
 router = APIRouter(prefix="/strutture", tags=["strutture"])
+regime_router = APIRouter(prefix="/regime-fiscale", tags=["strutture"])
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -81,6 +87,20 @@ def aggiorna(
     except service.StrutturaNonTrovataError:
         raise _non_trovata() from None
     return StrutturaOutput.model_validate(struttura)
+
+
+@regime_router.get("")
+def regime_fiscale(db: DbSession, host: CurrentHost) -> RegimeFiscaleOutput:
+    """Regime fiscale derivato dal numero di Strutture non archiviate."""
+    return RegimeFiscaleOutput.model_validate(
+        service.regime_fiscale(db, host.id), from_attributes=True
+    )
+
+
+@regime_router.post("/conferma-lettura", status_code=204)
+def conferma_lettura(db: DbSession, host: CurrentHost) -> None:
+    """L'Host ha letto il pannello a schermo intero (UX-DR14)."""
+    service.conferma_lettura_regime(db, host.id)
 
 
 @router.get("/{struttura_id}/configurazione-normativa")

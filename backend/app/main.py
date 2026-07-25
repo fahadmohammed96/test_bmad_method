@@ -12,6 +12,7 @@ from app.api.problems import register_problem_handlers
 from app.config_normativa.api import anagrafica_router, interno_router
 from app.core.config import get_settings
 from app.identity.api import auth_router, hosts_router
+from app.strutture.api import regime_router
 from app.strutture.api import router as strutture_router
 
 API_PREFIX = "/api/v1"
@@ -21,6 +22,7 @@ api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(hosts_router)
 api_router.include_router(strutture_router)
+api_router.include_router(regime_router)
 api_router.include_router(anagrafica_router)
 api_router.include_router(interno_router)
 

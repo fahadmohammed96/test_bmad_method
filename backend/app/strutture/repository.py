@@ -9,7 +9,8 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.strutture.models import StatoStruttura, Struttura
+from app.core.date_range import utcnow
+from app.strutture.models import RegimeLettura, StatoStruttura, Struttura
 
 
 class StrutturaRepository:
@@ -49,3 +50,31 @@ class StrutturaRepository:
         struttura.host_id = host_id
         self._db.add(struttura)
         return struttura
+
+
+class RegimeLetturaRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def _lettura(self, host_id: uuid.UUID) -> RegimeLettura | None:
+        return self._db.scalars(
+            select(RegimeLettura).where(RegimeLettura.host_id == host_id)
+        ).one_or_none()
+
+    def confermata(self, host_id: uuid.UUID) -> bool:
+        return self._lettura(host_id) is not None
+
+    def azzera(self, host_id: uuid.UUID) -> None:
+        """Il rientro sotto soglia cancella la conferma: se l'Host risale,
+        il pannello a schermo intero è di nuovo dovuto (UJ-4 edge)."""
+        lettura = self._lettura(host_id)
+        if lettura is not None:
+            self._db.delete(lettura)
+
+    def conferma(self, host_id: uuid.UUID, conteggio: int) -> None:
+        lettura = self._lettura(host_id)
+        if lettura is None:
+            self._db.add(RegimeLettura(host_id=host_id, conteggio_confermato=conteggio))
+        else:
+            lettura.conteggio_confermato = conteggio
+            lettura.confermato_il = utcnow()

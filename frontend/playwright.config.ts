@@ -40,6 +40,9 @@ export default defineConfig({
         // Solo e2e locale/CI su http: in ogni ambiente reale resta true.
         HOSTPILOT_SESSION_COOKIE_SECURE: "false",
         HOSTPILOT_FRONTEND_ORIGIN: "http://localhost:3000",
+        // Token di servizio SOLO per l'ambiente e2e: i test impostano i
+        // parametri normativi come dati, dagli endpoint interni.
+        HOSTPILOT_ADMIN_TOKEN: "token-e2e-endpoint-interni",
       },
     },
     {

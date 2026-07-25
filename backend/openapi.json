@@ -330,6 +330,78 @@
         "title": "Motivo",
         "type": "string"
       },
+      "ParametriFiscaliInput": {
+        "properties": {
+          "aliquote_citate": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Aliquote Citate",
+            "type": "string"
+          },
+          "attore": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Attore",
+            "type": "string"
+          },
+          "regime_da_soglia": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Regime Da Soglia",
+            "type": "string"
+          },
+          "regime_sotto_soglia": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Regime Sotto Soglia",
+            "type": "string"
+          },
+          "soglia_strutture": {
+            "minimum": 1.0,
+            "title": "Soglia Strutture",
+            "type": "integer"
+          },
+          "testo_da_soglia": {
+            "minLength": 1,
+            "title": "Testo Da Soglia",
+            "type": "string"
+          },
+          "testo_sotto_soglia": {
+            "minLength": 1,
+            "title": "Testo Sotto Soglia",
+            "type": "string"
+          },
+          "valido_al": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valido Al"
+          },
+          "valido_dal": {
+            "format": "date",
+            "title": "Valido Dal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attore",
+          "soglia_strutture",
+          "regime_sotto_soglia",
+          "regime_da_soglia",
+          "testo_sotto_soglia",
+          "testo_da_soglia",
+          "aliquote_citate",
+          "valido_dal"
+        ],
+        "title": "ParametriFiscaliInput",
+        "type": "object"
+      },
       "ParametriIstatOutput": {
         "properties": {
           "periodicita": {
@@ -410,6 +482,80 @@
         "title": "PreferenzeInput",
         "type": "object"
       },
+      "RegimeFiscaleOutput": {
+        "description": "Contenuto informativo con disclaimer: mai un calcolo d'imposta.",
+        "properties": {
+          "aliquote_citate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliquote Citate"
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "mostra_pannello_transizione": {
+            "title": "Mostra Pannello Transizione",
+            "type": "boolean"
+          },
+          "oltre_soglia": {
+            "title": "Oltre Soglia",
+            "type": "boolean"
+          },
+          "regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime"
+          },
+          "soglia": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soglia"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoRegime"
+          },
+          "strutture_non_archiviate": {
+            "title": "Strutture Non Archiviate",
+            "type": "integer"
+          },
+          "testo": {
+            "title": "Testo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stato",
+          "strutture_non_archiviate",
+          "soglia",
+          "oltre_soglia",
+          "regime",
+          "testo",
+          "aliquote_citate",
+          "disclaimer",
+          "mostra_pannello_transizione"
+        ],
+        "title": "RegimeFiscaleOutput",
+        "type": "object"
+      },
       "RegioneConfigInput": {
         "properties": {
           "attore": {
@@ -478,6 +624,14 @@
           "configurazione_non_disponibile"
         ],
         "title": "StatoConfigurazione",
+        "type": "string"
+      },
+      "StatoRegime": {
+        "enum": [
+          "disponibile",
+          "configurazione_non_disponibile"
+        ],
+        "title": "StatoRegime",
         "type": "string"
       },
       "StatoStruttura": {
@@ -1069,6 +1223,66 @@
         ]
       }
     },
+    "/api/v1/interno/parametri-fiscali": {
+      "put": {
+        "description": "Soglia e testi del Regime fiscale: dati, non costanti (AD-12).",
+        "operationId": "configura_parametri_fiscali_api_v1_interno_parametri_fiscali_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParametriFiscaliInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSalvataOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configura Parametri Fiscali",
+        "tags": [
+          "config_normativa"
+        ]
+      }
+    },
     "/api/v1/interno/regioni/{codice_istat}/configurazione": {
       "put": {
         "operationId": "configura_regione_api_v1_interno_regioni__codice_istat__configurazione_put",
@@ -1134,6 +1348,43 @@
         "summary": "Configura Regione",
         "tags": [
           "config_normativa"
+        ]
+      }
+    },
+    "/api/v1/regime-fiscale": {
+      "get": {
+        "description": "Regime fiscale derivato dal numero di Strutture non archiviate.",
+        "operationId": "regime_fiscale_api_v1_regime_fiscale_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegimeFiscaleOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Regime Fiscale",
+        "tags": [
+          "strutture"
+        ]
+      }
+    },
+    "/api/v1/regime-fiscale/conferma-lettura": {
+      "post": {
+        "description": "L'Host ha letto il pannello a schermo intero (UX-DR14).",
+        "operationId": "conferma_lettura_api_v1_regime_fiscale_conferma_lettura_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Conferma Lettura",
+        "tags": [
+          "strutture"
         ]
       }
     },

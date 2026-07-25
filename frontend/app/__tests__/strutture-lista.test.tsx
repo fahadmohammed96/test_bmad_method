@@ -5,6 +5,8 @@ const struttureMock = vi.fn();
 vi.mock("@/lib/api/hooks", () => ({
   useStrutture: () => struttureMock(),
   useArchiviaStruttura: () => ({ mutate: vi.fn() }),
+  // La pagina ospita il pannello Regime persistente (UX-DR14).
+  useRegimeFiscale: () => ({ isPending: true, data: undefined }),
 }));
 
 import StrutturePage from "../(app)/strutture/page";

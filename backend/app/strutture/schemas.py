@@ -5,6 +5,7 @@ import uuid
 from pydantic import BaseModel, Field, computed_field
 
 from app.strutture.models import StatoStruttura
+from app.strutture.regime_fiscale import StatoRegime
 
 
 class StrutturaInput(BaseModel):
@@ -21,6 +22,22 @@ class StrutturaUpdate(BaseModel):
     regione: str | None = Field(default=None, min_length=1, max_length=80)
     cin: str | None = Field(default=None, max_length=30)
     comune_codice_istat: str | None = Field(default=None, max_length=6)
+
+
+class RegimeFiscaleOutput(BaseModel):
+    """Contenuto informativo con disclaimer: mai un calcolo d'imposta."""
+
+    stato: StatoRegime
+    strutture_non_archiviate: int
+    soglia: int | None
+    oltre_soglia: bool
+    regime: str | None
+    testo: str
+    aliquote_citate: str | None
+    disclaimer: str
+    mostra_pannello_transizione: bool
+
+    model_config = {"from_attributes": True}
 
 
 class StrutturaOutput(BaseModel):

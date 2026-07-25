@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AppNav } from "@/components/AppNav";
+import { PannelloTransizioneRegime } from "@/components/PannelloTransizioneRegime";
 import { SelettoreStruttura } from "@/components/SelettoreStruttura";
 import { useMe } from "@/lib/api/hooks";
 import { navCopy } from "@/lib/copy/nav";
@@ -40,6 +41,9 @@ export default function AppLayout({
         </header>
         <main className="p-4 pb-24 md:pb-6">{children}</main>
       </div>
+      {/* Pannello a schermo intero alla transizione di soglia (UX-DR14):
+          vive nella shell, così compare ovunque si trovi l'Host. */}
+      <PannelloTransizioneRegime />
     </div>
   );
 }

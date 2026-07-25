@@ -76,6 +76,18 @@ class RegioneConfigInput(BaseModel):
     valido_al: date | None = None
 
 
+class ParametriFiscaliInput(BaseModel):
+    attore: str = Field(min_length=1, max_length=200)
+    soglia_strutture: int = Field(ge=1)
+    regime_sotto_soglia: str = Field(min_length=1, max_length=60)
+    regime_da_soglia: str = Field(min_length=1, max_length=60)
+    testo_sotto_soglia: str = Field(min_length=1)
+    testo_da_soglia: str = Field(min_length=1)
+    aliquote_citate: str = Field(min_length=1, max_length=200)
+    valido_dal: date
+    valido_al: date | None = None
+
+
 class ConfigSalvataOutput(BaseModel):
     valido_dal: date
     valido_al: date | None

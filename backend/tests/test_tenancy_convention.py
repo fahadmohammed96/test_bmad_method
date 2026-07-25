@@ -23,6 +23,7 @@ TABELLE_DI_RIFERIMENTO = {
     "comune",
     "comune_config",
     "regione_config",
+    "parametro_fiscale",
     "config_audit",
 }
 

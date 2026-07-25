@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -87,6 +87,31 @@ class RegioneConfig(Base):
         ),
         nullable=False,
     )
+    valido_dal: Mapped[date] = mapped_column(Date, nullable=False)
+    valido_al: Mapped[date | None] = mapped_column(Date, nullable=True)
+    creato_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+
+class ParametroFiscale(Base):
+    """Parametri del Regime fiscale (AD-12), a validità temporale.
+
+    Soglia, regimi citati, testi informativi e aliquote sono DATI: una
+    modifica di legge è un aggiornamento di configurazione, mai un
+    rilascio di codice (NFR-4). La soglia normativa è distinta dal cap
+    di prodotto del pilota (`Settings.max_strutture_attive`).
+    """
+
+    __tablename__ = "parametro_fiscale"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    soglia_strutture: Mapped[int] = mapped_column(Integer, nullable=False)
+    regime_sotto_soglia: Mapped[str] = mapped_column(String(60), nullable=False)
+    regime_da_soglia: Mapped[str] = mapped_column(String(60), nullable=False)
+    testo_sotto_soglia: Mapped[str] = mapped_column(Text, nullable=False)
+    testo_da_soglia: Mapped[str] = mapped_column(Text, nullable=False)
+    aliquote_citate: Mapped[str] = mapped_column(String(200), nullable=False)
     valido_dal: Mapped[date] = mapped_column(Date, nullable=False)
     valido_al: Mapped[date | None] = mapped_column(Date, nullable=True)
     creato_il: Mapped[datetime] = mapped_column(

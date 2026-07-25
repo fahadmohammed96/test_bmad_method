@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { BadgeStato } from "@/components/BadgeStato";
+import { PannelloRegimeFiscale } from "@/components/PannelloRegimeFiscale";
 import { useArchiviaStruttura, useStrutture } from "@/lib/api/hooks";
 import { struttureCopy } from "@/lib/copy/strutture";
 
@@ -41,6 +42,9 @@ export default function StrutturePage() {
           </Link>
         )}
       </div>
+
+      {/* Pannello Regime fiscale persistente, sempre accessibile (UX-DR14). */}
+      <PannelloRegimeFiscale />
 
       {lista.length === 0 && <p className="text-muted">{struttureCopy.nessuna}</p>}
 

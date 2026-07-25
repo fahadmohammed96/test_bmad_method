@@ -117,3 +117,11 @@ catalog = Catalog()
 # strutture (Story 1.4) — proprietario: modulo `strutture`.
 catalog.register_event("struttura.creata", payload_keys=("struttura_id", "host_id"))
 catalog.register_event("struttura.archiviata", payload_keys=("struttura_id", "host_id"))
+# Regime fiscale (Story 1.6): si emette la TRANSIZIONE di soglia, non lo
+# stato — il Regime resta derivato alla lettura (AD-12).
+catalog.register_event(
+    "regime_fiscale.soglia_superata", payload_keys=("host_id", "conteggio")
+)
+catalog.register_event(
+    "regime_fiscale.rientrato", payload_keys=("host_id", "conteggio")
+)
