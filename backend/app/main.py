@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.problems import register_problem_handlers
+from app.config_normativa.api import anagrafica_router, interno_router
 from app.core.config import get_settings
 from app.identity.api import auth_router, hosts_router
 from app.strutture.api import router as strutture_router
@@ -20,6 +21,8 @@ api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(hosts_router)
 api_router.include_router(strutture_router)
+api_router.include_router(anagrafica_router)
+api_router.include_router(interno_router)
 
 app = FastAPI(
     title="HostPilot API",

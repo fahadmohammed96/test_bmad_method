@@ -2,6 +2,8 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import { CampiLuogo, type ValoriLuogo } from "@/components/CampiLuogo";
+import { PannelloConfigurazione } from "@/components/PannelloConfigurazione";
 import {
   useAggiornaStruttura,
   useStrutture,
@@ -27,8 +29,11 @@ function FormModifica({
   const router = useRouter();
   const aggiorna = useAggiornaStruttura();
   const [nome, setNome] = useState(struttura.nome);
-  const [comune, setComune] = useState(struttura.comune);
-  const [regione, setRegione] = useState(struttura.regione);
+  const [luogo, setLuogo] = useState<ValoriLuogo>({
+    comune: struttura.comune,
+    comuneCodiceIstat: struttura.comune_codice_istat,
+    regione: struttura.regione,
+  });
   const [cin, setCin] = useState(struttura.cin ?? "");
 
   return (
@@ -45,8 +50,9 @@ function FormModifica({
               struttura_id: struttura.id,
               modifiche: {
                 nome,
-                comune,
-                regione,
+                comune: luogo.comune,
+                regione: luogo.regione,
+                comune_codice_istat: luogo.comuneCodiceIstat,
                 cin: cin.trim() === "" ? null : cin.trim(),
               },
             },
@@ -64,26 +70,7 @@ function FormModifica({
             className="rounded border px-2 py-2"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {struttureCopy.comuneEtichetta}
-          <input
-            required
-            maxLength={120}
-            value={comune}
-            onChange={(evento) => setComune(evento.target.value)}
-            className="rounded border px-2 py-2"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {struttureCopy.regioneEtichetta}
-          <input
-            required
-            maxLength={80}
-            value={regione}
-            onChange={(evento) => setRegione(evento.target.value)}
-            className="rounded border px-2 py-2"
-          />
-        </label>
+        <CampiLuogo valori={luogo} onChange={setLuogo} />
         <label className="flex flex-col gap-1 text-sm">
           {struttureCopy.cinEtichetta}
           <input
@@ -107,6 +94,8 @@ function FormModifica({
           </p>
         )}
       </form>
+
+      <PannelloConfigurazione strutturaId={struttura.id} />
     </div>
   );
 }

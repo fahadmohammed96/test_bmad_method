@@ -1,6 +1,94 @@
 {
   "components": {
     "schemas": {
+      "AreaIstatOutput": {
+        "properties": {
+          "messaggio": {
+            "title": "Messaggio",
+            "type": "string"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Motivo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parametri": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParametriIstatOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "promemoria_manuale": {
+            "title": "Promemoria Manuale",
+            "type": "boolean"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoConfigurazione"
+          }
+        },
+        "required": [
+          "stato",
+          "motivo",
+          "messaggio",
+          "promemoria_manuale",
+          "parametri"
+        ],
+        "title": "AreaIstatOutput",
+        "type": "object"
+      },
+      "AreaTassaOutput": {
+        "properties": {
+          "messaggio": {
+            "title": "Messaggio",
+            "type": "string"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Motivo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parametri": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParametriTassaOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "promemoria_manuale": {
+            "title": "Promemoria Manuale",
+            "type": "boolean"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoConfigurazione"
+          }
+        },
+        "required": [
+          "stato",
+          "motivo",
+          "messaggio",
+          "promemoria_manuale",
+          "parametri"
+        ],
+        "title": "AreaTassaOutput",
+        "type": "object"
+      },
       "CambioPasswordInput": {
         "properties": {
           "password_attuale": {
@@ -30,6 +118,150 @@
         ],
         "title": "CanaleNotifica",
         "type": "string"
+      },
+      "ComuneConfigInput": {
+        "properties": {
+          "attore": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Attore",
+            "type": "string"
+          },
+          "esenzione_eta_max": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Esenzione Eta Max"
+          },
+          "esenzione_notti_oltre": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Esenzione Notti Oltre"
+          },
+          "tassa_importo_cent": {
+            "minimum": 0.0,
+            "title": "Tassa Importo Cent",
+            "type": "integer"
+          },
+          "tassa_periodicita": {
+            "$ref": "#/components/schemas/Periodicita"
+          },
+          "valido_al": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valido Al"
+          },
+          "valido_dal": {
+            "format": "date",
+            "title": "Valido Dal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attore",
+          "tassa_importo_cent",
+          "tassa_periodicita",
+          "valido_dal"
+        ],
+        "title": "ComuneConfigInput",
+        "type": "object"
+      },
+      "ComuneOutput": {
+        "properties": {
+          "codice_istat": {
+            "title": "Codice Istat",
+            "type": "string"
+          },
+          "nome": {
+            "title": "Nome",
+            "type": "string"
+          },
+          "provincia": {
+            "title": "Provincia",
+            "type": "string"
+          },
+          "regione_codice_istat": {
+            "title": "Regione Codice Istat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codice_istat",
+          "nome",
+          "provincia",
+          "regione_codice_istat"
+        ],
+        "title": "ComuneOutput",
+        "type": "object"
+      },
+      "ConfigSalvataOutput": {
+        "properties": {
+          "valido_al": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valido Al"
+          },
+          "valido_dal": {
+            "format": "date",
+            "title": "Valido Dal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "valido_dal",
+          "valido_al"
+        ],
+        "title": "ConfigSalvataOutput",
+        "type": "object"
+      },
+      "ConfigurazioneNormativaOutput": {
+        "properties": {
+          "alla_data": {
+            "format": "date",
+            "title": "Alla Data",
+            "type": "string"
+          },
+          "istat": {
+            "$ref": "#/components/schemas/AreaIstatOutput"
+          },
+          "tassa_soggiorno": {
+            "$ref": "#/components/schemas/AreaTassaOutput"
+          }
+        },
+        "required": [
+          "alla_data",
+          "tassa_soggiorno",
+          "istat"
+        ],
+        "title": "ConfigurazioneNormativaOutput",
+        "type": "object"
       },
       "CredenzialiInput": {
         "properties": {
@@ -88,6 +320,84 @@
         "title": "HostOutput",
         "type": "object"
       },
+      "Motivo": {
+        "enum": [
+          "comune_non_riconosciuto",
+          "comune_non_configurato",
+          "regione_non_riconosciuta",
+          "regione_non_configurata"
+        ],
+        "title": "Motivo",
+        "type": "string"
+      },
+      "ParametriIstatOutput": {
+        "properties": {
+          "periodicita": {
+            "$ref": "#/components/schemas/Periodicita"
+          },
+          "tracciato": {
+            "title": "Tracciato",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tracciato",
+          "periodicita"
+        ],
+        "title": "ParametriIstatOutput",
+        "type": "object"
+      },
+      "ParametriTassaOutput": {
+        "properties": {
+          "esenzione_eta_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Esenzione Eta Max"
+          },
+          "esenzione_notti_oltre": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Esenzione Notti Oltre"
+          },
+          "importo_cent": {
+            "title": "Importo Cent",
+            "type": "integer"
+          },
+          "periodicita": {
+            "$ref": "#/components/schemas/Periodicita"
+          }
+        },
+        "required": [
+          "importo_cent",
+          "periodicita",
+          "esenzione_eta_max",
+          "esenzione_notti_oltre"
+        ],
+        "title": "ParametriTassaOutput",
+        "type": "object"
+      },
+      "Periodicita": {
+        "enum": [
+          "mensile",
+          "trimestrale",
+          "semestrale",
+          "annuale"
+        ],
+        "title": "Periodicita",
+        "type": "string"
+      },
       "PreferenzeInput": {
         "properties": {
           "canale_notifica_preferito": {
@@ -99,6 +409,76 @@
         ],
         "title": "PreferenzeInput",
         "type": "object"
+      },
+      "RegioneConfigInput": {
+        "properties": {
+          "attore": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Attore",
+            "type": "string"
+          },
+          "istat_periodicita": {
+            "$ref": "#/components/schemas/Periodicita"
+          },
+          "istat_tracciato": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Istat Tracciato",
+            "type": "string"
+          },
+          "valido_al": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valido Al"
+          },
+          "valido_dal": {
+            "format": "date",
+            "title": "Valido Dal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attore",
+          "istat_tracciato",
+          "istat_periodicita",
+          "valido_dal"
+        ],
+        "title": "RegioneConfigInput",
+        "type": "object"
+      },
+      "RegioneOutput": {
+        "properties": {
+          "codice_istat": {
+            "title": "Codice Istat",
+            "type": "string"
+          },
+          "nome": {
+            "title": "Nome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codice_istat",
+          "nome"
+        ],
+        "title": "RegioneOutput",
+        "type": "object"
+      },
+      "StatoConfigurazione": {
+        "enum": [
+          "configurata",
+          "configurazione_non_disponibile"
+        ],
+        "title": "StatoConfigurazione",
+        "type": "string"
       },
       "StatoStruttura": {
         "description": "Una Struttura si archivia, mai si distrugge (AD-20).",
@@ -128,6 +508,18 @@
             "minLength": 1,
             "title": "Comune",
             "type": "string"
+          },
+          "comune_codice_istat": {
+            "anyOf": [
+              {
+                "maxLength": 6,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comune Codice Istat"
           },
           "nome": {
             "maxLength": 200,
@@ -172,6 +564,17 @@
             "title": "Comune",
             "type": "string"
           },
+          "comune_codice_istat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comune Codice Istat"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -185,6 +588,17 @@
             "title": "Regione",
             "type": "string"
           },
+          "regione_codice_istat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regione Codice Istat"
+          },
           "stato": {
             "$ref": "#/components/schemas/StatoStruttura"
           }
@@ -196,6 +610,8 @@
           "regione",
           "cin",
           "stato",
+          "comune_codice_istat",
+          "regione_codice_istat",
           "cin_mancante"
         ],
         "title": "StrutturaOutput",
@@ -227,6 +643,18 @@
               }
             ],
             "title": "Comune"
+          },
+          "comune_codice_istat": {
+            "anyOf": [
+              {
+                "maxLength": 6,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comune Codice Istat"
           },
           "nome": {
             "anyOf": [
@@ -403,6 +831,54 @@
         ]
       }
     },
+    "/api/v1/comuni": {
+      "get": {
+        "operationId": "comuni_api_v1_comuni_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ricerca",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 2,
+              "title": "Ricerca",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ComuneOutput"
+                  },
+                  "title": "Response Comuni Api V1 Comuni Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Comuni",
+        "tags": [
+          "config_normativa"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "description": "Stato del servizio, usato da monitoraggio e smoke test.",
@@ -522,6 +998,168 @@
         "summary": "Aggiorna Preferenze",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/api/v1/interno/comuni/{codice_istat}/configurazione": {
+      "put": {
+        "operationId": "configura_comune_api_v1_interno_comuni__codice_istat__configurazione_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "codice_istat",
+            "required": true,
+            "schema": {
+              "title": "Codice Istat",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComuneConfigInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSalvataOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configura Comune",
+        "tags": [
+          "config_normativa"
+        ]
+      }
+    },
+    "/api/v1/interno/regioni/{codice_istat}/configurazione": {
+      "put": {
+        "operationId": "configura_regione_api_v1_interno_regioni__codice_istat__configurazione_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "codice_istat",
+            "required": true,
+            "schema": {
+              "title": "Codice Istat",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegioneConfigInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSalvataOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configura Regione",
+        "tags": [
+          "config_normativa"
+        ]
+      }
+    },
+    "/api/v1/regioni": {
+      "get": {
+        "description": "Anagrafica pubblica: serve anche prima dell'accesso (form di onboarding).",
+        "operationId": "regioni_api_v1_regioni_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegioneOutput"
+                  },
+                  "title": "Response Regioni Api V1 Regioni Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Regioni",
+        "tags": [
+          "config_normativa"
         ]
       }
     },
@@ -680,6 +1318,67 @@
           }
         },
         "summary": "Archivia",
+        "tags": [
+          "strutture"
+        ]
+      }
+    },
+    "/api/v1/strutture/{struttura_id}/configurazione-normativa": {
+      "get": {
+        "description": "Configurazione applicabile alla Struttura, con degrado sicuro (AD-9).",
+        "operationId": "configurazione_normativa_api_v1_strutture__struttura_id__configurazione_normativa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "struttura_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Struttura Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "alla_data",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Alla Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurazioneNormativaOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configurazione Normativa",
         "tags": [
           "strutture"
         ]

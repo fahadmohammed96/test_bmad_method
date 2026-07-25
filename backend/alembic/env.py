@@ -5,6 +5,7 @@ metadata dal shared kernel. Migrazioni forward-only (AR-11).
 from sqlalchemy import create_engine
 
 from alembic import context
+from app.config_normativa import models as _config_models  # noqa: F401
 
 # I modelli vanno importati perché popolino Base.metadata.
 from app.core import jobs as _jobs  # noqa: F401

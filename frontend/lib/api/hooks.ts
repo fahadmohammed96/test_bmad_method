@@ -12,6 +12,10 @@ export type HostOutput = components["schemas"]["HostOutput"];
 export type CanaleNotifica = components["schemas"]["CanaleNotifica"];
 export type StrutturaOutput = components["schemas"]["StrutturaOutput"];
 export type StrutturaInput = components["schemas"]["StrutturaInput"];
+export type ComuneOutput = components["schemas"]["ComuneOutput"];
+export type RegioneOutput = components["schemas"]["RegioneOutput"];
+export type ConfigurazioneNormativa =
+  components["schemas"]["ConfigurazioneNormativaOutput"];
 
 type Problem = { title?: string; detail?: string };
 
@@ -142,6 +146,49 @@ export function useArchiviaStruttura() {
       return data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strutture"] }),
+  });
+}
+
+export function useRegioni() {
+  return useQuery<RegioneOutput[]>({
+    queryKey: ["regioni"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/regioni");
+      if (!data) throw new Error(titoloErrore(error) ?? "regioni non disponibili");
+      return data;
+    },
+    staleTime: Infinity, // anagrafica stabile
+  });
+}
+
+/** Suggerimenti di Comune dall'anagrafica ISTAT (min. 2 caratteri). */
+export function useComuni(ricerca: string) {
+  return useQuery<ComuneOutput[]>({
+    queryKey: ["comuni", ricerca],
+    enabled: ricerca.trim().length >= 2,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/comuni", {
+        params: { query: { ricerca: ricerca.trim() } },
+      });
+      if (!data) throw new Error(titoloErrore(error) ?? "ricerca non disponibile");
+      return data;
+    },
+  });
+}
+
+export function useConfigurazioneNormativa(struttura_id: string) {
+  return useQuery<ConfigurazioneNormativa>({
+    queryKey: ["configurazione-normativa", struttura_id],
+    queryFn: async () => {
+      const { data, error } = await api.GET(
+        "/api/v1/strutture/{struttura_id}/configurazione-normativa",
+        { params: { path: { struttura_id } } },
+      );
+      if (!data) {
+        throw new Error(titoloErrore(error) ?? "configurazione non disponibile");
+      }
+      return data;
+    },
   });
 }
 

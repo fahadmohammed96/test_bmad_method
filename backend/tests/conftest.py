@@ -19,7 +19,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
 
-TABELLE_DA_SVUOTARE = "outbox, job, struttura, sessione, host"
+TABELLE_DA_SVUOTARE = (
+    "outbox, job, struttura, sessione, host, "
+    "comune_config, regione_config, config_audit, comune"
+)
 
 DEFAULT_TEST_DB_URL = (
     "postgresql+psycopg://postgres:postgres@localhost:54329/hostpilot_test"
@@ -36,6 +39,9 @@ def _test_db_url() -> str:
 # alcuni moduli (app.main) la chiamano a import-time — l'URL del DB deve
 # già puntare al database di test, mai a quello reale.
 os.environ["HOSTPILOT_DATABASE_URL"] = _test_db_url()
+# Token degli endpoint interni di configurazione (AD-9): valore di test,
+# nessun segreto reale nel repository.
+os.environ.setdefault("HOSTPILOT_ADMIN_TOKEN", "token-di-test-per-endpoint-interni")
 
 
 @pytest.fixture(scope="session")

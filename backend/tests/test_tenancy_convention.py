@@ -14,19 +14,31 @@ import pkgutil
 import app
 from app.core.db import Base
 
-# Tabelle senza host_id ammesse: infrastruttura core e la radice tenancy.
+# Tabelle senza host_id ammesse: infrastruttura core, la radice tenancy e
+# i DATI DI RIFERIMENTO condivisi (anagrafica ISTAT e configurazione
+# normativa, AD-9) — non appartengono a un Host, valgono per tutti.
 TABELLE_NON_TENANT = {"outbox", "job", "host"}
+TABELLE_DI_RIFERIMENTO = {
+    "regione",
+    "comune",
+    "comune_config",
+    "regione_config",
+    "config_audit",
+}
 
 # Moduli esclusi dalla guardia sui repository: `core`/`api` sono
 # infrastruttura; `identity` È il produttore di host_id (le sue lookup
-# per token/email sono il meccanismo di autenticazione stesso).
-MODULI_ESCLUSI = {"core", "api", "identity"}
+# per token/email sono il meccanismo di autenticazione stesso);
+# `config_normativa` espone solo dati di riferimento condivisi — lo
+# scoping per Host avviene in `strutture`, che possiede il legame
+# Struttura → Comune/Regione.
+MODULI_ESCLUSI = {"core", "api", "identity", "config_normativa"}
 
 
 def test_ogni_tabella_dati_porta_host_id_not_null() -> None:
     fuori_norma = []
     for tabella in Base.metadata.tables.values():
-        if tabella.name in TABELLE_NON_TENANT:
+        if tabella.name in TABELLE_NON_TENANT | TABELLE_DI_RIFERIMENTO:
             continue
         colonna = tabella.columns.get("host_id")
         if colonna is None or colonna.nullable:
@@ -76,3 +88,15 @@ def test_ogni_metodo_di_repository_di_dominio_richiede_host_id() -> None:
 def test_esiste_almeno_un_modulo_di_dominio_sorvegliato() -> None:
     # La guardia non deve mai svuotarsi in silenzio.
     assert "strutture" in _moduli_di_dominio()
+
+
+def test_le_tabelle_di_riferimento_non_contengono_dati_di_host() -> None:
+    # L'allowlist vale perché sono dati condivisi: se una di queste
+    # tabelle acquisisse un legame con l'Host, l'esenzione decadrebbe.
+    for nome in TABELLE_DI_RIFERIMENTO:
+        tabella = Base.metadata.tables[nome]
+        assert "host_id" not in tabella.columns
+        riferimenti = {
+            fk.column.table.name for col in tabella.columns for fk in col.foreign_keys
+        }
+        assert "host" not in riferimenti, nome

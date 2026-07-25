@@ -12,6 +12,19 @@ vi.mock("@/lib/api/hooks", () => ({
     isPending: false,
     isError: false,
   }),
+  useRegioni: () => ({
+    data: [{ codice_istat: "08", nome: "Emilia-Romagna" }],
+  }),
+  useComuni: () => ({
+    data: [
+      {
+        codice_istat: "037006",
+        nome: "Bologna",
+        provincia: "BO",
+        regione_codice_istat: "08",
+      },
+    ],
+  }),
 }));
 
 import NuovaStrutturaPage from "../(app)/strutture/nuova/page";
@@ -21,11 +34,9 @@ function compilaFinoAlCin() {
     target: { value: "Bologna Centro" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Avanti" }));
+  // Scegliere il Comune dai suggerimenti porta con sé codice ISTAT e Regione.
   fireEvent.change(screen.getByLabelText("Comune"), {
     target: { value: "Bologna" },
-  });
-  fireEvent.change(screen.getByLabelText("Regione"), {
-    target: { value: "Emilia-Romagna" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Avanti" }));
 }
@@ -49,6 +60,7 @@ describe("Wizard nuova Struttura (UX-DR3)", () => {
         nome: "Bologna Centro",
         comune: "Bologna",
         regione: "Emilia-Romagna",
+        comune_codice_istat: "037006",
         cin: null,
       },
       expect.anything(),

@@ -26,8 +26,18 @@ class Struttura(Base):
         ForeignKey("host.id"), nullable=False, index=True
     )
     nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    # `comune`/`regione` restano il testo mostrato all'Host; i codici ISTAT
+    # sono il legame con l'anagrafica (AD-9) e possono mancare quando il
+    # luogo non è ancora in anagrafica: in quel caso la configurazione
+    # degrada in sicurezza, l'onboarding non si blocca (FR-2).
     comune: Mapped[str] = mapped_column(String(120), nullable=False)
+    comune_codice_istat: Mapped[str | None] = mapped_column(
+        ForeignKey("comune.codice_istat"), nullable=True, index=True
+    )
     regione: Mapped[str] = mapped_column(String(80), nullable=False)
+    regione_codice_istat: Mapped[str | None] = mapped_column(
+        ForeignKey("regione.codice_istat"), nullable=True, index=True
+    )
     cin: Mapped[str | None] = mapped_column(String(30), nullable=True)
     stato: Mapped[StatoStruttura] = mapped_column(
         Enum(

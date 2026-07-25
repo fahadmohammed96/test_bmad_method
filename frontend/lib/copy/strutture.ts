@@ -28,6 +28,7 @@ export const struttureCopy = {
   nomeAiuto: "Come la chiami tu: es. “Bologna Centro”.",
   comuneEtichetta: "Comune",
   regioneEtichetta: "Regione",
+  regioneSegnaposto: "Scegli la Regione",
   comuneAiutoTitolo: "Perché li chiediamo?",
   comuneAiuto:
     "Tassa di soggiorno e rilevazione ISTAT dipendono dal Comune e dalla Regione della Struttura: li useremo per configurare i tuoi adempimenti.",
