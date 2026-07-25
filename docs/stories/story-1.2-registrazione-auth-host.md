@@ -1,9 +1,9 @@
 ---
 title: 'Story 1.2 — Registrazione e autenticazione dell''Host'
 epic: 'Epic 1: Fondamenta della piattaforma e gestione delle Strutture'
-status: in_review
+status: done
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-25
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - docs/epics.md (Story 1.2, AC completi)

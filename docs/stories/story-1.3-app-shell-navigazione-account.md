@@ -1,7 +1,7 @@
 ---
 title: 'Story 1.3 — App shell, navigazione, Dashboard frame, i18n e pannello Account'
 epic: 'Epic 1: Fondamenta della piattaforma e gestione delle Strutture'
-status: in_review
+status: done
 created: 2026-07-25
 updated: 2026-07-25
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
