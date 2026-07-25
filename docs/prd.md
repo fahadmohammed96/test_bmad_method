@@ -1,8 +1,8 @@
 ---
 title: 'PRD — HostPilot'
-status: draft
+status: approved
 gate: G2
-gate_status: 'in attesa di approvazione umana (Fahad) — PRD + UX Spec insieme'
+gate_status: 'approvato da Fahad al gate G3 (2026-07-24), insieme a UX Spec, Architettura, Epics/Stories e Readiness. Esiti [DECISIONE G2] registrati in §14.'
 created: 2026-07-24
 updated: 2026-07-24
 author: John — Product Manager
@@ -114,13 +114,13 @@ _Narrazioni con protagonista nominato; numerate UJ-1…UJ-N; le FR le referenzia
 _Termini da usare **verbatim** in FR, UJ e SM. Nessun sinonimo altrove nel documento. Se una feature introduce un nuovo sostantivo di dominio, va aggiunto qui nello stesso passaggio._
 
 - **Host** — l'utente del prodotto: privato che affitta 1-3 unità in proprio. Un account HostPilot appartiene a un Host.
-- **Struttura** — un'unità immobiliare affittata (appartamento). Un Host ha da 1 a 3 Strutture nel pilota. Ogni Struttura ha un Comune, una Regione e (quando disponibile) un CIN.
+- **Struttura** — un'unità immobiliare affittata (appartamento). Un Host ha da 1 a 3 Strutture nel pilota. Ogni Struttura ha un Comune, una Regione e (quando disponibile) un CIN. Una Struttura con dati collegati non si cancella: si **archivia** (`archiviata`) — esce dal conteggio del Regime fiscale e dal cap delle attive, i Feed smettono di sincronizzare, ma audit/registro/storico restano (estensione registrata al gate G3; architettura AD-20).
 - **Ospite** — la persona che soggiorna. Genera i dati per Alloggiati Web, tassa di soggiorno e ISTAT/ROSS1000.
-- **Prenotazione** — un soggiorno con date, canale d'origine (Airbnb/Booking/manuale), Struttura e Ospite/i.
+- **Prenotazione** — un soggiorno con date, canale d'origine (Airbnb/Booking/manuale), Struttura e Ospite/i. Ha uno stato: `attiva`, `cancellata`, `rimossa_dal_feed` (solo `attiva` partecipa alla rilevazione dei Conflitti e genera derivati; le Prenotazioni non si cancellano fisicamente — estensione registrata al gate G3; architettura AD-19).
 - **Canale** — la fonte OTA di una Prenotazione: Airbnb, Booking.com, o inserimento manuale.
 - **Feed iCal** — l'URL di sola lettura fornito dall'OTA per esportare le Prenotazioni. **Non in tempo reale** (latenza di aggiornamento).
 - **Calendario unificato** — la vista aggregata delle Prenotazioni di tutte le Strutture e di tutti i Canali dell'Host.
-- **Conflitto** — sovrapposizione di due Prenotazioni sulla stessa Struttura nello stesso intervallo di date. Ha uno stato: `rilevato`, `gestito`.
+- **Conflitto** — sovrapposizione di due Prenotazioni sulla stessa Struttura nello stesso intervallo di date. Ha uno stato: `rilevato`, `gestito`, `decaduto` (la sovrapposizione cessa da sola perché una Prenotazione esce da `attiva`: transizione di sistema tracciata, distinta da `gestito` — estensione registrata al gate G3; architettura AD-5).
 - **Finestra di riconciliazione** — l'intervallo/procedura entro cui l'Host risolve un Conflitto, tenendo conto che i Feed iCal non sono sincroni.
 - **Regola di prezzo** — una condizione configurabile (stagione, weekend, last-minute, soggiorno minimo) che determina il prezzo per date/Struttura.
 - **Adempimento** — un obbligo normativo italiano tracciato dal prodotto. I quattro dell'MVP: **Alloggiati Web**, **Tassa di soggiorno**, **ISTAT/ROSS1000**, **CIN**. Ha uno stato: `da fare`, `in sospeso`, `completato`, `non applicabile`.
@@ -296,6 +296,18 @@ Il sistema invia Messaggi automatici all'Ospite attivati da eventi: pre-arrivo, 
   - Un Messaggio è inviato al verificarsi dell'evento configurato.
   - `[ASSUNZIONE: il canale di invio (email vs. altri) e l'eventuale necessità di dati di contatto dell'Ospite dai portali sono da confermare in UX/architettura — i Feed iCal non sempre forniscono contatti.]`
 
+### 5.7 Account e preferenze
+
+**Descrizione:** infrastruttura implicita di qualunque prodotto con login, resa esplicita e ratificata al gate G3 (R-3 della Readiness; UX §2.3 `[GAP PRD]`, architettura `identity`).
+
+#### FR-20: Account e preferenze di notifica
+L'Host gestisce le proprie credenziali (email, password) e le preferenze di notifica.
+- **Consequences (testable):**
+  - L'Host può aggiornare email e password; le credenziali seguono la policy di sicurezza dell'architettura (sessione server-side, `identity`).
+  - L'Host può impostare il canale di notifica preferito tra quelli disponibili nell'MVP (in-app, email).
+  - Le preferenze di notifica sono rispettate dal motore di notifiche/promemoria (FR-15, FR-5).
+- **Notes:** `[FR aggiunta al gate G3 2026-07-24]` requisito minimo per tracciabilità; nessun ampliamento di scope oltre l'infrastruttura di account già implicata.
+
 ---
 
 ## 6. Requisiti non funzionali trasversali (NFR)
@@ -415,6 +427,15 @@ _Da portare al gate umano; ereditati e affinati dal brief (§Rischi)._
 
 _Bivi di prodotto che, per `project-context.md` §2, **non decido io**. Per ciascuno: opzioni, trade-off, raccomandazione di John. Fahad chiude al gate G2._
 
+> **Esito gate G3 — 2026-07-24 (approvazione di Fahad):**
+> - **G2-A** → **adottata Opz. 2** (Promemoria + Compilazione assistita per tutti e 4; Invio automatico come fast-follow dove sostenibile — candidato Alloggiati Web via WS_ALLOGGIATI).
+> - **G2-B** → **approccio adottato** (perimetro ristretto ad alta densità + degrado sicuro `configurazione_non_disponibile`), ma il **set iniziale concreto di Comuni/Regioni resta da indicare da Fahad** prima del rilascio delle feature Tassa di soggiorno/ISTAT (Epic 3, Story 3.6/3.7). **Punto ancora aperto.**
+> - **G2-C** → **adottata Opz. 1** (avviso informativo + rimando al commercialista, niente calcoli d'imposta).
+> - **G2-D** → **default adottato N=30 giorni dopo `completato` / M=90 giorni dal check-out** (= G3-3), **come valore iniziale in attesa della conferma legale** (vedi Readiness R-5, ancora da chiudere). Parametro di configurazione, modificabile senza rilascio.
+> - **G2-E** → **adottati** i target proposti (SM-1=0, SM-2≥90%, SM-3≥70%, SM-5≥50%; SM-4 senza target finché la WTP non è validata) e i target di usabilità proposti da Sally (onboarding ≤10 min, riconciliazione ≤3 interazioni, Alloggiati ≤2 min) come baseline.
+> - **Decisioni architetturali G3-1…5** ratificate (vedi `docs/architecture.md` §10 e `docs/project-context.md` §6).
+> - **Ancora da Fahad prima del rilascio compliance:** il set G2-B e l'assegnazione dell'owner della verifica legale (Readiness R-5). Non bloccano Epic 1/2.
+
 - **[DECISIONE G2-A] — Livello di automazione degli Adempimenti nell'MVP.**
   - Opz. 1: solo Promemoria. *Trade-off:* rapido, basso rischio legale; ma poco differenziante e non "in regola" nello spirito della decisione G1.
   - Opz. 2 (**raccomandata**): Promemoria + Compilazione assistita per tutti e 4, con Invio automatico validato **come fast-follow** dove sostenibile (candidato: Alloggiati Web). *Trade-off:* copre "in regola" (l'host adempie in tempo, lo stato è tracciato) contenendo il rischio di promettere invii automatici fragili. Coerente con la raccomandazione del brief.
@@ -433,7 +454,7 @@ _Bivi di prodotto che, per `project-context.md` §2, **non decido io**. Per cias
 
 ## 15. Riepilogo requisiti (indice FR/NFR)
 
-- **Feature:** Onboarding/Strutture (FR-1, FR-2) · Calendario & anti double-booking (FR-3…FR-7) · Prezzi (FR-8…FR-10) · Adempimenti (FR-11…FR-16) · Regime fiscale (FR-17) · Operatività (FR-18, FR-19).
+- **Feature:** Onboarding/Strutture (FR-1, FR-2) · Calendario & anti double-booking (FR-3…FR-7) · Prezzi (FR-8…FR-10) · Adempimenti (FR-11…FR-16) · Regime fiscale (FR-17) · Operatività (FR-18, FR-19) · Account e preferenze (FR-20).
 - **NFR trasversali:** NFR-1…NFR-9. **Privacy/GDPR:** NFR-10…NFR-16.
 
 ## 16. Indice delle assunzioni (`[ASSUNZIONE]`)

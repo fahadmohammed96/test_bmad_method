@@ -1,8 +1,8 @@
 ---
 title: 'Implementation Readiness Report — HostPilot'
-status: draft
+status: approved
 gate: G3
-gate_status: 'in attesa di approvazione umana (Fahad) — Architettura + Epics/Stories + Readiness insieme'
+gate_status: 'gate G3 approvato da Fahad (2026-07-24). Restano aperti solo R-5 (owner verifica legale) e il set G2-B — non bloccanti Epic 1/2.'
 created: 2026-07-24
 updated: 2026-07-24
 assessor: John — Product Manager (leader squad), con l'architettura di Winston

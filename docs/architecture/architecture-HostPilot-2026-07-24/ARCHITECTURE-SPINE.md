@@ -5,7 +5,7 @@ purpose: build-substrate
 altitude: initiative
 paradigm: 'monolite modulare a strati, event-augmented (transactional outbox)'
 scope: 'Intero prodotto HostPilot — MVP pilota (1-3 Strutture per Host)'
-status: draft
+status: approved
 created: '2026-07-24'
 updated: '2026-07-24'
 binds: ['FR-1…FR-19', 'NFR-1…NFR-16', 'UJ-1…UJ-5']
