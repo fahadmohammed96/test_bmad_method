@@ -82,7 +82,7 @@ Legenda stato: ✅ coperto nella consegna · ⚠️ coperto ma con gap (vedi §4
 | Catalogo eventi/job versionato, payload = soli identificatori scalari | AD-17 | unit | P0 | ✅ |
 | Outbox: emit nella stessa tx, rollback annulla, consegna post-commit | AD-1 | integration | P0 | ✅ |
 | Outbox/Job: claim concorrente `FOR UPDATE SKIP LOCKED` (2 sessioni) | AD-1/10 | integration | P0 | ✅ |
-| Job: retry/backoff esponenziale, esaurimento → `failed`, idempotenza | AD-10 | integration | P0 | ⚠️ (G-1) |
+| Job: retry/backoff esponenziale, esaurimento → `failed`, idempotenza | AD-10 | integration | P0 | ✅ (G-1 chiuso, PR #12) |
 | Worker: consegna outbox poi job durevoli scaduti | AD-1/10 | integration | P0 | ✅ |
 | API `/api/v1`, errori RFC 9457 `problem+json` | AD-14 | integration | P0 | ✅ |
 | OpenAPI ↔ client TS allineati | AD-14 | contract (CI) | P0 | ✅ |
@@ -101,8 +101,8 @@ Legenda stato: ✅ coperto nella consegna · ⚠️ coperto ma con gap (vedi §4
 | Sessione scaduta → 401; cookie contraffatto → 401 | AD-15 | integration | P0 | ✅ |
 | `host_id` **solo** dalla sessione, mai da query/header client | AD-2 | integration | P0 | ✅ |
 | Ogni endpoint non pubblico richiede sessione (guardia strutturale) | AD-2/15 | strutturale | P0 | ✅ |
-| Registrazione email duplicata rifiutata (case-insensitive) | AD-18 | integration | P0 | ⚠️ (G-2) |
-| Validazione 422 non riflette la password in chiaro | AD-15/NFR-6 | integration | P1 | ⛔ (G-4) |
+| Registrazione email duplicata rifiutata (case-insensitive) | AD-18 | integration | P0 | ✅ (G-2 chiuso, PR #12) |
+| Validazione 422 non riflette la password in chiaro | AD-15/NFR-6 | integration | P1 | ✅ (G-4 chiuso, PR #12) |
 | `host_id` NOT NULL su tabella di sessione | AD-2 | integration | P1 | ✅ |
 
 ### Story 1.3 — App shell, navigazione, i18n, Account (da consegnare)
@@ -160,7 +160,11 @@ Rilievi emersi dalla review retroattiva 1.1 e cross-review 1.2. Sono **proposte 
 correzione** ad Amelia (le entità applicative restano di sua competenza); i test/fixture/CI
 li porto io. Priorità indicata.
 
-- **G-1 (P1, correttezza AD-1/AD-10) — Atomicità per-item degli handler.** In
+**Stato:** G-1, G-2, G-4 **chiusi** dal fix-batch FIX-FORWARD (PR #12, mergiata da Fahad
+il 2026-07-25, verdetto APPROVA di Murat) — red→green verificato. G-3 pianificato con la
+Story 1.4; G-5 resta proposta P2 aperta.
+
+- **G-1 ✅ CHIUSO (PR #12) — (P1, correttezza AD-1/AD-10) — Atomicità per-item degli handler.** In
   `deliver_pending` e `run_due_jobs` un handler che *scrive e poi solleva* lascia le sue
   mutazioni ORM parziali nella sessione: vengono committate dal worker insieme al
   bookkeeping di fallimento. Manca un SAVEPOINT per item. Con at-least-once + retry questo
@@ -169,13 +173,16 @@ li porto io. Priorità indicata.
   è coperto. → Proposta: avvolgere ogni chiamata handler in `session.begin_nested()` con
   rollback del savepoint su eccezione. Test di regressione: handler *write-then-raise* →
   asserire che nessuno stato parziale sopravvive e che l'evento/job resta ritentabile.
+  **Esito:** SAVEPOINT per item in `outbox.py` e `jobs.py`, bookkeeping fuori dal savepoint;
+  test *write-then-raise* su entrambi i percorsi (nessuna riga orfana, `attempts=1`, retry).
 
-- **G-2 (P1, robustezza) — Registrazione concorrente stessa email.** Il controllo
+- **G-2 ✅ CHIUSO (PR #12) — (P1, robustezza) — Registrazione concorrente stessa email.** Il controllo
   `by_email` + insert non è atomico: due registrazioni concorrenti con la stessa email
   fanno passare entrambe il controllo, poi una viola il vincolo `uq_host_email` →
   `IntegrityError` non intercettato → **500** invece di **409**. → Proposta: intercettare
   `IntegrityError` sull'email e mappare a 409. Test: due insert in race → una 201, una 409,
-  mai 500.
+  mai 500. **Esito:** `try/except IntegrityError` sul flush → rollback → 409 problem+json;
+  test di gara con pre-check `by_email` accecato (decide il vincolo UNIQUE del DB).
 
 - **G-3 (P0, tenancy) — Guardia strutturale sullo scoping `host_id`.** La guardia auth
   (`test_auth_convention.py`) verifica che ogni endpoint abbia una sessione, ma **non** che
@@ -184,13 +191,15 @@ li porto io. Priorità indicata.
   interroga una tabella tenant-owned senza filtro tenant. È il moltiplicatore di rischio più
   alto di tutto l'Epic (R-A). → Da introdurre con la Story 1.4.
 
-- **G-4 (P1, igiene sicurezza NFR-6) — La 422 riflette la password.** Il gestore di
+- **G-4 ✅ CHIUSO (PR #12) — (P1, igiene sicurezza NFR-6) — La 422 riflette la password.** Il gestore di
   `RequestValidationError` restituisce `exc.errors()`, che in Pydantic v2 include il campo
   `input`: su password troppo corta a `/auth/registrazione` o `/auth/login` la **password in
   chiaro viene rimandata** nel corpo `errors[].input` (e finisce in eventuali log del
   client/proxy). Stesso mittente → rischio basso, ma è igiene da chiudere. → Proposta:
   redigere `input` (e `url`) per i campi sensibili prima di serializzare. Test: 422 su
-  password → il corpo NON contiene il valore inviato.
+  password → il corpo NON contiene il valore inviato. **Esito:** redatti `input`/`url`/`ctx`
+  su **tutti** i campi (nessuna allow-list da mantenere), restano `loc`/`msg`/`type`; test:
+  password assente dal body, 422 ancora utile al client.
 
 - **G-5 (P2, tech-debt) — Sessioni scadute mai raccolte + nessun rate-limit login.** Le
   sessioni scadute restano in tabella (crescita illimitata); il login non ha throttling/
