@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config_normativa.models import (
     Comune,
     ComuneConfig,
+    ParametroFiscale,
     Regione,
     RegioneConfig,
 )
@@ -88,6 +89,29 @@ class ConfigRepository:
             )
             .order_by(RegioneConfig.valido_dal.desc(), RegioneConfig.creato_il.desc())
         ).first()
+
+    def parametro_fiscale_vigente(self, alla_data: date) -> ParametroFiscale | None:
+        return self._db.scalars(
+            select(ParametroFiscale)
+            .where(
+                *self._vigente(
+                    ParametroFiscale.valido_dal, ParametroFiscale.valido_al, alla_data
+                )
+            )
+            .order_by(
+                ParametroFiscale.valido_dal.desc(), ParametroFiscale.creato_il.desc()
+            )
+        ).first()
+
+    def parametri_fiscali_aperti_dal(self, valido_dal: date) -> list[ParametroFiscale]:
+        return list(
+            self._db.scalars(
+                select(ParametroFiscale).where(
+                    ParametroFiscale.valido_dal <= valido_dal,
+                    ParametroFiscale.valido_al.is_(None),
+                )
+            )
+        )
 
     def comune_config_aperte_dal(
         self, comune_codice_istat: str, valido_dal: date

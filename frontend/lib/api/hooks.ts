@@ -16,6 +16,7 @@ export type ComuneOutput = components["schemas"]["ComuneOutput"];
 export type RegioneOutput = components["schemas"]["RegioneOutput"];
 export type ConfigurazioneNormativa =
   components["schemas"]["ConfigurazioneNormativaOutput"];
+export type RegimeFiscale = components["schemas"]["RegimeFiscaleOutput"];
 
 type Problem = { title?: string; detail?: string };
 
@@ -90,6 +91,13 @@ export function useAggiornaPreferenze() {
   });
 }
 
+/** Il Regime fiscale è derivato dal numero di Strutture (AD-12): ogni
+ * mutazione sulle Strutture invalida anche la sua cache. */
+function invalidaStruttureERegime(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["strutture"] });
+  queryClient.invalidateQueries({ queryKey: ["regime-fiscale"] });
+}
+
 export function useStrutture() {
   return useQuery<StrutturaOutput[]>({
     queryKey: ["strutture"],
@@ -109,7 +117,7 @@ export function useCreaStruttura() {
       if (!data) throw new Error(titoloErrore(error) ?? "registrazione fallita");
       return data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strutture"] }),
+    onSuccess: () => invalidaStruttureERegime(queryClient),
   });
 }
 
@@ -130,7 +138,7 @@ export function useAggiornaStruttura() {
       if (!data) throw new Error(titoloErrore(error) ?? "salvataggio fallito");
       return data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strutture"] }),
+    onSuccess: () => invalidaStruttureERegime(queryClient),
   });
 }
 
@@ -145,7 +153,7 @@ export function useArchiviaStruttura() {
       if (!data) throw new Error(titoloErrore(error) ?? "archiviazione fallita");
       return data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strutture"] }),
+    onSuccess: () => invalidaStruttureERegime(queryClient),
   });
 }
 
@@ -189,6 +197,28 @@ export function useConfigurazioneNormativa(struttura_id: string) {
       }
       return data;
     },
+  });
+}
+
+export function useRegimeFiscale() {
+  return useQuery<RegimeFiscale>({
+    queryKey: ["regime-fiscale"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/regime-fiscale");
+      if (!data) throw new Error(titoloErrore(error) ?? "regime non disponibile");
+      return data;
+    },
+  });
+}
+
+export function useConfermaLetturaRegime() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.POST("/api/v1/regime-fiscale/conferma-lettura");
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["regime-fiscale"] }),
   });
 }
 

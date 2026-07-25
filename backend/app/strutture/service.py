@@ -10,11 +10,14 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.config_normativa import service as config_service
 from app.config_normativa.repository import AnagraficaRepository
 from app.core.config import get_settings
+from app.core.date_range import today_rome
 from app.core.outbox import emit
 from app.strutture.models import StatoStruttura, Struttura
-from app.strutture.repository import StrutturaRepository
+from app.strutture.regime_fiscale import RegimeFiscale, calcola_regime, oltre_soglia
+from app.strutture.repository import RegimeLetturaRepository, StrutturaRepository
 
 
 class CapStruttureAttiveError(Exception):
@@ -57,9 +60,34 @@ def _payload(struttura: Struttura) -> dict[str, str]:
     return {"struttura_id": str(struttura.id), "host_id": str(struttura.host_id)}
 
 
+def _emetti_transizione_regime(
+    db: Session, host_id: uuid.UUID, conteggio_prima: int, conteggio_dopo: int
+) -> None:
+    """Evento alla transizione di soglia fiscale (FR-17, AD-12).
+
+    Solo l'attraversamento produce un evento: restare sopra o sotto la
+    soglia non ne genera. Senza parametri configurati non si inventa una
+    soglia, quindi non si emette nulla.
+    """
+    parametri = config_service.parametri_fiscali_vigenti(db, today_rome())
+    if parametri is None:
+        return
+    prima = oltre_soglia(conteggio_prima, parametri)
+    dopo = oltre_soglia(conteggio_dopo, parametri)
+    if prima == dopo:
+        return
+    payload = {"host_id": str(host_id), "conteggio": conteggio_dopo}
+    if dopo:
+        emit(db, "regime_fiscale.soglia_superata", payload)
+    else:
+        emit(db, "regime_fiscale.rientrato", payload)
+        RegimeLetturaRepository(db).azzera(host_id)
+
+
 def crea_struttura(db: Session, host_id: uuid.UUID, dati: DatiStruttura) -> Struttura:
     repo = StrutturaRepository(db)
-    if repo.conta_attive(host_id) >= get_settings().max_strutture_attive:
+    conteggio_prima = repo.conta_attive(host_id)
+    if conteggio_prima >= get_settings().max_strutture_attive:
         raise CapStruttureAttiveError()
     comune_codice, regione_codice = _risolvi_anagrafica(
         db, dati.comune_codice_istat, dati.regione
@@ -77,6 +105,7 @@ def crea_struttura(db: Session, host_id: uuid.UUID, dati: DatiStruttura) -> Stru
     )
     db.flush()
     emit(db, "struttura.creata", _payload(struttura))
+    _emetti_transizione_regime(db, host_id, conteggio_prima, conteggio_prima + 1)
     db.commit()
     return struttura
 
@@ -129,7 +158,25 @@ def archivia_struttura(
     struttura = _carica(db, host_id, struttura_id)
     if struttura.stato is StatoStruttura.ARCHIVIATA:
         return struttura  # idempotente: archiviata resta archiviata (AD-20)
+    conteggio_prima = StrutturaRepository(db).conta_attive(host_id)
     struttura.stato = StatoStruttura.ARCHIVIATA
     emit(db, "struttura.archiviata", _payload(struttura))
+    _emetti_transizione_regime(db, host_id, conteggio_prima, conteggio_prima - 1)
     db.commit()
     return struttura
+
+
+def regime_fiscale(db: Session, host_id: uuid.UUID) -> RegimeFiscale:
+    """Regime derivato alla lettura (AD-12): unico punto di verità."""
+    return calcola_regime(
+        db,
+        host_id,
+        alla_data=today_rome(),
+        lettura_confermata=RegimeLetturaRepository(db).confermata(host_id),
+    )
+
+
+def conferma_lettura_regime(db: Session, host_id: uuid.UUID) -> None:
+    conteggio = StrutturaRepository(db).conta_attive(host_id)
+    RegimeLetturaRepository(db).conferma(host_id, conteggio)
+    db.commit()

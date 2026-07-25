@@ -160,6 +160,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/interno/parametri-fiscali": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Configura Parametri Fiscali
+         * @description Soglia e testi del Regime fiscale: dati, non costanti (AD-12).
+         */
+        put: operations["configura_parametri_fiscali_api_v1_interno_parametri_fiscali_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/interno/regioni/{codice_istat}/configurazione": {
         parameters: {
             query?: never;
@@ -171,6 +191,46 @@ export interface paths {
         /** Configura Regione */
         put: operations["configura_regione_api_v1_interno_regioni__codice_istat__configurazione_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/regime-fiscale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Regime Fiscale
+         * @description Regime fiscale derivato dal numero di Strutture non archiviate.
+         */
+        get: operations["regime_fiscale_api_v1_regime_fiscale_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/regime-fiscale/conferma-lettura": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Conferma Lettura
+         * @description L'Host ha letto il pannello a schermo intero (UX-DR14).
+         */
+        post: operations["conferma_lettura_api_v1_regime_fiscale_conferma_lettura_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -387,6 +447,30 @@ export interface components {
          * @enum {string}
          */
         Motivo: "comune_non_riconosciuto" | "comune_non_configurato" | "regione_non_riconosciuta" | "regione_non_configurata";
+        /** ParametriFiscaliInput */
+        ParametriFiscaliInput: {
+            /** Aliquote Citate */
+            aliquote_citate: string;
+            /** Attore */
+            attore: string;
+            /** Regime Da Soglia */
+            regime_da_soglia: string;
+            /** Regime Sotto Soglia */
+            regime_sotto_soglia: string;
+            /** Soglia Strutture */
+            soglia_strutture: number;
+            /** Testo Da Soglia */
+            testo_da_soglia: string;
+            /** Testo Sotto Soglia */
+            testo_sotto_soglia: string;
+            /** Valido Al */
+            valido_al?: string | null;
+            /**
+             * Valido Dal
+             * Format: date
+             */
+            valido_dal: string;
+        };
         /** ParametriIstatOutput */
         ParametriIstatOutput: {
             periodicita: components["schemas"]["Periodicita"];
@@ -411,6 +495,29 @@ export interface components {
         /** PreferenzeInput */
         PreferenzeInput: {
             canale_notifica_preferito: components["schemas"]["CanaleNotifica"];
+        };
+        /**
+         * RegimeFiscaleOutput
+         * @description Contenuto informativo con disclaimer: mai un calcolo d'imposta.
+         */
+        RegimeFiscaleOutput: {
+            /** Aliquote Citate */
+            aliquote_citate: string | null;
+            /** Disclaimer */
+            disclaimer: string;
+            /** Mostra Pannello Transizione */
+            mostra_pannello_transizione: boolean;
+            /** Oltre Soglia */
+            oltre_soglia: boolean;
+            /** Regime */
+            regime: string | null;
+            /** Soglia */
+            soglia: number | null;
+            stato: components["schemas"]["StatoRegime"];
+            /** Strutture Non Archiviate */
+            strutture_non_archiviate: number;
+            /** Testo */
+            testo: string;
         };
         /** RegioneConfigInput */
         RegioneConfigInput: {
@@ -439,6 +546,11 @@ export interface components {
          * @enum {string}
          */
         StatoConfigurazione: "configurata" | "configurazione_non_disponibile";
+        /**
+         * StatoRegime
+         * @enum {string}
+         */
+        StatoRegime: "disponibile" | "configurazione_non_disponibile";
         /**
          * StatoStruttura
          * @description Una Struttura si archivia, mai si distrugge (AD-20).
@@ -774,6 +886,41 @@ export interface operations {
             };
         };
     };
+    configura_parametri_fiscali_api_v1_interno_parametri_fiscali_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParametriFiscaliInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigSalvataOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     configura_regione_api_v1_interno_regioni__codice_istat__configurazione_put: {
         parameters: {
             query?: never;
@@ -808,6 +955,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    regime_fiscale_api_v1_regime_fiscale_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegimeFiscaleOutput"];
+                };
+            };
+        };
+    };
+    conferma_lettura_api_v1_regime_fiscale_conferma_lettura_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

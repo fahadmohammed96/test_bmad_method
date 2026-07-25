@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.date_range import utcnow
@@ -16,6 +16,26 @@ class StatoStruttura(enum.Enum):
 
     ATTIVA = "attiva"
     ARCHIVIATA = "archiviata"
+
+
+class RegimeLettura(Base):
+    """Conferma di lettura del pannello Regime fiscale (UX-DR14).
+
+    Traccia PER QUALE conteggio di Strutture l'Host ha già visto il
+    pannello a schermo intero: non è il Regime (che resta derivato,
+    AD-12), è solo lo stato di lettura dell'informativa.
+    """
+
+    __tablename__ = "regime_lettura"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    host_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("host.id"), nullable=False, unique=True, index=True
+    )
+    conteggio_confermato: Mapped[int] = mapped_column(Integer, nullable=False)
+    confermato_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
 
 
 class Struttura(Base):

@@ -20,8 +20,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from alembic import command
 
 TABELLE_DA_SVUOTARE = (
-    "outbox, job, struttura, sessione, host, "
-    "comune_config, regione_config, config_audit, comune"
+    "outbox, job, regime_lettura, struttura, sessione, host, "
+    "comune_config, regione_config, parametro_fiscale, config_audit, comune"
 )
 
 DEFAULT_TEST_DB_URL = (

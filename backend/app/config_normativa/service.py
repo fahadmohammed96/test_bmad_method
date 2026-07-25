@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.config_normativa.models import (
     ComuneConfig,
     ConfigAudit,
+    ParametroFiscale,
     Periodicita,
     RegioneConfig,
 )
@@ -206,6 +207,57 @@ def aggiorna_comune_config(
     )
     db.commit()
     return config
+
+
+def aggiorna_parametri_fiscali(
+    db: Session,
+    *,
+    attore: str,
+    soglia_strutture: int,
+    regime_sotto_soglia: str,
+    regime_da_soglia: str,
+    testo_sotto_soglia: str,
+    testo_da_soglia: str,
+    aliquote_citate: str,
+    valido_dal: date,
+    valido_al: date | None = None,
+) -> ParametroFiscale:
+    """Aggiorna i parametri del Regime fiscale (AD-12): operazione dati."""
+    config_repo = ConfigRepository(db)
+    for aperto in config_repo.parametri_fiscali_aperti_dal(valido_dal):
+        aperto.valido_al = valido_dal - timedelta(days=1)
+
+    parametro = ParametroFiscale(
+        soglia_strutture=soglia_strutture,
+        regime_sotto_soglia=regime_sotto_soglia,
+        regime_da_soglia=regime_da_soglia,
+        testo_sotto_soglia=testo_sotto_soglia,
+        testo_da_soglia=testo_da_soglia,
+        aliquote_citate=aliquote_citate,
+        valido_dal=valido_dal,
+        valido_al=valido_al,
+    )
+    db.add(parametro)
+    _audita(
+        db,
+        attore,
+        "parametro_fiscale",
+        "globale",
+        {
+            "soglia_strutture": soglia_strutture,
+            "regime_sotto_soglia": regime_sotto_soglia,
+            "regime_da_soglia": regime_da_soglia,
+            "aliquote_citate": aliquote_citate,
+            "valido_dal": valido_dal.isoformat(),
+            "valido_al": valido_al.isoformat() if valido_al else None,
+        },
+    )
+    db.commit()
+    return parametro
+
+
+def parametri_fiscali_vigenti(db: Session, alla_data: date) -> ParametroFiscale | None:
+    return ConfigRepository(db).parametro_fiscale_vigente(alla_data)
 
 
 def aggiorna_regione_config(
