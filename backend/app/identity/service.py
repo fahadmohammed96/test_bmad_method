@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.date_range import utcnow
-from app.identity.models import Host, Sessione
+from app.identity.models import CanaleNotifica, Host, Sessione
 from app.identity.repository import HostRepository, SessioneRepository
 
 _hasher = PasswordHasher()  # profilo argon2id di default della libreria
@@ -100,6 +100,25 @@ def host_da_token(db: Session, token: str) -> Host | None:
     if sessione is None:
         return None
     return HostRepository(db).by_id(sessione.host_id)
+
+
+def aggiorna_preferenze(db: Session, host: Host, canale: CanaleNotifica) -> Host:
+    host.canale_notifica_preferito = canale
+    db.commit()
+    return host
+
+
+def cambia_password(
+    db: Session, host: Host, password_attuale: str, password_nuova: str, token: str
+) -> None:
+    """Ruota la password e invalida ogni altra sessione dell'Host."""
+    try:
+        _hasher.verify(host.password_hash, password_attuale)
+    except VerificationError:
+        raise CredenzialiNonValideError() from None
+    host.password_hash = _hasher.hash(password_nuova)
+    SessioneRepository(db).delete_altre_dell_host(host.id, _token_hash(token))
+    db.commit()
 
 
 def logout(db: Session, token: str) -> None:

@@ -9,7 +9,9 @@ Contratto vincolante: `docs/architecture/architecture-HostPilot-2026-07-24/ARCHI
 
 - Next.js 16.2 (App Router) + React 19, TypeScript strict, Node 24
 - Styling: Tailwind CSS 4 — token in `app/globals.css` (blocco `@theme`);
-  shadcn/ui come seed UI (si attiva con la Story 1.3)
+  shadcn/ui resta il seed UI ratificato (G3-1): si inizializza alla prima
+  Story che richiede componenti complessi (form multi-step, dialog);
+  fino ad allora componenti Tailwind semplici coerenti coi token
 - Stato server: TanStack Query 5 (provider in `app/providers.tsx`);
   nessuno store globale aggiuntivo senza motivazione registrata
 - Package manager: npm — usa SOLO questo (`npm ci` per installare)

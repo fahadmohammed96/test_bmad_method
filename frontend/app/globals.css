@@ -14,6 +14,7 @@
   --color-surface: oklch(0.98 0.005 260);
   --color-surface-contrast: oklch(0.22 0.01 260);
   --color-muted: oklch(0.55 0.01 260);
+  --color-danger: oklch(0.45 0.19 25);
 
   --font-display: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
   --font-body: var(--font-sans, ui-sans-serif, system-ui, sans-serif);

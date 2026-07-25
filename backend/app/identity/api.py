@@ -10,7 +10,12 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.identity import service
 from app.identity.deps import CurrentHost
-from app.identity.schemas import CredenzialiInput, HostOutput
+from app.identity.schemas import (
+    CambioPasswordInput,
+    CredenzialiInput,
+    HostOutput,
+    PreferenzeInput,
+)
 
 auth_router = APIRouter(prefix="/auth", tags=["identity"])
 hosts_router = APIRouter(prefix="/hosts", tags=["identity"])
@@ -77,3 +82,33 @@ def logout(
 @hosts_router.get("/me", response_model=HostOutput)
 def me(host: CurrentHost) -> HostOutput:
     return HostOutput.model_validate(host)
+
+
+@hosts_router.patch("/me/preferenze", response_model=HostOutput)
+def aggiorna_preferenze(
+    preferenze: PreferenzeInput, db: DbSession, host: CurrentHost
+) -> HostOutput:
+    aggiornato = service.aggiorna_preferenze(
+        db, host, preferenze.canale_notifica_preferito
+    )
+    return HostOutput.model_validate(aggiornato)
+
+
+@hosts_router.post("/me/password", status_code=204)
+def cambia_password(
+    cambio: CambioPasswordInput,
+    request: Request,
+    db: DbSession,
+    host: CurrentHost,
+) -> None:
+    token = request.cookies.get(get_settings().session_cookie_name) or ""
+    try:
+        service.cambia_password(
+            db, host, cambio.password_attuale, cambio.password_nuova, token
+        )
+    except service.CredenzialiNonValideError:
+        raise DomainProblem(
+            status=403,
+            title="Password attuale errata",
+            type_slug="invalid-current-password",
+        ) from None
