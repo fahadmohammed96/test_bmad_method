@@ -1,7 +1,7 @@
 ---
 title: 'Story 1.5 — Anagrafica Comune/Regione e configurazione normativa con degrado sicuro'
 epic: 'Epic 1: Fondamenta della piattaforma e gestione delle Strutture'
-status: in_review
+status: done
 created: 2026-07-25
 updated: 2026-07-25
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
@@ -56,3 +56,4 @@ So that Tassa di soggiorno e ISTAT/ROSS1000 siano parametrizzati correttamente, 
 ### Change log
 
 - 2026-07-25 — Story creata, implementata test-first e consegnata in PR (branch `story/1.5-config-normativa`).
+- 2026-07-25 — Mergiata su `main` con il verdetto del Test Architect; stato portato a **`done`** alla chiusura dell'Epic 1 a debito zero (azione **A7** della retrospettiva; evidenza in `docs/qa/test-design-epic-1.md` §7.5 copertura AC e §7.6 dichiarazione).
