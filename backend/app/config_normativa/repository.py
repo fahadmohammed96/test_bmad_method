@@ -70,7 +70,9 @@ class ConfigRepository:
                     ComuneConfig.valido_dal, ComuneConfig.valido_al, alla_data
                 ),
             )
-            .order_by(ComuneConfig.valido_dal.desc())
+            # A parità di decorrenza vale l'ULTIMA emessa: senza questo
+            # tiebreaker l'esito dipenderebbe dall'ordine di Postgres.
+            .order_by(ComuneConfig.valido_dal.desc(), ComuneConfig.creato_il.desc())
         ).first()
 
     def regione_config_vigente(
@@ -84,18 +86,23 @@ class ConfigRepository:
                     RegioneConfig.valido_dal, RegioneConfig.valido_al, alla_data
                 ),
             )
-            .order_by(RegioneConfig.valido_dal.desc())
+            .order_by(RegioneConfig.valido_dal.desc(), RegioneConfig.creato_il.desc())
         ).first()
 
     def comune_config_aperte_dal(
         self, comune_codice_istat: str, valido_dal: date
     ) -> list[ComuneConfig]:
-        """Configurazioni ancora aperte che una nuova delibera va a chiudere."""
+        """Configurazioni ancora aperte che una nuova delibera va a chiudere.
+
+        Include quelle di PARI decorrenza (delibera ri-emessa per
+        correzione): altrimenti resterebbero due periodi aperti con la
+        stessa data e la risoluzione non sarebbe deterministica.
+        """
         return list(
             self._db.scalars(
                 select(ComuneConfig).where(
                     ComuneConfig.comune_codice_istat == comune_codice_istat,
-                    ComuneConfig.valido_dal < valido_dal,
+                    ComuneConfig.valido_dal <= valido_dal,
                     ComuneConfig.valido_al.is_(None),
                 )
             )
@@ -108,7 +115,7 @@ class ConfigRepository:
             self._db.scalars(
                 select(RegioneConfig).where(
                     RegioneConfig.regione_codice_istat == regione_codice_istat,
-                    RegioneConfig.valido_dal < valido_dal,
+                    RegioneConfig.valido_dal <= valido_dal,
                     RegioneConfig.valido_al.is_(None),
                 )
             )

@@ -15,7 +15,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config_normativa.models import Comune, ComuneConfig, ConfigAudit
+from app.config_normativa.models import (
+    Comune,
+    ComuneConfig,
+    ConfigAudit,
+    Periodicita,
+    RegioneConfig,
+)
 from app.config_normativa.seed import REGIONI_ISTAT
 
 PROBLEM = "application/problem+json"
@@ -373,6 +379,69 @@ class TestEndpointInterniAuditati:
         assert audit[0].entita_riferimento == COMUNE_A["codice_istat"]
         assert audit[0].creato_il is not None  # quando
         assert audit[0].dati["tassa_importo_cent"] == 200
+
+    def test_ri_emettere_con_la_stessa_decorrenza_lascia_una_sola_vigente(
+        self, client: TestClient, anagrafica: None, db_session: Session
+    ) -> None:
+        # F-2: correzione di un importo sbagliato nella stessa delibera.
+        # Due righe con la stessa `valido_dal` renderebbero la risoluzione
+        # non deterministica: vale sempre l'ultima emessa.
+        _configura_comune(client, importo_cent=200, valido_dal="2026-01-01")
+        _configura_comune(client, importo_cent=220, valido_dal="2026-01-01")
+
+        aperte = db_session.scalars(
+            select(ComuneConfig).where(ComuneConfig.valido_al.is_(None))
+        ).all()
+        assert len(aperte) == 1
+        assert aperte[0].tassa_importo_cent == 220
+
+        _accedi(client)
+        struttura = _crea_struttura(
+            client, comune_codice_istat=COMUNE_A["codice_istat"]
+        )
+        tassa = _stato(client, struttura["id"], alla_data="2026-03-01")[
+            "tassa_soggiorno"
+        ]
+        assert tassa["parametri"]["importo_cent"] == 220
+
+    def test_stessa_decorrenza_anche_per_la_regione(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        _configura_regione(client, istat_tracciato="ross1000-v1")
+        _configura_regione(client, istat_tracciato="ross1000-v2")
+
+        aperte = db_session.scalars(
+            select(RegioneConfig).where(RegioneConfig.valido_al.is_(None))
+        ).all()
+        assert len(aperte) == 1
+        assert aperte[0].istat_tracciato == "ross1000-v2"
+
+    def test_la_risoluzione_e_deterministica_a_parita_di_decorrenza(
+        self, client: TestClient, anagrafica: None, db_session: Session
+    ) -> None:
+        # Difesa in profondità: anche se due righe di pari decorrenza
+        # finissero comunque nel database (dati storici, import), la
+        # risoluzione deve scegliere in modo deterministico l'ultima
+        # emessa, mai affidarsi all'ordine di ritorno di Postgres.
+        from app.config_normativa.repository import ConfigRepository
+
+        for importo in (200, 220):
+            db_session.add(
+                ComuneConfig(
+                    comune_codice_istat=COMUNE_A["codice_istat"],
+                    tassa_importo_cent=importo,
+                    tassa_periodicita=Periodicita.TRIMESTRALE,
+                    valido_dal=date(2026, 1, 1),
+                    valido_al=None,
+                )
+            )
+            db_session.commit()
+
+        vigente = ConfigRepository(db_session).comune_config_vigente(
+            COMUNE_A["codice_istat"], date(2026, 3, 1)
+        )
+        assert vigente is not None
+        assert vigente.tassa_importo_cent == 220
 
     def test_aggiornare_le_aliquote_e_un_operazione_dati(
         self, client: TestClient, anagrafica: None, db_session: Session
