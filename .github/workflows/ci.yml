@@ -7,7 +7,8 @@
 # - installazioni da lockfile (`uv sync --locked`, `npm ci`) senza
 #   esecuzione di script di terze parti (`--no-build`, `--ignore-scripts`);
 # - il progetto locale non si installa in CI (`--no-install-project`):
-#   i comandi girano dalla directory del backend, quindi `uv run --no-sync`.
+#   i comandi girano dalla directory del backend, quindi
+#   `uv run --no-sync --no-build` (nessun re-sync, nessuna build implicita).
 name: CI
 
 on:
@@ -43,13 +44,13 @@ jobs:
       - name: Install
         run: uv sync --locked --no-build --no-install-project --group dev
       - name: Lint
-        run: uv run --no-sync ruff check .
+        run: uv run --no-sync --no-build ruff check .
       - name: Format check
-        run: uv run --no-sync ruff format --check .
+        run: uv run --no-sync --no-build ruff format --check .
       - name: Typecheck
-        run: uv run --no-sync mypy
+        run: uv run --no-sync --no-build mypy
       - name: Test
-        run: uv run --no-sync pytest
+        run: uv run --no-sync --no-build pytest
 
   frontend:
     runs-on: ubuntu-latest
@@ -108,7 +109,7 @@ jobs:
       - name: Install browsers
         # `npm exec --no`: usa il Playwright del lockfile, senza installare
         # pacchetti on-demand (a differenza di `npx`).
-        run: npm exec --no -- playwright install --with-deps chromium
+        run: npm exec --no --ignore-scripts -- playwright install --with-deps chromium
         working-directory: frontend
       - name: E2E + a11y (axe)
         run: npm run test:e2e
@@ -133,7 +134,7 @@ jobs:
         run: uv sync --locked --no-build --no-install-project
         working-directory: backend
       - name: Export OpenAPI
-        run: uv run --no-sync python scripts/export_openapi.py
+        run: uv run --no-sync --no-build python scripts/export_openapi.py
         working-directory: backend
       - name: Install frontend
         run: npm ci --ignore-scripts
