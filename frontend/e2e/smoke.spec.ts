@@ -1,12 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Smoke test: invariante universale — la home carica senza errori
- * e il contenuto principale è visibile.
+ * Smoke test: la home smista verso /accesso quando non c'è sessione
+ * (anche senza backend raggiungibile) e il form di accesso è visibile.
  */
-test("la home carica e mostra il titolo", async ({ page }) => {
+test("senza sessione la home porta all'accesso", async ({ page }) => {
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", { level: 1, name: /hostpilot/i }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/accesso/);
+  await expect(page.getByRole("heading", { level: 1, name: "Accedi" })).toBeVisible();
 });

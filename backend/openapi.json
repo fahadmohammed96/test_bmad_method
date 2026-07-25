@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "CambioPasswordInput": {
+        "properties": {
+          "password_attuale": {
+            "maxLength": 128,
+            "title": "Password Attuale",
+            "type": "string"
+          },
+          "password_nuova": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password Nuova",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password_attuale",
+          "password_nuova"
+        ],
+        "title": "CambioPasswordInput",
+        "type": "object"
+      },
+      "CanaleNotifica": {
+        "description": "Canali di notifica Host dell'MVP (envelope operativo: in-app + email).",
+        "enum": [
+          "in_app",
+          "email"
+        ],
+        "title": "CanaleNotifica",
+        "type": "string"
+      },
       "CredenzialiInput": {
         "properties": {
           "email": {
@@ -37,6 +67,9 @@
       },
       "HostOutput": {
         "properties": {
+          "canale_notifica_preferito": {
+            "$ref": "#/components/schemas/CanaleNotifica"
+          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -49,9 +82,22 @@
         },
         "required": [
           "id",
-          "email"
+          "email",
+          "canale_notifica_preferito"
         ],
         "title": "HostOutput",
+        "type": "object"
+      },
+      "PreferenzeInput": {
+        "properties": {
+          "canale_notifica_preferito": {
+            "$ref": "#/components/schemas/CanaleNotifica"
+          }
+        },
+        "required": [
+          "canale_notifica_preferito"
+        ],
+        "title": "PreferenzeInput",
         "type": "object"
       },
       "ValidationError": {
@@ -241,6 +287,81 @@
           }
         },
         "summary": "Me",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/hosts/me/password": {
+      "post": {
+        "operationId": "cambia_password_api_v1_hosts_me_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CambioPasswordInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cambia Password",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/hosts/me/preferenze": {
+      "patch": {
+        "operationId": "aggiorna_preferenze_api_v1_hosts_me_preferenze_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferenzeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aggiorna Preferenze",
         "tags": [
           "identity"
         ]

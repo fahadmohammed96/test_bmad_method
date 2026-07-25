@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.identity.models import Host, Sessione
@@ -41,3 +41,11 @@ class SessioneRepository:
 
     def delete(self, sessione: Sessione) -> None:
         self._db.delete(sessione)
+
+    def delete_altre_dell_host(self, host_id: uuid.UUID, token_hash: str) -> None:
+        """Elimina tutte le sessioni dell'Host tranne quella corrente."""
+        self._db.execute(
+            delete(Sessione).where(
+                Sessione.host_id == host_id, Sessione.token_hash != token_hash
+            )
+        )

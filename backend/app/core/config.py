@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
     session_ttl_days: int = 30
 
+    # Origin del frontend ammessa dal CORS (cookie con credentials, AD-14/15).
+    frontend_origin: str = "http://localhost:3000"
+
 
 @lru_cache
 def get_settings() -> Settings:

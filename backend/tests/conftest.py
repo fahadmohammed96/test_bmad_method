@@ -32,6 +32,12 @@ def _test_db_url() -> str:
     return os.environ.get("HOSTPILOT_TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
 
 
+# Prima di QUALSIASI import di app.*: `get_settings()` è lru_cache-ata e
+# alcuni moduli (app.main) la chiamano a import-time — l'URL del DB deve
+# già puntare al database di test, mai a quello reale.
+os.environ["HOSTPILOT_DATABASE_URL"] = _test_db_url()
+
+
 @pytest.fixture(scope="session")
 def pg_engine() -> Iterator[Engine]:
     url = _test_db_url()
@@ -53,6 +59,9 @@ def pg_engine() -> Iterator[Engine]:
         conn.execute(text("CREATE SCHEMA public"))
 
     os.environ["HOSTPILOT_DATABASE_URL"] = url
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     command.upgrade(cfg, "head")
