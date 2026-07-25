@@ -27,6 +27,27 @@ COLONNA_PROVINCIA = "Sigla automobilistica"
 COLONNA_REGIONE = "Codice Regione"
 
 
+def percorso_validato(argomento: str, base: Path | None = None) -> Path:
+    """Valida il percorso ricevuto da riga di comando prima di aprirlo.
+
+    Il file deve essere un CSV regolare, esistente e contenuto nella
+    directory di lavoro (o in quella indicata): un argomento malformato
+    non può portare a leggere file fuori dal perimetro previsto.
+    """
+    radice = (base or Path.cwd()).resolve()
+    try:
+        percorso = Path(argomento).resolve(strict=True)
+    except OSError as errore:
+        raise ValueError(f"file non accessibile: {argomento}") from errore
+    if not percorso.is_relative_to(radice):
+        raise ValueError(f"il file deve trovarsi sotto {radice}: {percorso}")
+    if not percorso.is_file():
+        raise ValueError(f"non è un file regolare: {percorso}")
+    if percorso.suffix.lower() != ".csv":
+        raise ValueError(f"formato atteso .csv: {percorso.name}")
+    return percorso
+
+
 def importa(db: Session, percorso: Path) -> int:
     """Upsert idempotente dell'anagrafica: rieseguire non duplica."""
     esistenti = {c.codice_istat: c for c in db.scalars(select(Comune))}
@@ -52,7 +73,10 @@ def main() -> None:
         raise SystemExit(
             "uso: python -m app.config_normativa.importa_comuni <file.csv>"
         )
-    percorso = Path(sys.argv[1])
+    try:
+        percorso = percorso_validato(sys.argv[1])
+    except ValueError as errore:
+        raise SystemExit(str(errore)) from errore
     with get_sessionmaker()() as db:
         totale = importa(db, percorso)
     print(f"Anagrafica Comuni aggiornata: {totale} righe da {percorso}")
