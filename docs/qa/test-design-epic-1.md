@@ -105,17 +105,17 @@ Legenda stato: ✅ coperto nella consegna · ⚠️ coperto ma con gap (vedi §4
 | Validazione 422 non riflette la password in chiaro | AD-15/NFR-6 | integration | P1 | ✅ (G-4 chiuso, PR #12) |
 | `host_id` NOT NULL su tabella di sessione | AD-2 | integration | P1 | ✅ |
 
-### Story 1.3 — App shell, navigazione, i18n, Account (da consegnare)
+### Story 1.3 — App shell, navigazione, i18n, Account (consegnata, PR #13)
 
 | AC (sintesi) | Rif | Livello | Prio | Stato |
 | --- | --- | --- | :---: | :---: |
-| Navigazione 5 voci (tab mobile / sidebar desktop), Strutture in impostazioni | UX-DR1 | e2e | P0 | ⛔ |
-| Selettore Struttura trasversale con default "Tutte le Strutture" | UX-DR1 | e2e | P0 | ⛔ |
-| Dashboard frame con stato vuoto rassicurante | UX-DR2 | e2e | P1 | ⛔ |
-| UI it-IT + formati italiani (gg/mm/aaaa, €, virgola) | NFR-9/UX-DR11 | e2e + unit(format) | P0 | ⛔ |
-| Pannello Account / preferenze notifica | UX-DR15 | e2e + integration | P1 | ⛔ |
-| Layout responsive mobile-first, densità 1–3 Strutture | UX-DR12 | e2e | P1 | ⛔ |
-| a11y baseline WCAG 2.1 AA sui flussi critici | NFR-8 | e2e (axe) | P0 | ⛔ |
+| Navigazione 5 voci (tab mobile / sidebar desktop), Strutture in impostazioni | UX-DR1 | e2e | P0 | ✅ (PR #13, component) |
+| Selettore Struttura trasversale con default "Tutte le Strutture" | UX-DR1 | e2e | P0 | ✅ (PR #13, component) |
+| Dashboard frame con stato vuoto rassicurante | UX-DR2 | e2e | P1 | ✅ (PR #13) |
+| UI it-IT + formati italiani (gg/mm/aaaa, €, virgola) | NFR-9/UX-DR11 | e2e + unit(format) | P0 | ✅ (PR #13) |
+| Pannello Account / preferenze notifica | UX-DR15 | e2e + integration | P1 | ✅ (PR #13) |
+| Layout responsive mobile-first, densità 1–3 Strutture | UX-DR12 | e2e | P1 | ✅ (PR #13) |
+| a11y baseline WCAG 2.1 AA sui flussi critici | NFR-8 | e2e (axe) | P0 | ⚠️ (C1: axe e2e non in #13 — arriva con la 1.4/PR #14) |
 
 ### Story 1.4 — Strutture con cap 3 (da consegnare)
 
