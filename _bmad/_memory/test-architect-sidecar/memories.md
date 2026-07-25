@@ -30,3 +30,16 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   vigore dalla Story 1.3. Le PR mergiate prima (#12, #18) sono state verificate
   **retroattivamente** e l'esito è registrato nella matrice. Se una regola di gate arriva a
   metà Epic, la verifica arretrata va fatta e scritta, non condonata in silenzio.
+- 2026-07-25 — **Gli ID di rischi e finding si prefissano con l'Epic** dal test design dell'Epic
+  2 in poi: rischi `R2-x`, finding `E2-Gn` / `E2-Fn` / `E2-Cn`. Nell'Epic 1 erano `R-x` / `G-n`
+  / `F-n` / `C-n`, univoci solo dentro l'Epic — ma «G-2» ha ormai un significato preciso nelle
+  conversazioni di squadra, e riusare la sigla in un altro Epic renderebbe ambigua ogni
+  citazione futura. I rischi tracciati restano `RT-n`, unici per progetto perché attraversano
+  gli Epic per costruzione (hanno un momento di rivalutazione, non una scadenza).
+- 2026-07-25 — **Un test design scritto davvero prima del codice produce due output, non uno**:
+  la tabella di copertura (§3) e la lista dei **confini non specificati negli AC** (§4). Nel
+  test design dell'Epic 2 la seconda conta tredici voci, sette delle quali hanno la stessa
+  forma — l'AC descrive il caso normale e tace sul **ritorno dal caso degradato** (il feed che
+  torna, il sync mai riuscito, il conflitto fra due prenotazioni manuali). Quelle voci non le
+  risolvo io: tornano a John, che corregge `docs/epics.md`. Provare a scriverle come test le
+  avrebbe trasformate in decisioni di prodotto prese di nascosto dentro un documento di QA.
