@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     )
     worker_poll_seconds: float = 1.0
 
+    # Sessione server-side (AD-15). `Secure` resta attivo ovunque; l'override
+    # a False è ammesso SOLO in dev locale su http (browser senza TLS).
+    session_cookie_name: str = "hostpilot_session"
+    session_cookie_secure: bool = True
+    session_ttl_days: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

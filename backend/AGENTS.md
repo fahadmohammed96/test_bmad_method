@@ -49,6 +49,9 @@ Contratto vincolante: `docs/architecture/architecture-HostPilot-2026-07-24/ARCHI
   ogni tabella tenant-owned porta `host_id` NOT NULL (AD-2)
 - Eventi/job SOLO dichiarati nel catalogo `app/core/events.py` (AD-17)
 - Errori API: RFC 9457 `application/problem+json`, mai stacktrace al client
+- Ogni endpoint NON pubblico dichiara `CurrentHost` (`app.identity.deps`):
+  `host_id` si risolve dalla sessione, mai da input client (AD-15);
+  la convenzione è imposta da `tests/test_auth_convention.py`
 
 # Dati e migrazioni
 
