@@ -82,6 +82,39 @@ class TestRegistrazione:
         response = _registra(client, password="corta")
         assert response.status_code == 422
 
+    def test_registrazione_concorrente_stessa_email_409_non_500(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # G-2: due registrazioni in gara sulla stessa email. Il pre-check
+        # `by_email` di entrambe passa prima del commit dell'altra: simulato
+        # accecando il pre-check; deve rispondere il vincolo UNIQUE del DB,
+        # mappato su 409 — mai un 500.
+        from app.identity.repository import HostRepository
+
+        _registra(client)
+        client.cookies.clear()
+        monkeypatch.setattr(HostRepository, "by_email", lambda self, email: None)
+
+        response = _registra(client)
+        assert response.status_code == 409
+        assert response.headers["content-type"].startswith(PROBLEM)
+
+    def test_la_password_non_compare_mai_nella_risposta_422(
+        self, client: TestClient
+    ) -> None:
+        # G-4: Pydantic v2 rimette l'input dentro errors[].input — per i
+        # campi sensibili va redatto: la password NON deve mai tornare
+        # indietro nel corpo della risposta.
+        password_corta = "segretissima"[:7]
+        response = _registra(client, password=password_corta)
+        assert response.status_code == 422
+        assert password_corta not in response.text
+        for errore in response.json()["errors"]:
+            assert "input" not in errore
+            assert "url" not in errore
+        # La 422 resta utilizzabile: loc e msg ci sono ancora.
+        assert all("loc" in e and "msg" in e for e in response.json()["errors"])
+
 
 class TestLogin:
     def test_login_con_credenziali_valide(self, client: TestClient) -> None:

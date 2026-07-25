@@ -71,11 +71,18 @@ def register_problem_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # Redazione (G-4): `errors[].input` di Pydantic v2 rimanda indietro
+        # il valore inviato — con campi sensibili (password) è un leak.
+        # Restano loc/msg/type: sufficienti al client per correggere.
+        errors = [
+            {k: v for k, v in error.items() if k not in {"input", "url", "ctx"}}
+            for error in exc.errors()
+        ]
         return problem_response(
             status=422,
             title="Richiesta non valida",
             type_=TYPE_VALIDATION,
-            extra={"errors": exc.errors()},
+            extra={"errors": errors},
         )
 
     @app.exception_handler(Exception)

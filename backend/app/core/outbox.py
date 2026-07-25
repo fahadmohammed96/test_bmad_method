@@ -94,16 +94,20 @@ def deliver_pending(
 
     delivered = 0
     for event in pending:
-        event.attempts += 1
         try:
-            for handler in subs.handlers_for(event.event_name):
-                handler(session, event.event_name, event.payload)
+            # SAVEPOINT per item (G-1): un handler che scrive e poi fallisce
+            # non lascia scritture parziali da committare col batch.
+            with session.begin_nested():
+                for handler in subs.handlers_for(event.event_name):
+                    handler(session, event.event_name, event.payload)
         except Exception:
             logger.exception(
                 "consegna evento outbox fallita",
                 extra={"event_name": event.event_name, "outbox_id": str(event.id)},
             )
+            event.attempts += 1
             continue
+        event.attempts += 1
         event.delivered_at = utcnow()
         delivered += 1
     session.flush()

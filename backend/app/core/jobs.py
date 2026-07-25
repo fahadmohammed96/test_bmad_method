@@ -165,7 +165,10 @@ def run_due_jobs(
             )
             continue
         try:
-            handler(session, job.payload)
+            # SAVEPOINT per item (G-1): un handler che scrive e poi fallisce
+            # non lascia scritture parziali; il retry riparte da stato pulito.
+            with session.begin_nested():
+                handler(session, job.payload)
         except Exception as exc:
             logger.exception(
                 "esecuzione job fallita",

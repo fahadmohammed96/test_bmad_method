@@ -12,6 +12,7 @@ from datetime import timedelta
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -66,7 +67,13 @@ def registra_host(db: Session, email: str, password: str) -> SessioneAperta:
     if hosts.by_email(email) is not None:
         raise EmailGiaRegistrataError(email)
     host = hosts.add(Host(email=email, password_hash=_hasher.hash(password)))
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # Gara tra registrazioni sulla stessa email (G-2): il pre-check è
+        # passato in entrambe, decide il vincolo UNIQUE del DB → 409, non 500.
+        db.rollback()
+        raise EmailGiaRegistrataError(email) from None
     token = _apri_sessione(db, host)
     db.commit()
     return SessioneAperta(host=host, token=token)
