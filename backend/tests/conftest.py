@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from alembic import command
 
 TABELLE_DA_SVUOTARE = (
-    "outbox, job, regime_lettura, struttura, sessione, host, "
+    "outbox, job, regime_lettura, struttura, sessione, tentativo_login, host, "
     "comune_config, regione_config, parametro_fiscale, config_audit, comune"
 )
 

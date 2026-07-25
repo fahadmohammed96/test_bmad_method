@@ -41,6 +41,25 @@ class Host(Base):
     )
 
 
+class TentativoLogin(Base):
+    """Traccia effimera dei tentativi di accesso, per frenare gli abusi.
+
+    NON è un dato tenant-owned: si registra PRIMA di sapere se l'account
+    esiste — legarlo a un `host_id` rivelerebbe quali email sono
+    registrate. Contiene solo email tentata, origine ed esito: mai la
+    password. Le righe vecchie le elimina il purge periodico.
+    """
+
+    __tablename__ = "tentativo_login"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    origine: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    avvenuto_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+
+
 class Sessione(Base):
     """Sessione server-side (AD-15): in DB vive solo l'hash del token."""
 

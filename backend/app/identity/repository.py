@@ -3,10 +3,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.identity.models import Host, Sessione
+from app.identity.models import Host, Sessione, TentativoLogin
 
 
 class HostRepository:
@@ -22,6 +22,36 @@ class HostRepository:
     def add(self, host: Host) -> Host:
         self._db.add(host)
         return host
+
+
+class TentativoLoginRepository:
+    """Tracce dei tentativi di accesso: pre-autenticazione, non tenant-owned."""
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def registra(self, email: str, origine: str) -> None:
+        self._db.add(TentativoLogin(email=email, origine=origine))
+
+    def conta_per_email(self, email: str, dal: datetime) -> int:
+        return self._conta(TentativoLogin.email == email, dal)
+
+    def conta_per_origine(self, origine: str, dal: datetime) -> int:
+        return self._conta(TentativoLogin.origine == origine, dal)
+
+    def _conta(self, condizione, dal: datetime) -> int:
+        return int(
+            self._db.scalar(
+                select(func.count())
+                .select_from(TentativoLogin)
+                .where(condizione, TentativoLogin.avvenuto_il >= dal)
+            )
+            or 0
+        )
+
+    def azzera_per_email(self, email: str) -> None:
+        """Un accesso riuscito cancella il debito dell'account."""
+        self._db.execute(delete(TentativoLogin).where(TentativoLogin.email == email))
 
 
 class SessioneRepository:

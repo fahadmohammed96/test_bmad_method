@@ -18,6 +18,10 @@ from app.core.db import Base
 # i DATI DI RIFERIMENTO condivisi (anagrafica ISTAT e configurazione
 # normativa, AD-9) — non appartengono a un Host, valgono per tutti.
 TABELLE_NON_TENANT = {"outbox", "job", "host"}
+# Tracce PRE-autenticazione: si scrivono prima di sapere se l'account
+# esiste, quindi non possono portare `host_id` — legarle all'Host
+# rivelerebbe quali email sono registrate (G-5).
+TABELLE_PRE_AUTENTICAZIONE = {"tentativo_login"}
 TABELLE_DI_RIFERIMENTO = {
     "regione",
     "comune",
@@ -38,8 +42,9 @@ MODULI_ESCLUSI = {"core", "api", "identity", "config_normativa"}
 
 def test_ogni_tabella_dati_porta_host_id_not_null() -> None:
     fuori_norma = []
+    esentate = TABELLE_NON_TENANT | TABELLE_DI_RIFERIMENTO | TABELLE_PRE_AUTENTICAZIONE
     for tabella in Base.metadata.tables.values():
-        if tabella.name in TABELLE_NON_TENANT | TABELLE_DI_RIFERIMENTO:
+        if tabella.name in esentate:
             continue
         colonna = tabella.columns.get("host_id")
         if colonna is None or colonna.nullable:
@@ -91,10 +96,12 @@ def test_esiste_almeno_un_modulo_di_dominio_sorvegliato() -> None:
     assert "strutture" in _moduli_di_dominio()
 
 
-def test_le_tabelle_di_riferimento_non_contengono_dati_di_host() -> None:
-    # L'allowlist vale perché sono dati condivisi: se una di queste
-    # tabelle acquisisse un legame con l'Host, l'esenzione decadrebbe.
-    for nome in TABELLE_DI_RIFERIMENTO:
+def test_le_tabelle_esentate_non_acquisiscono_un_legame_con_host() -> None:
+    # L'esenzione vale perché quei dati non appartengono a un Host: dati
+    # di riferimento condivisi, o tracce scritte prima di sapere chi è.
+    # Se una di queste tabelle acquisisse `host_id` o una FK verso host,
+    # l'esenzione decadrebbe e questo test lo dice subito.
+    for nome in TABELLE_DI_RIFERIMENTO | TABELLE_PRE_AUTENTICAZIONE:
         tabella = Base.metadata.tables[nome]
         assert "host_id" not in tabella.columns
         riferimenti = {

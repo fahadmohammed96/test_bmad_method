@@ -54,10 +54,29 @@ def registrazione(
 
 @auth_router.post("/login", response_model=HostOutput)
 def login(
-    credenziali: CredenzialiInput, response: Response, db: DbSession
+    credenziali: CredenzialiInput,
+    request: Request,
+    response: Response,
+    db: DbSession,
 ) -> HostOutput:
     try:
-        aperta = service.login(db, credenziali.email, credenziali.password)
+        aperta = service.login(
+            db,
+            credenziali.email,
+            credenziali.password,
+            origine=request.client.host if request.client else "sconosciuta",
+        )
+    except service.TroppiTentativiError as freno:
+        raise DomainProblem(
+            status=429,
+            title="Troppi tentativi di accesso",
+            type_slug="too-many-login-attempts",
+            detail=(
+                "Per sicurezza abbiamo messo in pausa gli accessi a questo "
+                "account: riprova fra qualche minuto."
+            ),
+            headers={"Retry-After": str(freno.riprova_fra_secondi)},
+        ) from None
     except service.CredenzialiNonValideError:
         raise DomainProblem(
             status=401,

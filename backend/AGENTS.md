@@ -23,7 +23,9 @@ Contratto vincolante: `docs/architecture/architecture-HostPilot-2026-07-24/ARCHI
 - Lint: `uv run ruff check .` e `uv run ruff format --check .`
 - Typecheck: `uv run mypy`
 - Avvio API: `uv run uvicorn app.main:app --reload` → http://localhost:8000
-- Avvio worker: `uv run python -m app.core.worker`
+- Avvio worker: `uv run python -m app.worker` (entrypoint applicativo:
+  registra gli handler dei moduli e fa il bootstrap dei job periodici,
+  poi cede a `app.core.worker`, che resta il ciclo generico del kernel)
 - Migrazioni: `uv run alembic upgrade head` (forward-only: downgrade vietato)
 - Export contratto: `uv run python scripts/export_openapi.py` → `openapi.json`
 

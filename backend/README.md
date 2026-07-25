@@ -10,7 +10,7 @@ il contratto architetturale è lo spine in `../docs/architecture/`.
 uv sync --group dev
 cp .env.example .env
 uv run uvicorn app.main:app --reload    # http://localhost:8000/api/v1/docs
-uv run python -m app.core.worker        # worker outbox/job (processo separato)
+uv run python -m app.worker        # worker outbox/job (processo separato)
 ```
 
 ## Comandi
@@ -18,7 +18,7 @@ uv run python -m app.core.worker        # worker outbox/job (processo separato)
 | Comando                                   | Cosa fa                       |
 | ----------------------------------------- | ----------------------------- |
 | `uv run uvicorn app.main:app --reload`    | Server di sviluppo            |
-| `uv run python -m app.core.worker`        | Worker outbox/job             |
+| `uv run python -m app.worker`        | Worker outbox/job             |
 | `uv run pytest`                           | Suite di test                 |
 | `uv run ruff check .` / `format --check .`| Lint / format                 |
 | `uv run mypy`                             | Typecheck                     |

@@ -18,7 +18,11 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.date_range import utcnow
 from app.identity.models import CanaleNotifica, Host, Sessione
-from app.identity.repository import HostRepository, SessioneRepository
+from app.identity.repository import (
+    HostRepository,
+    SessioneRepository,
+    TentativoLoginRepository,
+)
 
 _hasher = PasswordHasher()  # profilo argon2id di default della libreria
 
@@ -33,6 +37,14 @@ class EmailGiaRegistrataError(Exception):
 
 class CredenzialiNonValideError(Exception):
     pass
+
+
+class TroppiTentativiError(Exception):
+    """Freno agli accessi ripetuti: temporaneo, mai un lockout definitivo."""
+
+    def __init__(self, riprova_fra_secondi: int) -> None:
+        super().__init__("troppi tentativi di accesso")
+        self.riprova_fra_secondi = riprova_fra_secondi
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,15 +91,47 @@ def registra_host(db: Session, email: str, password: str) -> SessioneAperta:
     return SessioneAperta(host=host, token=token)
 
 
-def login(db: Session, email: str, password: str) -> SessioneAperta:
+def _verifica_freno(db: Session, email: str, origine: str) -> None:
+    """Freno agli accessi ripetuti (G-5).
+
+    Due limiti su finestra temporale: per account (Host preso di mira) e
+    per origine (spraying su molti account). Si applica PRIMA di guardare
+    le credenziali e vale anche per email inesistenti, altrimenti la
+    differenza di comportamento rivelerebbe quali account esistono.
+    """
+    settings = get_settings()
+    tentativi = TentativoLoginRepository(db)
+    dal = utcnow() - timedelta(minutes=settings.login_finestra_minuti)
+
+    per_account = tentativi.conta_per_email(email, dal)
+    per_origine = tentativi.conta_per_origine(origine, dal)
+    if (
+        per_account >= settings.login_max_tentativi_account
+        or per_origine >= settings.login_max_tentativi_origine
+    ):
+        raise TroppiTentativiError(settings.login_finestra_minuti * 60)
+
+
+def login(
+    db: Session, email: str, password: str, origine: str = "sconosciuta"
+) -> SessioneAperta:
     email = _normalizza_email(email)
+    _verifica_freno(db, email, origine)
+
     host = HostRepository(db).by_email(email)
     try:
         _hasher.verify(host.password_hash if host else _DUMMY_HASH, password)
+        credenziali_valide = host is not None
     except VerificationError:
-        raise CredenzialiNonValideError() from None
-    if host is None:
+        credenziali_valide = False
+
+    if not credenziali_valide or host is None:
+        TentativoLoginRepository(db).registra(email, origine)
+        db.commit()
         raise CredenzialiNonValideError()
+
+    # L'accesso riuscito cancella il debito dell'account.
+    TentativoLoginRepository(db).azzera_per_email(email)
     token = _apri_sessione(db, host)
     db.commit()
     return SessioneAperta(host=host, token=token)
