@@ -1,6 +1,6 @@
 ---
-title: 'Test Design — Epic 1 (Fondamenta e gestione Strutture)'
-status: draft
+title: 'Test Design e matrice di tracciabilità — Epic 1 (Fondamenta e gestione Strutture)'
+status: 'chiuso — Epic 1 a debito zero (2026-07-25, vedi §7.6)'
 phase: '4 · Implementation — gate di qualità (Murat, Test Architect)'
 created: 2026-07-25
 author: Murat — Master Test Architect
@@ -13,14 +13,26 @@ inputDocuments:
 related:
   - docs/stories/story-1.1-scaffolding-monorepo-core-ci.md (consegnata, PR #9)
   - docs/stories/story-1.2-registrazione-auth-host.md (consegnata, PR #10)
+  - docs/stories/story-1.3-app-shell-navigazione-account.md (consegnata, PR #13)
+  - docs/stories/story-1.4-registrazione-strutture-cap3.md (consegnata, PR #14)
+  - docs/stories/story-1.5-config-normativa.md (consegnata, PR #16)
+  - docs/stories/story-1.6-regime-fiscale.md (consegnata, PR #19)
 ---
 
-# Test Design — Epic 1
+> **Come si legge questo documento.** §1–§6 sono il *piano* di test dell'Epic 1 (rischio,
+> livelli, copertura per Story, criteri di gate). **§7 è la matrice di tracciabilità di
+> chiusura**: se stai cercando la risposta a *«l'Epic 1 ha debito aperto?»*, vai a
+> **§7.4** (registro dei finding), **§7.6** (dichiarazione di debito zero) e **§7.7**
+> (rischi tracciati, che debito **non** sono).
+
+# Test Design e matrice di tracciabilità — Epic 1
 
 Piano di test **essenziale e risk-based** per l'Epic 1. Recupera il kickoff di qualità
 saltato: definisce *cosa* testare, a *quale livello*, con *quale priorità*, e traccia
 ogni acceptance criteria (AC) di `epics.md` verso un invariante architetturale (AD-N).
 Non è una suite: è il contratto di copertura contro cui misurare le Story 1.1→1.6 al gate.
+A Epic concluso è anche il documento di chiusura: la §7 dice se resta debito, e la risposta
+oggi è **no** (§7.6).
 
 > **Principio guida:** la profondità del test scala con il rischio (probabilità × impatto).
 > Preferire sempre il livello più basso possibile (unit > integration > e2e). Le API sono
@@ -160,10 +172,10 @@ Rilievi emersi dalla review retroattiva 1.1 e cross-review 1.2. Sono **proposte 
 correzione** ad Amelia (le entità applicative restano di sua competenza); i test/fixture/CI
 li porto io. Priorità indicata.
 
-**Stato:** G-1, G-2, G-4 **chiusi** dal fix-batch FIX-FORWARD (PR #12). **G-3 e C1 chiusi**
-dalla Story 1.4 (PR #14). **F-2 chiuso** dal secondo fix-batch (PR #18).
-**F-1 e F-3 chiusi** dal terzo fix-batch (PR #21). Resta aperto il solo **G-5** (P2),
-in chiusura con la PR #23.
+**Stato: tutti chiusi.** G-1, G-2, G-4 dal fix-batch FIX-FORWARD (PR #12). G-3 e C1 dalla
+Story 1.4 (PR #14). F-2 dal secondo fix-batch (PR #18). F-1 e F-3 dal terzo fix-batch
+(PR #21). **G-5 — l'ultimo — dal quarto fix-batch (PR #23, mergiata il 2026-07-25).**
+Nessun finding dell'Epic 1 resta aperto: il registro completo è in §7.4.
 
 - **F-2 ✅ CHIUSO (PR #18) — (P1, correttezza AD-9/NFR-4) — Delibera ri-emessa con la stessa
   `valido_dal`.** Due periodi restavano aperti e la risoluzione dipendeva dall'ordine di
@@ -232,10 +244,29 @@ in chiusura con la PR #23.
   su **tutti** i campi (nessuna allow-list da mantenere), restano `loc`/`msg`/`type`; test:
   password assente dal body, 422 ancora utile al client.
 
-- **G-5 (P2, tech-debt) — Sessioni scadute mai raccolte + nessun rate-limit login.** Le
-  sessioni scadute restano in tabella (crescita illimitata); il login non ha throttling/
-  lockout (brute-force mitigato solo dal costo argon2id). → Proposta: purge come `job`
-  durevole (AD-10) e rate-limit come follow-up NFR-sicurezza. Non blocca Epic 1.
+- **G-5 ✅ CHIUSO (PR #23) — (P2, tech-debt) — Sessioni scadute mai raccolte + nessun
+  rate-limit login.** Le sessioni scadute restavano in tabella (crescita illimitata); il
+  login non aveva throttling/lockout (brute-force mitigato solo dal costo argon2id). →
+  Proposta: purge come `job` durevole (AD-10) e rate-limit come follow-up NFR-sicurezza.
+  **Esito:** (1) purge delle sessioni scadute come **job durevole periodico** sul kernel
+  AD-10 — handler idempotente che si riprogramma a fine giro più bootstrap idempotente al
+  riavvio del worker, nessun timer in memoria; ripulisce anche le tracce di login fuori
+  finestra, così nemmeno quella tabella cresce senza limite. Nuovo entrypoint applicativo
+  `python -m app.worker`, che registra gli handler di dominio e lascia `app.core.worker`
+  generico (AD-1 preservato). (2) **Freno ai login ripetuti** su finestra temporale, mai
+  lockout permanente: due limiti distinti — per account (Host preso di mira) e per origine
+  (spraying su molti account) — applicati **prima** di verificare le credenziali e anche
+  per email inesistenti, altrimenti la differenza di comportamento diventerebbe
+  enumerazione degli account (regressione su AD-15). 429 `problem+json` con `Retry-After`;
+  un accesso riuscito azzera il debito dell'account; soglie e finestra in configurazione
+  (`login_max_tentativi_account`, `login_max_tentativi_origine`, `login_finestra_minuti`),
+  mai hardcoded. La tabella `tentativo_login` non ha `host_id` — si scrive prima di sapere
+  se l'account esiste — ed è in allowlist **esplicita e sorvegliata** dalla guardia di
+  tenancy. Evidenza: `backend/tests/test_purge_sessioni.py` (7 test: eliminazione
+  selettiva, idempotenza, riprogrammazione, bootstrap dopo riavvio, tipo a catalogo) e
+  `backend/tests/test_rate_limit_login.py` (10 test: soglia, `Retry-After`, scadenza della
+  finestra, azzeramento su login riuscito, **non-enumerazione**, spraying per origine,
+  password mai registrata, interazione col purge).
 
 ---
 
@@ -275,6 +306,10 @@ Controllo di chiusura complessivo dell'Epic: ogni requisito coperto dall'Epic 1 
 Story, a un livello di test e a un'evidenza eseguibile. Compilata da Murat al termine
 dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
 
+**Scritta per chi non c'era.** Le sezioni che seguono rispondono in ordine a: cosa è stato
+verificato (§7.1–§7.3), cosa era rotto e chi l'ha chiuso (§7.4), quanto è coperto Story per
+Story (§7.5), se resta debito (§7.6), che cosa resta comunque da sorvegliare (§7.7).
+
 ### 7.1 Requisiti funzionali
 
 | Req | Story | Livello di verifica | Evidenza (suite) | Stato |
@@ -310,18 +345,103 @@ dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
 | **NFR-14** Controllo accessi Host proprietario | guardia tenancy + test cross-tenant (404 su risorse altrui) | ✅ |
 | **NFR-16** Nessun dato reale nei test | fixture su dominio `example.com`, codici ISTAT sintetici marcati | ✅ |
 
-### 7.4 Debiti aperti alla chiusura dell'Epic (tutti P2, decisione umana)
+### 7.4 Registro dei finding dell'Epic 1 — stato finale
 
-| ID | Stato | Sintesi | Origine |
-| --- | :---: | --- | --- |
-| **F-1** | ✅ PR #21 | Cap "3 attive" non atomico (TOCTOU) → advisory lock per Host | review 1.4 |
-| **F-3** | ✅ PR #21 | `compare_digest` → 500 su header non-ASCII → confronto sui byte | review 1.5 |
-| **G-5** | ⏳ PR #23 | Sessioni scadute mai raccolte; nessun freno ai login ripetuti | review 1.2 |
+**Tutti e nove i finding numerati emersi nell'Epic 1 sono chiusi.** Nessuna riga è aperta,
+nessuna è stata accettata come debito residuo, nessuna è stata chiusa ammorbidendo un test:
+in ogni caso il test descriveva l'atteso e il codice si è adeguato.
 
-Nessun debito P0/P1 resta aperto: i quattro emersi (G-1, G-2, G-4, F-2) più G-3 e C1 sono
-stati chiusi e verificati entro l'Epic. Dei tre P2, due sono chiusi; **G-5 è l'ultimo**.
+| ID | Prio | Sintesi | Origine | Chiuso da | Evidenza di regressione |
+| --- | :---: | --- | --- | :---: | --- |
+| **G-1** | P1 | Handler outbox/job non atomici per item: un handler *write-then-raise* lasciava scritture parziali committate col bookkeeping di fallimento | review retroattiva 1.1 | ✅ **PR #12** | SAVEPOINT per item; test *write-then-raise* in `test_outbox.py`, `test_jobs.py` |
+| **G-2** | P1 | Registrazione concorrente stessa email → `IntegrityError` non intercettato → 500 invece di 409 | cross-review 1.2 | ✅ **PR #12** | test di gara con pre-check accecato in `test_identity_auth.py` (una 201, una 409, mai 500) |
+| **G-3** | P0 | Nessuna guardia strutturale sullo scoping `host_id` (solo quella auth) — moltiplicatore di rischio R-A | cross-review 1.2, da consegnare con 1.4 | ✅ **PR #14** | `test_tenancy_convention.py` (+ test anti-svuotamento della guardia stessa) |
+| **G-4** | P1 | La 422 di validazione rifletteva la **password in chiaro** in `errors[].input` | cross-review 1.2 | ✅ **PR #12** | redazione di `input`/`url`/`ctx`; test che la password non compare nel body |
+| **G-5** | P2 | Sessioni scadute mai raccolte (crescita illimitata) + nessun freno ai login ripetuti | cross-review 1.2 | ✅ **PR #23** | `test_purge_sessioni.py` (7 test), `test_rate_limit_login.py` (10 test) |
+| **F-1** | P2 | Cap "3 Strutture attive" non atomico (TOCTOU): due `POST` concorrenti → 4 attive | review 1.4 | ✅ **PR #21** | `pg_advisory_xact_lock` per Host; test di gara a 8 thread con barrier |
+| **F-2** | P1 | Delibera ri-emessa con la stessa `valido_dal`: due periodi aperti, risoluzione dipendente dall'ordine di Postgres | review 1.5 | ✅ **PR #18** | chiusura delle pari-decorrenza + tiebreaker `creato_il DESC`; 3 test in `test_config_normativa.py` |
+| **F-3** | P2 | `compare_digest` su header non-ASCII → `TypeError` → 500 invece di 403 | review 1.5 | ✅ **PR #21** | confronto sui byte (`.encode()`) + test con header non-ASCII |
+| **C1** | P0 | Prima UI reale senza copertura a11y/e2e in CI | review 1.3 | ✅ **PR #14** | job CI `e2e` full-stack + **axe serious/critical = 0** su 4 superfici |
+
+**Lettura per priorità:** 2 P0 (G-3, C1), 4 P1 (G-1, G-2, G-4, F-2), 3 P2 (G-5, F-1, F-3) —
+**9 su 9 chiusi entro l'Epic**. Ogni chiusura è passata da un verdetto esplicito prima del
+merge umano, tranne F-2 e G-1/G-2/G-4, verificati **retroattivamente** (PR mergiate prima che
+la regola «verdetto prima del merge» fosse in vigore): la verifica retroattiva è stata fatta
+e documentata, non saltata.
+
+### 7.5 Copertura Story per Story (1.1 → 1.6)
+
+Sintesi delle tabelle di §3: ogni Story dell'Epic 1 è consegnata e ogni suo AC ha un test
+verde al livello previsto dal test design. Nessun AC è coperto "per ispezione".
+
+| Story | Consegnata da | AC tracciati (P0 / P1 / P2) | AC coperti | Livelli effettivi | Finding aperti sulla Story |
+| --- | :---: | :---: | :---: | --- | :---: |
+| **1.1** Scaffolding, `core`, CI | PR #9 | 10 (8 / 2 / 0) | 10/10 ✅ | unit + integration su PG reale + contract (CI) | nessuno (G-1 chiuso) |
+| **1.2** Registrazione e auth Host | PR #10 | 11 (9 / 2 / 0) | 11/11 ✅ | integration (API) + guardia strutturale auth | nessuno (G-2, G-4, G-5 chiusi) |
+| **1.3** App shell, i18n, Account | PR #13 | 7 (4 / 3 / 0) | 7/7 ✅ | component + e2e (axe) + integration | nessuno (C1 chiuso) |
+| **1.4** Strutture con cap 3 | PR #14 | 8 (6 / 1 / 1) | 8/8 ✅ | integration + e2e + guardia strutturale tenancy | nessuno (F-1 chiuso) |
+| **1.5** Comune/Regione, degrado sicuro | PR #16 | 6 (5 / 1 / 0) | 6/6 ✅ | integration + e2e | nessuno (F-2, F-3 chiusi) |
+| **1.6** Regime fiscale derivato | PR #19 | 6 (4 / 2 / 0) | 6/6 ✅ | unit + integration (evento) + e2e | nessuno |
+| **Totale Epic 1** | — | **48 (36 / 11 / 1)** | **48/48 ✅** | — | **0** |
+
+I criteri di gate di §6 sono soddisfatti per tutte e sei le Story: AC P0 verdi al livello
+indicato, CI verde (compreso `api-contract` quando l'API cambia), guardie strutturali verdi
+(auth su tutte, tenancy da 1.4), nessun dato reale nei fixture, zero gap P0/P1 aperti.
+
+### 7.6 Dichiarazione di chiusura — **Epic 1 a debito zero**
+
+> **In data 2026-07-25 dichiaro l'Epic 1 (Story 1.1 → 1.6) chiuso a debito zero.**
+> Non esiste alcun finding di qualità, correttezza o sicurezza aperto o accettato come
+> debito residuo sull'Epic 1.
+>
+> — Murat, Master Test Architect
+
+Su che cosa si fonda la dichiarazione (verificabile, non dichiarativo):
+
+1. **Registro dei finding completo e chiuso** — 9 finding su 9 chiusi (§7.4), ciascuno con la
+   PR che lo chiude e un test di regressione nominato. Nessuna chiusura per waiver.
+2. **Copertura degli AC completa** — 48 AC su 48 coperti da test verdi al livello previsto
+   (§7.5); tracciabilità requisito → Story → livello → suite in §7.1–§7.3.
+3. **Verdetto dato su ogni PR** — ogni consegna e ogni fix-batch è passato dal verdetto del
+   Test Architect prima del merge umano; le quattro PR mergiate prima che la regola entrasse
+   in vigore (#12, #18) sono state verificate retroattivamente e l'esito è nel registro.
+4. **CI verde su `main`** — sul commit di riferimento `61d7ac4` (che include `dec7680`, il
+   merge della PR #23) i cinque check obbligatori sono `success`: `backend`, `frontend`,
+   `e2e`, `api-contract`, **SonarCloud Code Analysis**.
+5. **La pipeline non può essere verde a vuoto** — `HOSTPILOT_TEST_DB_REQUIRED=1` rende errore
+   lo skip dei test su Postgres reale, e il job `api-contract` fallisce sul `git diff` se
+   OpenAPI e client TS divergono dal codice: una CI verde implica che quei test sono girati
+   davvero e che il contratto è allineato.
+6. **Gli invarianti sono imposti dai test, non dalle review** — `test_auth_convention.py`
+   (ogni endpoint non pubblico è protetto) e `test_tenancy_convention.py` (ogni tabella
+   tenant-owned ha `host_id` NOT NULL + FK, ogni repository di dominio lo richiede in firma),
+   entrambe con allowlist esplicite a loro volta sorvegliate da un test.
+
+**Che cosa questa dichiarazione NON dice:** non dice che l'Epic 1 è privo di rischio, né che
+è pronto per un traffico di produzione. Dice che il lavoro pianificato è completo e che
+nulla di noto è stato lasciato indietro. I rischi noti e non chiusi — che debito **non**
+sono — sono elencati qui sotto.
+
+### 7.7 Rischi tracciati alla chiusura (non sono debito)
+
+Debito zero ≠ rischio zero. Queste voci **non** sono finding aperti: nessuna viola un AC o
+un invariante, nessuna ha un test rosso. Sono condizioni note, accettate consapevolmente,
+con un momento preciso in cui vanno rivalutate. Elencarle è il modo di non farle diventare
+debito per dimenticanza.
+
+| ID | Rischio | Perché non è debito | Quando rivalutarlo |
+| --- | --- | --- | :---: |
+| **RT-1** | **Advisory `npm audit` transitivi.** 14 advisory *high* sul frontend, nessuno diretto: 11 nella toolchain di sviluppo (catena `eslint`/`minimatch`/`brace-expansion`, `@redocly/openapi-core`/`js-yaml`) e **3 nel runtime, tutti transitivi dentro `next` 16.2.11** (`postcss`, `sharp`). | Gli 11 di toolchain non finiscono nel bundle (`npm audit --omit=dev` ne conta 3). I 3 runtime non sono raggiungibili dalla superficie dell'Epic 1: `postcss` agisce a build-time su CSS del progetto, non su input utente; `sharp` serve l'ottimizzazione immagini di `next/image`, e in Epic 1 non esiste upload né sorgente immagine remota controllabile dall'utente. | **Al prossimo bump di `next`.** Nota operativa: `npm audit fix --force` qui propone `next@9.3.3` — un **downgrade major** — e va rifiutato; la risoluzione corretta è aspettare la patch upstream, non "seguire il consiglio del tool". |
+| **RT-2** | **Il freno per origine usa `request.client.host`.** Dietro un reverse proxy tutte le richieste condividono un'unica origine. | Non è un bypass — l'`X-Forwarded-For` *non* è considerato, ed è la scelta sicura in assenza di una lista di proxy fidati. Il limite per account resta pienamente efficace e nessun AC dipende dal limite per origine. L'effetto possibile è un falso positivo collettivo, non un buco. | **Alla prima messa in esercizio dietro proxy/CDN**, insieme alla configurazione dei proxy fidati. |
+| **RT-3** | **Namespace `1001` degli advisory lock.** Il cap Strutture usa `pg_advisory_xact_lock(1001, hashtext(host_id))`. | Oggi è l'unico advisory lock del progetto: nessuna collisione possibile. | **Al secondo advisory lock** introdotto nel codice: va usato un namespace diverso e la convenzione va scritta. |
+| **RT-4** | **Copertura e2e volutamente stretta.** Pochi spec Playwright, scelti sui percorsi critici. | È una scelta di strategia (§2): la flakiness è debito tecnico critico, e la piramide vuole il minimo indispensabile al livello più alto. Gli invarianti stanno ai livelli sotto. | **Quando l'Epic 2 introduce il calendario/sync iCal**, superficie in cui il rischio di regressione è realmente end-to-end. |
+
+Nessuna di queste voci blocca la chiusura dell'Epic 1 né richiede una decisione oggi.
+Sono consegnate all'umano (Fahad) come informazione, non come richiesta.
 
 ---
 
-_Documento vivo: ad ogni Story consegnata la relativa tabella §3 passa da ⛔/⚠️ a ✅ e i gap
-§4 chiusi vengono barrati. Aggiornamenti via PR._
+_Documento chiuso per l'Epic 1 il 2026-07-25 (§7.6). Resta il riferimento di tracciabilità
+per l'Epic: eventuali riaperture vanno fatte via PR, aggiungendo una riga a §7.4 con la
+motivazione — non modificando la dichiarazione. Il modello §3/§4/§7 si replica per l'Epic 2
+in un documento nuovo._
