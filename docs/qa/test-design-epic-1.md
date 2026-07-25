@@ -161,8 +161,9 @@ correzione** ad Amelia (le entità applicative restano di sua competenza); i tes
 li porto io. Priorità indicata.
 
 **Stato:** G-1, G-2, G-4 **chiusi** dal fix-batch FIX-FORWARD (PR #12). **G-3 e C1 chiusi**
-dalla Story 1.4 (PR #14). **F-2 chiuso** dal secondo fix-batch (PR #18). Restano aperti,
-come P2 parcheggiati per decisione umana: **G-5**, **F-1**, **F-3**.
+dalla Story 1.4 (PR #14). **F-2 chiuso** dal secondo fix-batch (PR #18).
+**F-1 e F-3 chiusi** dal terzo fix-batch (PR #21). Resta aperto il solo **G-5** (P2),
+in chiusura con la PR #23.
 
 - **F-2 ✅ CHIUSO (PR #18) — (P1, correttezza AD-9/NFR-4) — Delibera ri-emessa con la stessa
   `valido_dal`.** Due periodi restavano aperti e la risoluzione dipendeva dall'ordine di
@@ -172,7 +173,7 @@ come P2 parcheggiati per decisione umana: **G-5**, **F-1**, **F-3**.
   Vale per Comune e Regione; 3 test nuovi. Verificato retroattivamente (PR mergiata prima del
   verdetto): il caso normale a date distinte non regredisce.
 
-- **F-3 (P2, robustezza) — `compare_digest` solleva `TypeError` su header non-ASCII.** Le
+- **F-3 ✅ CHIUSO (PR #21) — (P2, robustezza) — `compare_digest` solleva `TypeError` su header non-ASCII.** Le
   intestazioni HTTP sono decodificate latin-1: un `X-Admin-Token` con un byte non-ASCII
   produce **500** invece di 403. Nessun leak né bypass. → Confrontare i byte (`.encode()`).
 
@@ -212,7 +213,7 @@ come P2 parcheggiati per decisione umana: **G-5**, **F-1**, **F-3**.
   buildato), baseline **axe serious/critical = 0** su accesso/registrazione/dashboard/strutture,
   flusso registrazione→prima Struttura, su chromium + mobile.
 
-- **F-1 (P2, robustezza) — Il cap "3 attive" non è atomico (TOCTOU).** Emerso dalla review
+- **F-1 ✅ CHIUSO (PR #21) — (P2, robustezza) — Il cap "3 attive" non è atomico (TOCTOU).** Emerso dalla review
   di Story 1.4. `conta_attive(host_id) >= 3` e l'insert non sono atomici né serializzati:
   due `POST /strutture` concorrenti dello stesso Host possono passare entrambi il controllo
   → 4 attive. Stessa classe di G-2, ma impatto minore (cap di prodotto morbido, nessuna
@@ -311,14 +312,14 @@ dell'Epic; non sostituisce i verdetti pre-merge, li ricapitola.
 
 ### 7.4 Debiti aperti alla chiusura dell'Epic (tutti P2, decisione umana)
 
-| ID | Sintesi | Origine |
-| --- | --- | --- |
-| **G-5** | Sessioni scadute mai raccolte; nessun rate-limit sul login | review 1.2 |
-| **F-1** | Cap "3 attive" non atomico (TOCTOU) | review 1.4 |
-| **F-3** | `compare_digest` → 500 su header non-ASCII | review 1.5 |
+| ID | Stato | Sintesi | Origine |
+| --- | :---: | --- | --- |
+| **F-1** | ✅ PR #21 | Cap "3 attive" non atomico (TOCTOU) → advisory lock per Host | review 1.4 |
+| **F-3** | ✅ PR #21 | `compare_digest` → 500 su header non-ASCII → confronto sui byte | review 1.5 |
+| **G-5** | ⏳ PR #23 | Sessioni scadute mai raccolte; nessun freno ai login ripetuti | review 1.2 |
 
 Nessun debito P0/P1 resta aperto: i quattro emersi (G-1, G-2, G-4, F-2) più G-3 e C1 sono
-stati chiusi e verificati entro l'Epic.
+stati chiusi e verificati entro l'Epic. Dei tre P2, due sono chiusi; **G-5 è l'ultimo**.
 
 ---
 
