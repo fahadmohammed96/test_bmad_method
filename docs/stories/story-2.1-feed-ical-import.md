@@ -421,6 +421,87 @@ Aggiunto `P9999999999D`, che a dieci cifre fa saltare `timedelta` per davvero.
 (`ix_job_due`/`ix_outbox_pending` e `regime_lettura.host_id`): le tre
 `remove_table` sono confermate assenti. Murat le ha portate su MYL-44.
 
+### Fix-batch `epic2-batch3` — terzo giro di cross-review (BOCCIA su PR #36)
+
+Un P1, due chiusure da **decidere**, quattro test che passavano per il motivo
+sbagliato, un margine.
+
+**P1 — l'abbandono liberava il worker ma non rilasciava la connessione.** Il
+`httpx.Client` si costruiva **dentro** l'azione abbandonata, quindi il lato che
+abbandona non aveva alcun handle: `cancel_futures` scarta solo le future non
+avviate, e thread, socket e pool restavano nel thread orfano. E il docstring
+affermava il contrario — «il lavoro abbandonato muore da sé perché il timeout
+di lettura è limitato al residuo» — che è **falso** per la stessa ragione
+scritta due paragrafi sopra: i timeout per-operazione si azzerano a ogni byte.
+Lo stesso errore del giro precedente, un livello più in basso. A fermare il
+thread restava solo `MAX_INCOMPLETE_EVENT_SIZE` di httpcore: 100 KiB × il
+timeout di lettura ≈ 284 ore, e su una costante privata.
+
+Tre cose insieme: il client si costruisce in `scarica` (fuori dall'azione), si
+**chiude** sul percorso di scadenza — così la read successiva solleva e il
+thread esce entro un ciclo di lettura — e il thread è **daemon**, perché quelli
+di `ThreadPoolExecutor` non lo sono e un hook atexit li fa `join`: un abbandono
+bloccava l'uscita del processo, quindi un `SIGTERM` al worker restava appeso
+fino al `SIGKILL`.
+
+Il presidio che mancava, e che è la proprietà su cui poggia tutto il giro
+precedente: `test_un_fetch_abbandonato_non_lascia_thread_ne_connessioni` conta i
+superstiti con `threading.enumerate()`, più
+`test_l_azione_abbandonata_gira_in_un_thread_daemon_e_viene_chiusa` che è
+**deterministico** — l'azione blocca su un `Event` del test, quindi il thread è
+vivo con certezza quando si ispezionano `daemon` e chiusura. Tre mutazioni
+verificate: `daemon=False` cade, chiusura non invocata cade, e togliendo
+**entrambe** le chiusure il test di integrazione trova i superstiti.
+
+**Decisione 1 — `not is_global` si tiene, ma il commento diceva il falso.** Il
+test sceglieva tre indirizzi che hanno `is_private=True` e cadono già sul check
+esplicito: cancellando la clausola la suite restava verde. La clausola non ha
+copertura odierna dimostrabile — l'unica classe candidata, la CGNAT, è già
+nella lista esplicita. Vale come **assicurazione in avanti**: quando la IANA
+assegna una nuova destinazione speciale, `is_global` la prende con un
+aggiornamento della stdlib e la lista no. Commento riscritto in quei termini, e
+la clausola pinnata per come è osservabile — una sottoclasse di un indirizzo
+**vero** con `is_global` sovrascritto (uno stub solleverebbe `TypeError` dentro
+`ip_network.__contains__` e il test misurerebbe quello). Cancellare la riga ora
+fa cadere quel test.
+
+**Decisione 2 — la `.trim()` si tiene, e ora è pinnata.** La sanitizzazione sta
+nel **setter** di `value` di jsdom per `input[type="url"]`, quindi sia
+`userEvent` sia `fireEvent.change` la subiscono: su spazi ASCII la `.trim()`
+sarebbe codice morto anche in produzione, perché i browser reali fanno lo
+stesso. Ma il sanitizer non tocca lo spazio **insecabile** (U+00A0) — che è
+esattamente quello che arriva incollando un link da una pagina web — e
+`String.trim()` lo rimuove. Quindi la `.trim()` ha uno scopo reale, e il test
+lo dimostra: togliendola, il test cade con
+`expected ' https://…' to be 'https://…'`.
+
+**I quattro test che passavano per il motivo sbagliato.** La guardia di
+`registro_modelli` confrontava lo scan del filesystem col `Base.metadata` del
+processo corrente, già popolato dagli import di collection: escludere
+`calendario` dalla scoperta restava **verde in suite completa**. Ora la
+scoperta gira in un interprete fresco (`subprocess`) e si confronta ciò che
+riporta quel processo — verificato, la mutazione cade anche in suite completa.
+La sentinella su `env.py` esercitava solo l'helper: estratto `_import_a_mano`
+che prende il **sorgente**, parametrizzato su cinque forme evasive più quattro
+legittime; cancellando il ramo `ast.Import` due casi cadono. Il test dei proxy
+azzera anche `NO_PROXY`/`no_proxy`. La guardia sulle migrazioni ha un pavimento
+sul numero di file: puntata su un percorso rinominato non passa più
+ispezionando zero bersagli.
+
+**Margine.** Il test sui redirect scalato a `ritardo=0.5` / `deadline=1.2`: la
+discriminazione per-hop/totale è identica (ogni ritardo resta metà del budget),
+lo slack passa da ~100 ms a ~700 ms — serviva perché ogni hop costruisce un
+`SSLContext` nuovo.
+
+**Extra descritto in review, incluso perché è la proprietà giusta:** la
+regressione dello userinfo era pinnata su un'uguaglianza di stringa sul metodo
+privato; ora c'è anche il test che asserisce l'`Authorization: Basic`
+effettivamente **ricevuto** dal server.
+
+**Sparito per costruzione:** `except ScadenzaFuturo` non esiste più — con il
+thread grezzo non c'è una `TimeoutError` builtin che possa confondere un
+`socket.timeout` sollevato dentro l'azione con la scadenza complessiva.
+
 ### Change log
 
 - 2026-07-26 — Story creata, implementata test-first e consegnata in PR
@@ -434,3 +515,9 @@ Aggiunto `P9999999999D`, che a dieci cifre fa saltare `timedelta` per davvero.
   declassamento fuso nel calcolo del prossimo hop, due test vacui resi
   mordenti, piu' la lista P2. Rosso visto prima su tutti e tre i
   bloccanti.
+- 2026-07-26 — Terzo giro di cross-review: **BOCCIA**. Fix-batch
+  `epic2-batch3`: il thread abbandonato non rilasciava la connessione
+  (client fuori dall'azione + `close()` + daemon + presidio sui thread),
+  due chiusure risolte decidendo, quattro test resi mordenti, margine
+  del test sui redirect. Voce di sidecar sbagliata **corretta sul
+  posto**.

@@ -167,11 +167,19 @@ def _indirizzo_vietato(indirizzo: IndirizzoIP, politica: PoliticaUscitaRete) -> 
         or indirizzo.is_multicast
         or indirizzo.is_reserved
         or indirizzo.is_unspecified
-        # Chiude la CLASSE invece delle istanze: qualunque indirizzo che la
-        # libreria standard non considera instradabile su Internet è fuori.
-        # Si AGGIUNGE ai controlli espliciti, non li sostituisce — alcuni
-        # indirizzi che vogliamo vietare (multicast, NAT64) risultano
-        # `is_global=True`, quindi da solo non basterebbe.
+        # ASSICURAZIONE IN AVANTI, non copertura di oggi. Misurato: su
+        # 800 000 indirizzi casuali non esiste una classe in cui questa
+        # clausola sia il solo motivo di rifiuto — l'unica candidata, la CGNAT
+        # `100.64.0.0/10`, è già in `RETI_VIETATE_AGGIUNTIVE`. Quindi oggi non
+        # ha contributo dimostrabile, e dire il contrario sarebbe affermare una
+        # copertura che non c'è.
+        #
+        # Si tiene perché il suo valore è nel FUTURO: quando la IANA assegna
+        # una nuova destinazione speciale, `is_global` la prende con un
+        # aggiornamento della stdlib, mentre la lista esplicita qui sopra no.
+        # E si AGGIUNGE ai controlli espliciti, non li sostituisce: multicast,
+        # NAT64 e `fec0::/10` risultano `is_global=True`, quindi da sola questa
+        # riga li lascerebbe passare.
         or not indirizzo.is_global
     )
 

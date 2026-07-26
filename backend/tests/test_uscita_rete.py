@@ -16,9 +16,11 @@ import ipaddress
 import pytest
 
 from app.calendario.uscita_rete import (
+    RETI_VIETATE_AGGIUNTIVE,
     DestinazioneNonAmmessaError,
     PoliticaUscitaRete,
     UrlFeedNonValidoError,
+    _indirizzo_vietato,
     url_redatto,
     valida_destinazione,
     valida_formato,
@@ -183,42 +185,60 @@ class TestDenylistDegliIndirizzi:
         )
 
 
-class TestChiusuraPerClasse:
-    """`not is_global` chiude la CLASSE, i check espliciti restano portanti.
+class _IndirizzoIgnotoAlleListe(ipaddress.IPv4Address):
+    """Indirizzo pubblico per ogni check esplicito, ma non instradabile.
 
-    Le due meta' vanno verificate insieme: senza `fec0::/10` e senza
-    `not is_global` alcuni indirizzi non instradabili passerebbero; e senza i
-    check espliciti alcuni indirizzi che vogliamo vietare passerebbero
-    comunque, perche' `ipaddress` li considera globali.
+    È il futuro simulato: la IANA assegna una nuova destinazione speciale, la
+    stdlib la marca non globale con un aggiornamento, e la nostra lista
+    esplicita non la conosce ancora. Sottoclasse di un indirizzo VERO e non
+    uno stub, perché `ip_network.__contains__` accetta solo indirizzi veri —
+    con un oggetto finto la funzione sotto test solleverebbe `TypeError` e il
+    test misurerebbe quello.
     """
 
-    @pytest.mark.parametrize("indirizzo", ["2001:db8::1", "198.18.0.1", "192.0.2.1"])
-    def test_alcuni_vietati_lo_sono_solo_grazie_a_is_global(
-        self, indirizzo: str
-    ) -> None:
-        # Se questi fossero coperti dai soli check espliciti, `not is_global`
-        # sarebbe ridondante. Non lo e'.
-        import ipaddress as modulo_ip
+    @property
+    def is_global(self) -> bool:
+        return False
 
-        oggetto = modulo_ip.ip_address(indirizzo)
-        assert not oggetto.is_global
-        with pytest.raises(DestinazioneNonAmmessaError):
-            valida_destinazione(
-                valida_formato("http://feed.example.com/f.ics"),
-                POLITICA,
-                _risolutore({"feed.example.com": [indirizzo]}),
-            )
+
+class TestChiusuraPerClasse:
+    """`not is_global` è assicurazione in avanti, e va pinnata come tale.
+
+    La versione precedente di questa classe affermava il falso: sceglieva
+    `2001:db8::1`, `198.18.0.1`, `192.0.2.1` come «vietati solo grazie a
+    `is_global`», ma tutti e tre hanno `is_private=True` e cadono già sul
+    check esplicito che sta sopra. Cancellando la clausola la suite restava
+    verde.
+
+    Oggi la clausola **non ha copertura propria dimostrabile**: su 800 000
+    indirizzi casuali l'unica classe in cui sarebbe il solo motivo di rifiuto
+    è la CGNAT, che è già nella lista esplicita. Si pinna quindi per come è
+    osservabile — un indirizzo che la stdlib considera non instradabile e che
+    nessun altro controllo intercetta.
+    """
+
+    def test_un_indirizzo_non_instradabile_ma_ignoto_alle_liste_e_rifiutato(
+        self,
+    ) -> None:
+        ignoto = _IndirizzoIgnotoAlleListe("93.184.216.34")
+        # Ogni check esplicito lo lascia passare...
+        assert not ignoto.is_private
+        assert not ignoto.is_reserved
+        assert not any(ignoto in rete for rete in RETI_VIETATE_AGGIUNTIVE)
+        # ...ed è `not is_global` a fermarlo. Cancellata quella riga, questo
+        # test cade: è l'unica asserzione che la pinna.
+        assert _indirizzo_vietato(ignoto, POLITICA)
+
+    def test_lo_stesso_indirizzo_instradabile_passa(self) -> None:
+        # L'altra metà: la clausola non deve prendere dentro il legittimo.
+        assert not _indirizzo_vietato(ipaddress.ip_address("93.184.216.34"), POLITICA)
 
     @pytest.mark.parametrize("indirizzo", ["224.0.0.1", "64:ff9b::7f00:1", "fec0::1"])
-    def test_alcuni_vietati_risultano_globali_e_servono_i_check_espliciti(
-        self, indirizzo: str
-    ) -> None:
-        # La ragione per cui `not is_global` si e' AGGIUNTO e non sostituito:
-        # da solo lascerebbe passare questi. `fec0::1` in particolare risulta
-        # globale, quindi senza la voce esplicita `fec0::/10` era AMMESSO.
-        import ipaddress as modulo_ip
-
-        assert modulo_ip.ip_address(indirizzo).is_global
+    def test_i_check_espliciti_restano_portanti(self, indirizzo: str) -> None:
+        # Questi risultano `is_global=True`: senza le voci esplicite
+        # passerebbero nonostante la clausola. È la ragione per cui `is_global`
+        # si è AGGIUNTO e non sostituito.
+        assert ipaddress.ip_address(indirizzo).is_global
         with pytest.raises(DestinazioneNonAmmessaError):
             valida_destinazione(
                 valida_formato("http://feed.example.com/f.ics"),
@@ -227,8 +247,6 @@ class TestChiusuraPerClasse:
             )
 
     def test_un_indirizzo_pubblico_non_viene_sovra_bloccato(self) -> None:
-        # L'altra meta' di un allargamento largo: non deve prendere dentro
-        # anche cio' che e' legittimo.
         for indirizzo in ("93.184.216.34", "1.1.1.1", "2606:2800:220::1"):
             assert valida_destinazione(
                 valida_formato("https://feed.example.com/f.ics"),
