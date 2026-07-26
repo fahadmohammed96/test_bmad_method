@@ -135,16 +135,32 @@ class TestSintassi:
         evento = analizza_feed(corpo).eventi[0]
         assert evento.valore("SUMMARY") == "a" * 66 + "b" * 20
 
-    def test_le_proprieta_sconosciute_si_ignorano(self) -> None:
-        # «Si ignorano» significa: non finiscono fra le proprieta' dell'evento
-        # e non fanno saltare il parse. Contare gli eventi non lo dimostrava.
-        feed = analizza_feed(_fixture("folding-e-confini-testuali.ics"))
-        assert len(feed.eventi) == 2
-        nomi = {
-            proprieta.nome for evento in feed.eventi for proprieta in evento.proprieta
+    def test_le_proprieta_sconosciute_non_disturbano_la_normalizzazione(self) -> None:
+        # «Si ignorano» significa due cose precise, e la prima versione di
+        # questo test non ne asseriva nessuna: la proprieta' stava a livello
+        # VCALENDAR, quindi non poteva comparire fra quelle dei VEVENT
+        # qualunque cosa facesse il parser. Spostata dentro il VEVENT, si
+        # scopre che il parser la RACCOGLIE — e' il normalizzatore a non
+        # guardarla. Ecco le due proprieta' vere:
+        eventi = _eventi_per_uid("folding-e-confini-testuali.ics")
+        vevent = eventi["eeee5555-folding@example.com"]
+
+        # 1. il parser la porta senza inciampare, e non la confonde con altro
+        assert vevent.valore("X-PROPRIETA-SCONOSCIUTA") == (
+            "il parser la ignora senza lamentarsi"
+        )
+        assert {"UID", "DTSTART", "DTEND", "SUMMARY"} <= {
+            proprieta.nome for proprieta in vevent.proprieta
         }
-        assert "X-PROPRIETA-SCONOSCIUTA" not in nomi
-        assert {"UID", "DTSTART", "DTEND"} <= nomi
+
+        # 2. l'evento normalizzato e' identico a quello senza la proprieta'
+        righe = [
+            riga
+            for riga in _fixture("folding-e-confini-testuali.ics").splitlines()
+            if not riga.startswith("X-PROPRIETA-SCONOSCIUTA")
+        ]
+        senza = analizza_feed("\n".join(righe)).eventi[0]
+        assert normalizza(vevent) == normalizza(senza)
 
     def test_un_sommario_vuoto_resta_vuoto_senza_errori(self) -> None:
         eventi = _eventi_per_uid("folding-e-confini-testuali.ics")

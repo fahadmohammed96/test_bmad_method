@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import TracebackType
 
+FINE_RIGA = b"\r\n"
+
 
 @dataclass
 class RispostaPreparata:
@@ -30,6 +32,14 @@ class RispostaPreparata:
     # timeout per-operazione scatta mai: solo una deadline complessiva
     # sull'intero fetch può fermarlo.
     sgocciola_secondi: float | None = None
+    # Sgocciola le INTESTAZIONI, non il corpo: la fase di testa non passa da
+    # `iter_bytes`, quindi non incontra nessun checkpoint applicativo. Solo un
+    # bound che vive sulla SOCKET la può fermare.
+    sgocciola_intestazioni_secondi: float | None = None
+    # Risponde normalmente, ma dopo questa attesa: serve a far consumare a
+    # ogni hop una FRAZIONE del budget complessivo, che e' l'unico modo di
+    # distinguere «budget del fetch» da «budget per hop».
+    ritardo_secondi: float | None = None
 
 
 class ServerFeed:
@@ -63,6 +73,15 @@ class ServerFeed:
             protocol_version = "HTTP/1.1"
 
             def do_GET(self) -> None:  # noqa: N802 (nome imposto da BaseHTTPRequestHandler)
+                try:
+                    self._rispondi()
+                except OSError:
+                    # Il client ha abbandonato la connessione: e' l'esito
+                    # atteso dei test di scadenza. Senza questo `socketserver`
+                    # stampa un traceback che sembra un errore del test.
+                    self.close_connection = True
+
+            def _rispondi(self) -> None:
                 richieste.append((self.command, self.path, dict(self.headers.items())))
                 preparata = risposte.get(self.path)
                 if preparata is None:
@@ -79,6 +98,13 @@ class ServerFeed:
                     # a ogni test che usa questa forma.
                     chiusura.wait(30)
                     return
+                if preparata.ritardo_secondi is not None and chiusura.wait(
+                    preparata.ritardo_secondi
+                ):
+                    return
+                if preparata.sgocciola_intestazioni_secondi is not None:
+                    self._sgocciola_intestazioni(preparata)
+                    return
                 self.send_response(preparata.stato)
                 for chiave, valore in preparata.intestazioni.items():
                     self.send_header(chiave, valore)
@@ -91,17 +117,41 @@ class ServerFeed:
                 self.send_header("Content-Length", str(len(preparata.corpo)))
                 self.end_headers()
                 if preparata.sgocciola_secondi is not None:
-                    pausa = threading.Event()
                     for byte in preparata.corpo:
                         try:
                             self.wfile.write(bytes([byte]))
                             self.wfile.flush()
                         except OSError:
                             return  # il client ha chiuso: e' l'esito atteso
-                        pausa.wait(preparata.sgocciola_secondi)
+                        # `chiusura`, non un Event anonimo: alla fine del test
+                        # l'handler esce subito invece di dormire.
+                        if chiusura.wait(preparata.sgocciola_secondi):
+                            return
                     return
                 if preparata.corpo:
                     self.wfile.write(preparata.corpo)
+
+            def _sgocciola_intestazioni(self, preparata: RispostaPreparata) -> None:
+                """Riga di stato, poi intestazioni un byte alla volta, senza
+                mai chiudere la testa della risposta."""
+                pausa = preparata.sgocciola_intestazioni_secondi or 0.1
+                self.wfile.write(b"HTTP/1.1 200 OK" + FINE_RIGA)
+                self.wfile.flush()
+                indice = 0
+                while not chiusura.is_set():
+                    # Intestazioni sintetiche e infinite: ogni byte arriva
+                    # dentro il timeout di lettura, quindi nessun timeout
+                    # per-operazione scatta mai.
+                    riga = f"X-Riempimento-{indice}: {indice}".encode() + FINE_RIGA
+                    for byte in riga:
+                        try:
+                            self.wfile.write(bytes([byte]))
+                            self.wfile.flush()
+                        except OSError:
+                            return  # il client ha chiuso: e' l'esito atteso
+                        if chiusura.wait(pausa):
+                            return
+                    indice += 1
 
             def log_message(self, formato: str, *argomenti: object) -> None:
                 """Silenzio: l'output del test non è un access log."""

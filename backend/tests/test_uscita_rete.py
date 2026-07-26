@@ -99,6 +99,8 @@ class TestDenylistDegliIndirizzi:
             "224.0.0.1",  # multicast
             "240.0.0.1",  # reserved
             "192.0.0.1",  # IETF protocol assignments
+            "198.18.0.1",  # benchmarking (RFC 2544): non instradabile
+            "192.0.2.1",  # documentazione TEST-NET-1
         ],
     )
     def test_rifiuta_gli_indirizzi_ipv4_vietati(self, indirizzo: str) -> None:
@@ -119,6 +121,10 @@ class TestDenylistDegliIndirizzi:
             "::ffff:169.254.169.254",  # IPv4-mapped verso i metadati
             "64:ff9b::7f00:1",  # NAT64 verso loopback
             "::",  # unspecified
+            "fec0::1",  # site-local deprecato (RFC 3879)
+            "fec0:abcd::1",
+            "2001:db8::1",  # documentazione
+            "100::1",  # discard-only (RFC 6666)
         ],
     )
     def test_rifiuta_gli_indirizzi_ipv6_vietati(self, indirizzo: str) -> None:
@@ -175,6 +181,60 @@ class TestDenylistDegliIndirizzi:
         assert valida_destinazione(
             url, POLITICA, _risolutore({"feed.example.com": ["93.184.216.34"]})
         )
+
+
+class TestChiusuraPerClasse:
+    """`not is_global` chiude la CLASSE, i check espliciti restano portanti.
+
+    Le due meta' vanno verificate insieme: senza `fec0::/10` e senza
+    `not is_global` alcuni indirizzi non instradabili passerebbero; e senza i
+    check espliciti alcuni indirizzi che vogliamo vietare passerebbero
+    comunque, perche' `ipaddress` li considera globali.
+    """
+
+    @pytest.mark.parametrize("indirizzo", ["2001:db8::1", "198.18.0.1", "192.0.2.1"])
+    def test_alcuni_vietati_lo_sono_solo_grazie_a_is_global(
+        self, indirizzo: str
+    ) -> None:
+        # Se questi fossero coperti dai soli check espliciti, `not is_global`
+        # sarebbe ridondante. Non lo e'.
+        import ipaddress as modulo_ip
+
+        oggetto = modulo_ip.ip_address(indirizzo)
+        assert not oggetto.is_global
+        with pytest.raises(DestinazioneNonAmmessaError):
+            valida_destinazione(
+                valida_formato("http://feed.example.com/f.ics"),
+                POLITICA,
+                _risolutore({"feed.example.com": [indirizzo]}),
+            )
+
+    @pytest.mark.parametrize("indirizzo", ["224.0.0.1", "64:ff9b::7f00:1", "fec0::1"])
+    def test_alcuni_vietati_risultano_globali_e_servono_i_check_espliciti(
+        self, indirizzo: str
+    ) -> None:
+        # La ragione per cui `not is_global` si e' AGGIUNTO e non sostituito:
+        # da solo lascerebbe passare questi. `fec0::1` in particolare risulta
+        # globale, quindi senza la voce esplicita `fec0::/10` era AMMESSO.
+        import ipaddress as modulo_ip
+
+        assert modulo_ip.ip_address(indirizzo).is_global
+        with pytest.raises(DestinazioneNonAmmessaError):
+            valida_destinazione(
+                valida_formato("http://feed.example.com/f.ics"),
+                POLITICA,
+                _risolutore({"feed.example.com": [indirizzo]}),
+            )
+
+    def test_un_indirizzo_pubblico_non_viene_sovra_bloccato(self) -> None:
+        # L'altra meta' di un allargamento largo: non deve prendere dentro
+        # anche cio' che e' legittimo.
+        for indirizzo in ("93.184.216.34", "1.1.1.1", "2606:2800:220::1"):
+            assert valida_destinazione(
+                valida_formato("https://feed.example.com/f.ics"),
+                POLITICA,
+                _risolutore({"feed.example.com": [indirizzo]}),
+            ) == (indirizzo,)
 
 
 class TestEsenzioniSorvegliate:

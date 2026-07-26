@@ -9,6 +9,7 @@ misurare il mock (retrospettiva Epic 1 §3.3).
 Nessun dato reale di Ospiti nei fixture (NFR-16).
 """
 
+import gzip
 import ipaddress
 import time
 import uuid
@@ -16,6 +17,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,7 +32,11 @@ from app.calendario.models import (
     StatoPrenotazione,
 )
 from app.calendario.schemas import StatoSincronizzazione
-from app.calendario.trasporto import ClientFeedHttp
+from app.calendario.trasporto import (
+    ClientFeedHttp,
+    EsitoHttpInattesoError,
+    UrlNonRaggiungibileError,
+)
 from app.calendario.uscita_rete import PoliticaUscitaRete, UrlFeedNonValidoError
 from app.core.date_range import utcnow
 from app.core.jobs import Job, JobStatus
@@ -511,6 +517,73 @@ class TestScomparsoDalFeed:
         assert prenotazioni(db_session, feed)[0].stato is StatoPrenotazione.ATTIVA
 
 
+class TestGuardiaDelRepository:
+    """La difesa in profondita' va pinnata, o il prossimo giro la cancella.
+
+    La guardia sul caso vuoto in `marca_rimosse_dal_feed` non era coperta da
+    nessun test: il service cortocircuita prima, quindi cancellarla lasciava
+    la suite verde. Un passaggio di pulizia («ramo irraggiungibile») l'avrebbe
+    tolta in buona fede, e il P0 sarebbe tornato a dipendere da un solo
+    livello.
+    """
+
+    def test_con_uid_presenti_vuoto_non_marca_nulla(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        from app.calendario.repository import PrenotazioneRepository
+
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent("uid-1@example.com", dal="20260810", al="20260812"),
+                    vevent("uid-2@example.com", dal="20260901", al="20260903"),
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+        sincronizza(db_session, feed, client())
+
+        # Chiamata DIRETTA al repository, saltando la decisione del service.
+        rimosse = PrenotazioneRepository(db_session).marca_rimosse_dal_feed(
+            feed.host_id, feed_id=feed.id, uid_presenti=[]
+        )
+        db_session.commit()
+
+        assert rimosse == 0
+        assert {riga.stato for riga in prenotazioni(db_session, feed)} == {
+            StatoPrenotazione.ATTIVA
+        }
+
+    def test_con_un_uid_presente_marca_solo_gli_altri(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # L'altra metà: la guardia non deve inibire il comportamento normale.
+        from app.calendario.repository import PrenotazioneRepository
+
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent("uid-1@example.com", dal="20260810", al="20260812"),
+                    vevent("uid-2@example.com", dal="20260901", al="20260903"),
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+        sincronizza(db_session, feed, client())
+
+        rimosse = PrenotazioneRepository(db_session).marca_rimosse_dal_feed(
+            feed.host_id, feed_id=feed.id, uid_presenti=["uid-1@example.com"]
+        )
+        db_session.commit()
+
+        assert rimosse == 1
+        stati = {riga.ical_uid: riga.stato for riga in prenotazioni(db_session, feed)}
+        assert stati["uid-1@example.com"] is StatoPrenotazione.ATTIVA
+        assert stati["uid-2@example.com"] is StatoPrenotazione.RIMOSSA_DAL_FEED
+
+
 class TestScomparsoNonERicevuto:
     """AC 4 — E2-G3, il rischio peggiore dell'Epic (R2-C).
 
@@ -739,12 +812,26 @@ class TestOgniRunLasciaTraccia:
         ("descrizione", "corpo"),
         [
             (
-                # timedelta esplode su una durata assurda: il regex accetta
-                # cifre illimitate, `timedelta` no.
-                "durata oltre i limiti di timedelta",
+                # NON e' `timedelta` a esplodere: `timedelta.max.days` e'
+                # 999 999 999, quindi 8 cifre ci stanno comodamente. Salta la
+                # SOMMA con la data (`_giorno_locale(inizio) + delta`), perche'
+                # `date.max` e' l'anno 9999.
+                "durata che sfonda date.max nella somma",
                 calendario(
                     "BEGIN:VEVENT\r\nUID:ostile-durata@example.com\r\n"
                     "DTSTART;VALUE=DATE:20260810\r\nDURATION:P99999999D\r\n"
+                    "SUMMARY:Reserved\r\nEND:VEVENT\r\n"
+                ),
+            ),
+            (
+                # Questo si', invece: dieci cifre sfondano `timedelta` prima
+                # di arrivare alla somma. Percorso DIVERSO dai due sopra —
+                # senza questo caso la tesi «la classe e' chiusa» poggiava su
+                # un solo punto di rottura.
+                "durata oltre i limiti di timedelta",
+                calendario(
+                    "BEGIN:VEVENT\r\nUID:ostile-timedelta@example.com\r\n"
+                    "DTSTART;VALUE=DATE:20260810\r\nDURATION:P9999999999D\r\n"
                     "SUMMARY:Reserved\r\nEND:VEVENT\r\n"
                 ),
             ),
@@ -758,7 +845,9 @@ class TestOgniRunLasciaTraccia:
                 ),
             ),
             (
-                "settimane oltre i limiti di timedelta",
+                # Stessa riga, unita' diversa: anche questo e' un overflow di
+                # `date`, non di `timedelta`.
+                "settimane che sfondano date.max nella somma",
                 calendario(
                     "BEGIN:VEVENT\r\nUID:ostile-settimane@example.com\r\n"
                     "DTSTART;VALUE=DATE:20260810\r\nDURATION:P99999999W\r\n"
@@ -1018,31 +1107,139 @@ class TestPoliticaDiUscitaDiRete:
         _, _, intestazioni = server_feed.richieste[0]
         assert intestazioni["Host"] == f"feed.example.com:{porta}"
 
-    def test_un_redirect_da_https_a_http_e_rifiutato(
-        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    @pytest.mark.parametrize(
+        ("origine", "posizione", "ammesso"),
+        [
+            ("https://feed.example.com/c.ics", "http://feed.example.com/c.ics", False),
+            ("https://feed.example.com/c.ics", "/relativo.ics", True),
+            (
+                "https://feed.example.com/c.ics",
+                "https://altro.example.com/c.ics",
+                True,
+            ),
+            # Salire è lecito, scendere no. E `http → http` non è un
+            # declassamento: `http` è ammesso in assoluto.
+            ("http://feed.example.com/c.ics", "https://feed.example.com/c.ics", True),
+            ("http://feed.example.com/c.ics", "http://altro.example.com/c.ics", True),
+        ],
+    )
+    def test_il_calcolo_del_prossimo_hop_vieta_il_declassamento(
+        self, origine: str, posizione: str, ammesso: bool
     ) -> None:
-        # L'URL del Feed porta il segreto in query: un declassamento lo
-        # metterebbe in chiaro sul filo. `http` è ammesso in assoluto, ma non
-        # DOPO `https`.
-        from app.calendario.trasporto import UrlNonRaggiungibileError
+        # Il controllo vive DENTRO il calcolo del prossimo hop, non come riga
+        # adiacente nel ciclo dei redirect: là era una riga cancellabile senza
+        # rompere nulla. Ora il prossimo hop non si calcola senza passare dal
+        # controllo, e cancellare il calcolo fa cadere i test dei redirect
+        # (`una_catena_di_redirect_troppo_lunga`, `un_redirect_lecito`).
+        risposta = httpx.Response(302, headers={"location": posizione})
+        if ammesso:
+            assert ClientFeedHttp._prossimo_hop(origine, risposta)
+        else:
+            with pytest.raises(UrlNonRaggiungibileError):
+                ClientFeedHttp._prossimo_hop(origine, risposta)
 
-        trasporto = ClientFeedHttp(politica())
-        with pytest.raises(UrlNonRaggiungibileError):
-            trasporto._vieta_declassamento(
-                "https://feed.example.com/c.ics", "http://feed.example.com/c.ics"
+    def test_un_redirect_senza_location_e_un_esito_http_inatteso(self) -> None:
+        with pytest.raises(EsitoHttpInattesoError):
+            ClientFeedHttp._prossimo_hop(
+                "https://feed.example.com/c.ics", httpx.Response(302)
             )
-        # Il caso simmetrico è lecito: si può salire, non scendere.
-        trasporto._vieta_declassamento(
-            "http://feed.example.com/c.ics", "https://feed.example.com/c.ics"
-        )
 
-    def test_si_chiede_identity_e_non_si_ereditano_i_proxy_dall_ambiente(
+    @pytest.mark.parametrize(
+        ("url", "atteso_pinnato", "atteso_host"),
+        [
+            (
+                "https://feed.example.com/c.ics",
+                "https://93.184.216.34/c.ics",
+                "feed.example.com",
+            ),
+            (
+                "https://feed.example.com:8443/c.ics?s=x",
+                "https://93.184.216.34:8443/c.ics?s=x",
+                "feed.example.com:8443",
+            ),
+            # REGRESSIONE del batch precedente: sostituire l'intero netloc
+            # cancellava lo userinfo, quindi httpx non derivava piu' il
+            # BasicAuth e un Feed credenziato prendeva 401 ->
+            # ESITO_HTTP_INATTESO. E' una forma che questo codice supporta
+            # esplicitamente (`url_redatto` ha un ramo dedicato).
+            (
+                "https://utente:pw@feed.example.com/c.ics",
+                "https://utente:pw@93.184.216.34/c.ics",
+                "feed.example.com",
+            ),
+            (
+                "https://solo-utente@feed.example.com/c.ics",
+                "https://solo-utente@93.184.216.34/c.ics",
+                "feed.example.com",
+            ),
+        ],
+    )
+    def test_il_pinning_conserva_userinfo_porta_e_query(
+        self, url: str, atteso_pinnato: str, atteso_host: str
+    ) -> None:
+        pinnato, intestazioni, estensioni = ClientFeedHttp._richiesta_pinnata(
+            url, ("93.184.216.34",)
+        )
+        assert pinnato == atteso_pinnato
+        # `Host` senza userinfo: e' l'identita' del server, non una credenziale.
+        assert intestazioni["Host"] == atteso_host
+        assert estensioni["sni_hostname"] == "feed.example.com"
+
+    @pytest.mark.parametrize(
+        ("url", "atteso_pinnato", "atteso_host"),
+        [
+            (
+                "https://[2001:db8::1]/c.ics",
+                "https://[2606:2800:220::1]/c.ics",
+                "[2001:db8::1]",
+            ),
+            (
+                "https://[2001:db8::1]:8443/c.ics",
+                "https://[2606:2800:220::1]:8443/c.ics",
+                "[2001:db8::1]:8443",
+            ),
+        ],
+    )
+    def test_il_pinning_mette_le_quadre_a_un_ipv6_anche_nell_host(
+        self, url: str, atteso_pinnato: str, atteso_host: str
+    ) -> None:
+        # `parti.hostname` restituisce l'IPv6 SENZA parentesi: usarlo tale e
+        # quale produceva `Host: 2001:db8::1`, che RFC 9110 vuole fra quadre,
+        # e con la porta diventava `2001:db8::1:8443` — impossibile da parsare.
+        pinnato, intestazioni, _ = ClientFeedHttp._richiesta_pinnata(
+            url, ("2606:2800:220::1",)
+        )
+        assert pinnato == atteso_pinnato
+        assert intestazioni["Host"] == atteso_host
+
+    def test_i_proxy_dell_ambiente_non_vengono_ereditati(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        server_feed: ServerFeed,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # `trust_env=False` verificato sul COMPORTAMENTO, non per ispezione:
+        # con l'ambiente onorato httpx instraderebbe la richiesta al proxy
+        # (che non esiste) e il fetch fallirebbe. Un proxy nell'ambiente del
+        # worker azzererebbe l'intera denylist, perché il nome lo
+        # risolverebbe il proxy.
+        for variabile in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy"):
+            monkeypatch.setenv(variabile, "http://127.0.0.1:9/")
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(corpo=fixture_ical("airbnb-date-only.ics")),
+        )
+        feed = collega(db_session, contesto, url)
+
+        run = sincronizza(db_session, feed, client())
+
+        assert run.esito is EsitoSyncRun.RIUSCITO
+        assert run.prenotazioni_importate == 2
+
+    def test_si_chiede_di_non_comprimere_la_risposta(
         self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
     ) -> None:
-        # `Accept-Encoding: identity` toglie la decompressione illimitata di
-        # `iter_bytes()`; `trust_env=False` impedisce che un HTTPS_PROXY
-        # nell'ambiente del worker azzeri la denylist facendo risolvere il
-        # nome al proxy.
         url = server_feed.prepara(
             "/calendario.ics",
             RispostaPreparata(corpo=fixture_ical("airbnb-date-only.ics")),
@@ -1052,6 +1249,52 @@ class TestPoliticaDiUscitaDiRete:
 
         _, _, intestazioni = server_feed.richieste[0]
         assert intestazioni["Accept-Encoding"] == "identity"
+
+    def test_una_risposta_compressa_e_rifiutata_anche_se_l_abbiamo_vietata(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # `Accept-Encoding` è una richiesta, non una garanzia: `iter_bytes()`
+        # decodifica in base al `Content-Encoding` della RISPOSTA. Un portale
+        # ostile risponde gzip con un `Content-Length` piccolo che passa il
+        # pre-check, e il corpo si espande di ordini di grandezza prima che il
+        # cap sui byte decodificati se ne accorga.
+        gonfio = gzip.compress(b"A" * 4_000_000)
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(corpo=gonfio, intestazioni={"Content-Encoding": "gzip"}),
+        )
+        feed = collega(db_session, contesto, url)
+
+        run = sincronizza(db_session, feed, client(cap=1_000_000))
+
+        assert run.esito is EsitoSyncRun.FALLITO
+        assert run.categoria_errore is CategoriaErroreSync.RISPOSTA_TROPPO_GRANDE
+        assert prenotazioni(db_session, feed) == []
+
+    def test_un_portale_che_sgocciola_le_INTESTAZIONI_si_ferma_sulla_deadline(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # La fase di TESTA non passa da `iter_bytes`: nessun checkpoint
+        # applicativo la vede. Un byte di intestazione ogni pausa sta dentro il
+        # timeout di lettura (che si azzera a ogni read) e l'unico tetto
+        # aggregato sarebbe `MAX_INCOMPLETE_EVENT_SIZE` di h11, 100 KiB —
+        # cioè 102 400 read, ciascuna dentro il timeout. Un insieme di
+        # controlli non limita il tempo che passa FRA due controlli: serve un
+        # bound che viva sulla socket.
+        url = server_feed.prepara(
+            "/calendario.ics", RispostaPreparata(sgocciola_intestazioni_secondi=0.05)
+        )
+        feed = collega(db_session, contesto, url)
+
+        inizio = time.monotonic()
+        run = sincronizza(db_session, feed, client(lettura=10.0, deadline=0.6))
+        trascorso = time.monotonic() - inizio
+
+        assert run.esito is EsitoSyncRun.FALLITO
+        assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
+        # Sotto il timeout di lettura (10s): se il bound fosse solo
+        # per-operazione, questo test non finirebbe prima di ore.
+        assert trascorso < 3.0
 
     def test_un_portale_che_sgocciola_si_ferma_sulla_deadline_complessiva(
         self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
@@ -1072,40 +1315,69 @@ class TestPoliticaDiUscitaDiRete:
         feed = collega(db_session, contesto, url)
 
         inizio = time.monotonic()
-        run = sincronizza(db_session, feed, client(lettura=5.0, deadline=0.6))
+        # `lettura` MOLTO più alto del margine dell'assert: se coincidessero,
+        # l'unico modo in cui il test può dare il colore sbagliato — fermarsi
+        # sul timeout di lettura invece che sulla deadline, indistinguibili
+        # entrambi come TIMEOUT — cadrebbe esattamente sul confine.
+        run = sincronizza(db_session, feed, client(lettura=10.0, deadline=0.6))
         trascorso = time.monotonic() - inizio
 
         assert run.esito is EsitoSyncRun.FALLITO
         assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
-        # La deadline deve MORDERE, non essere una decorazione: senza di essa
-        # il corpo (oltre 400 byte a 0.12s l'uno) impiegherebbe ~50 secondi.
-        assert trascorso < 5.0
+        # La deadline deve MORDERE: senza di essa il corpo (oltre 400 byte a
+        # 0,12s l'uno) impiegherebbe ~50 secondi, e con il solo timeout di
+        # lettura non si fermerebbe mai.
+        assert trascorso < 3.0
 
     def test_la_deadline_non_si_moltiplica_per_i_redirect(
         self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
     ) -> None:
-        # Il budget è dell'intero fetch: una catena di redirect lenti non deve
-        # poter comprare tempo un hop alla volta.
+        # Ogni hop consuma una FRAZIONE del budget: tre ritardi da 0,25s
+        # contro una scadenza di 0,6s. Con un budget PER HOP passerebbero
+        # tutti e tre (0,25 < 0,6) e il fetch riuscirebbe; con il budget
+        # dell'intero fetch il terzo hop non parte.
+        #
+        # Senza i ritardi il test non discriminava: bastava che l'ultimo hop
+        # sfondasse il proprio budget per restare TIMEOUT anche spostando il
+        # calcolo della scadenza dentro il ciclo.
         server_feed.prepara(
             "/uno.ics",
-            RispostaPreparata(stato=302, intestazioni={"Location": "/due.ics"}),
+            RispostaPreparata(
+                stato=302, intestazioni={"Location": "/due.ics"}, ritardo_secondi=0.25
+            ),
         )
         server_feed.prepara(
             "/due.ics",
             RispostaPreparata(
-                corpo=fixture_ical("airbnb-date-only.ics"), sgocciola_secondi=0.12
+                stato=302, intestazioni={"Location": "/tre.ics"}, ritardo_secondi=0.25
+            ),
+        )
+        server_feed.prepara(
+            "/tre.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent("uid-1@example.com", dal="20260810", al="20260812")
+                ),
+                ritardo_secondi=0.25,
             ),
         )
         feed = collega(db_session, contesto, server_feed.url("/uno.ics"))
 
-        inizio = time.monotonic()
         run = sincronizza(
-            db_session, feed, client(lettura=5.0, deadline=0.6, max_redirect=3)
+            db_session, feed, client(lettura=10.0, deadline=0.6, max_redirect=3)
         )
-        trascorso = time.monotonic() - inizio
 
+        # La proprietà è l'ESITO, non quanti hop sono partiti: il terzo hop
+        # può legittimamente iniziare (0,25 + 0,25 < 0,6) e scadere durante.
+        # Con un budget PER HOP, invece, tutti e tre completerebbero — ogni
+        # ritardo è 0,25 contro 0,6 — e il fetch RIUSCIREBBE. È quella la
+        # differenza che questo test misura.
+        assert run.esito is EsitoSyncRun.FALLITO
         assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
-        assert trascorso < 5.0
+        assert prenotazioni(db_session, feed) == []
+        # E la catena è stata davvero percorsa: non è morta al primo hop per
+        # un motivo diverso dal budget.
+        assert len(server_feed.richieste) >= 2
 
     def test_la_deadline_arriva_dalla_configurazione(self) -> None:
         from app.core.config import Settings
@@ -1143,6 +1415,11 @@ class TestPoliticaDiUscitaDiRete:
         for record in con_url:
             assert "segretissima" not in record.url
             assert record.url == "https://***@feed.example.com/calendario.ics"
+        # Le sedi sono DUE (trasporto e service): pretenderle entrambe, o
+        # cancellarne una lascerebbe il test verde con metà presidio.
+        moduli = {record.name for record in con_url}
+        assert any("trasporto" in nome for nome in moduli), moduli
+        assert any("service" in nome for nome in moduli), moduli
 
 
 class TestJobDurevole:

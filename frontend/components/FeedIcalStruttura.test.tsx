@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -222,6 +222,41 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     expect(campo).toHaveValue("https://feed.example.com/c.ics");
     act(() => opzioni.onSuccess());
     expect(campo).toHaveValue("");
+  });
+
+  it("mentre carica non dice né che ci sono né che non ci sono calendari", () => {
+    // Lo stato `isPending` era scoperto: è il terzo caso, e come gli altri due
+    // non deve affermare nulla sullo stato del calendario.
+    feedMock.mockReturnValue({ isPending: true, isError: false, data: undefined });
+    collegaMock.mockReturnValue(COLLEGA_INERTE);
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Caricamento…");
+    expect(
+      screen.queryByText("Nessun calendario collegato a questa Struttura."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Non riusciamo a caricare i calendari/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("l'URL si invia ripulito degli spazi anche quando l'input non li tocca", () => {
+    // `input type="url"` in jsdom applica la sanitizzazione RFC e restituisce
+    // il valore già senza spazi ai bordi: il test che digitava spazi non
+    // pinnava il `trim()`, lo diceva da sé asserendo `toHaveValue` senza
+    // spazi. Qui il valore arriva dallo stato, non dalla digitazione.
+    const mutate = vi.fn();
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
+    collegaMock.mockReturnValue({ ...COLLEGA_INERTE, mutate });
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    const campo = screen.getByLabelText("Indirizzo del calendario (iCal)");
+    fireEvent.change(campo, {
+      target: { value: "  https://feed.example.com/c.ics  " },
+    });
+    fireEvent.submit(campo.closest("form")!);
+
+    expect(mutate.mock.calls[0][0].url).toBe("https://feed.example.com/c.ics");
   });
 
   it("disabilita il bottone mentre il collegamento è in volo", () => {

@@ -26,9 +26,11 @@ from app.core.db import Base
 # infrastruttura (importate esplicitamente qui sotto), il secondo non ne ha.
 MODULI_NON_DI_DOMINIO = frozenset({"core", "api"})
 
-# Tabelle di infrastruttura del kernel: non stanno in un modulo di dominio,
-# ma fanno parte del modello.
-MODULI_INFRASTRUTTURALI = ("app.core.jobs", "app.core.outbox")
+# `core` dichiara tabelle di infrastruttura (outbox, job) fuori dai moduli di
+# dominio. Anche qui si SCOPRONO: un elenco a mano avrebbe lasciato intatto,
+# per `app/core/`, esattamente il difetto che questo modulo esiste per
+# chiudere — e la guardia lo escludeva dal proprio scopo.
+PACCHETTO_INFRASTRUTTURALE = "core"
 
 
 def moduli_di_dominio() -> list[str]:
@@ -40,10 +42,20 @@ def moduli_di_dominio() -> list[str]:
     )
 
 
+def moduli_infrastrutturali() -> list[str]:
+    """Moduli di `app/core/`, scoperti: possono dichiarare tabelle."""
+    pacchetto = importlib.import_module(f"app.{PACCHETTO_INFRASTRUTTURALE}")
+    return sorted(
+        f"app.{PACCHETTO_INFRASTRUTTURALE}.{info.name}"
+        for info in pkgutil.iter_modules(pacchetto.__path__)
+        if not info.ispkg
+    )
+
+
 def importa_tutti_i_modelli() -> type[Base]:
     """Importa ogni modulo che dichiara tabelle e ritorna la Base popolata."""
-    for nome in MODULI_INFRASTRUTTURALI:
-        importlib.import_module(nome)
+    for nome in moduli_infrastrutturali():
+        _importa_se_esiste(nome)
     for modulo in moduli_di_dominio():
         _importa_se_esiste(f"app.{modulo}.models")
     return Base
