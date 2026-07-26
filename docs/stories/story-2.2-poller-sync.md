@@ -39,8 +39,8 @@ Riferimento di copertura: `docs/qa/test-design-epic-2.md` §3, Story 2.2
 | 6 | Un fallimento temporaneo lascia **intatti** i dati già importati | I | ✅ | `TestUnFallimentoNonErodeIDati` — quattro giri falliti di fila su tre forme di guasto, poi ripresa senza perdite |
 | 7 | Il fallimento produce un **errore visibile sulla Struttura** | I + Cmp | ✅ | `categoria_errore` + `fallimenti_consecutivi` in `FeedIcalOutput`; `test_calendario_api.py` e `FeedIcalStruttura.test.tsx` (3 test nuovi: quando, quante volte, e la distinzione fra intoppo e guasto) |
 | 8 | **Alert interno dopo N fallimenti consecutivi**, N configurabile | I | ⚠️ implementato, AC **non chiudibile** (§4.2-9) | `service._valuta_alert_fallimenti`: log strutturato all'attraversamento della soglia. `TestFallimentiConsecutiviEAlert` (7 test). Vedi «Voci di §4.2» |
-| 9 | Ogni superficie con dati da Feed espone l'**ultimo sync riuscito**; su un run fallito non avanza | I + **S** (GS-7) + E | ✅ I e S · ❌ E non implementabile | `PrenotazioniDelFeedOutput` (envelope nuovo) + `tests/test_superfici_feed_convention.py` (GS-7, 7 test). Il livello **E** richiede due superfici che oggi non esistono: vedi «Scelte di progetto» |
-| 10 | Intervallo **adattivo** fino a 5' in prossimità di un check-in | U | ⚠️ implementato, AC **non chiudibile** (§4.2-8) | `calendario/intervallo.py`, funzione pura; `tests/test_intervallo_sync.py` (14 test, confini e cambio d'ora inclusi) |
+| 9 | Ogni superficie con dati da Feed espone l'**ultimo sync riuscito**; su un run fallito non avanza | I + **S** (GS-7) + E | ✅ I e S · ❌ E non implementabile | `PrenotazioniDelFeedOutput` (envelope nuovo) + `tests/test_superfici_feed_convention.py` (GS-7, 8 test) — che copre le superfici aggiunte DENTRO `calendario`; il residuo di E2-G8 (altri moduli) resta alla 2.3. Il livello **E** richiede due superfici che oggi non esistono: vedi «Scelte di progetto» |
+| 10 | Intervallo **adattivo** fino a 5' in prossimità di un check-in | U | ⚠️ implementato, AC **non chiudibile** (§4.2-8) | `calendario/intervallo.py`, funzione pura; `tests/test_intervallo_sync.py` (14 test, confini e cambio d'ora inclusi) più `TestIntervalloDelPollerSulDatabASE` (9 test) sulla COMPOSIZIONE con la lettura di stato |
 | 11 | † Un Feed **mai** sincronizzato espone uno stato esplicito, mai un orario inventato | I + Cmp | ✅ | `TestVeritaTemporaleSottoIlPoller`, `test_le_prenotazioni_di_un_feed_MAI_sincronizzato_dicono_non_so`, e il ramo `maiAggiornato` di `FeedIcalStruttura` (il trattino `—` è stato tolto) |
 | 12 | † Backoff e `max_attempts`: un Feed rotto **non blocca** gli altri; l'esaurimento è visibile | I | ✅ | `TestUnFeedRottoNonBloccaGliAltri` (2 test): quattro giri con due Feed in coda, e l'esaurimento che lascia `failed` + `last_error` |
 
@@ -49,8 +49,8 @@ Riferimento di copertura: `docs/qa/test-design-epic-2.md` §3, Story 2.2
 | # | Esito | Dove |
 | --- | :---: | --- |
 | **MYL-44** — `alembic check` in CI | ✅ | Passo `Schema allineato ai modelli` nel job `backend`. **Ha richiesto di chiudere prima la deriva preesistente** (5 voci): vedi «Scelte di progetto» |
-| **MYL-49** — guardia sulla base della PR | ✅ | Job `base-della-pr`; A2 applicata (nessun `${{ }}` di input non fidato dentro `run:`, nessun checkout, nessun permesso in più) |
-| **RT-3** — namespace degli advisory lock | ✅ chiuso | `app/core/lock.py` + `tests/test_lock_convention.py` (8 test) |
+| **MYL-49** — guardia sulla base della PR | ✅ | Workflow `.github/workflows/base-della-pr.yml`, con `types: [..., edited]` perché il cambio di base emette `edited`; A2 applicata (nessun `${{ }}` di input non fidato dentro `run:`, nessun checkout, `permissions: {}`). Resta a Fahad la ruleset che lo rende bloccante su target `**` |
+| **RT-3** — namespace degli advisory lock | ✅ chiuso | `app/core/lock.py` + `tests/test_lock_convention.py` (15 test, tre sentinelle) |
 
 ## Scelte di progetto da segnalare in review
 
@@ -94,11 +94,30 @@ Riferimento di copertura: `docs/qa/test-design-epic-2.md` §3, Story 2.2
   e nessuna che dica quale vale. La rotta oggi non è consumata da alcun hook o
   componente, quindi il costo del cambio è zero e non tornerà a zero più tardi.
 
-- **GS-7 l'ho implementata qui, non nella 2.3.** §2.6 la assegna alla 2.3 e
-  §3 la mette fra i livelli dell'AC 9 di **questa** Story: ho seguito la
-  tabella degli AC, che è il contratto di copertura. Se preferisci il
-  contrario, la guardia è un file solo e si sposta; ma anticiparla costa poco e
-  significa che la griglia del calendario nasce già dentro il cancello.
+- **GS-7 è anticipata qui, ma copre METÀ di E2-G8, e le due cose vanno tenute
+  distinte.** §2.6, §4.1 (E2-G8) e il criterio di gate 3 assegnano la guardia
+  alla 2.3; solo la colonna dei livelli di §3 la mette qui. Anticiparla non
+  viola niente — il criterio 3 chiede un superset — e ho seguito la tabella
+  degli AC.
+
+  Ma il perimetro consegnato è più stretto di E2-G8, e la prima stesura di
+  questo documento non lo diceva: elencava E2-G8 fra gli aperti mentre ne
+  consegnava il rimedio, che è una posizione che non regge in nessuna delle
+  due letture (rilievo di Murat sulla PR #40).
+
+  **Cosa copre `tests/test_superfici_feed_convention.py`:** ogni schema di
+  risposta aggiunto a `app/calendario/schemas.py` va classificato come
+  superficie da Feed o come esente, e se è una superficie deve esporre
+  `ultimo_sync_riuscito_il` e `stato_sync`. Presidia la 2.3, la 2.4 e la 2.5,
+  che scrivono dentro `calendario`.
+
+  **Cosa NON copre, e resta E2-G8 aperto:** la superficie scritta in un
+  **altro modulo** — «la quarta superficie, scritta nell'Epic 3 o 5 da
+  qualcuno che non ha letto questo documento». La guardia cammina un modulo
+  solo e non la vedrebbe. Estenderla a tutti i moduli richiede di sapere quali
+  schemi altrove mostrano dati derivati da Feed, e oggi non ne esiste nessuno:
+  la si scriverebbe contro un insieme vuoto, cioè senza poterla vedere mordere.
+  **E2-G8 resta assegnato alla 2.3** con questo perimetro residuo dichiarato.
 
 - **Il livello E dell'AC 9 non è implementabile in questa Story, e non l'ho
   finto.** Il test design lo motiva con «due superfici che non divergono dopo
@@ -203,7 +222,7 @@ Sono decisioni di prodotto: non le decido io (criterio di gate 11).
 **Aperti e fuori dal perimetro:** E2-G6 (equità della coda, P2 — l'ho
 guardato: `TestUnFeedRottoNonBloccaGliAltri` mostra che un Feed rotto non
 blocca la coda, ma **non** misura l'equità fra tenant con K job di sync in
-coda; resta aperto e resta P2), GS-3 (2.6), GS-4 (2.7), E2-G8.
+coda; resta aperto e resta P2), GS-3 (2.6), GS-4 (2.7), e il **residuo** di E2-G8 — le superfici da Feed scritte fuori da `calendario`, che la guardia consegnata qui non vede (perimetro dichiarato in «Scelte di progetto»).
 
 ## Dev Agent Record
 
