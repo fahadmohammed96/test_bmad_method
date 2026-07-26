@@ -240,11 +240,21 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("l'URL si invia ripulito degli spazi anche quando l'input non li tocca", () => {
-    // `input type="url"` in jsdom applica la sanitizzazione RFC e restituisce
-    // il valore già senza spazi ai bordi: il test che digitava spazi non
-    // pinnava il `trim()`, lo diceva da sé asserendo `toHaveValue` senza
-    // spazi. Qui il valore arriva dallo stato, non dalla digitazione.
+  it("ripulisce dall'URL gli spazi che il sanitizer del browser NON tocca", () => {
+    // DECISIONE: la `.trim()` si TIENE, e ora e' pinnata per davvero.
+    //
+    // I due tentativi precedenti non pinnavano nulla, e la ragione e'
+    // istruttiva: la sanitizzazione non sta nel layer di battitura ma nel
+    // SETTER di `value` di jsdom per `input[type="url"]`, e sia `userEvent`
+    // sia `fireEvent.change` scrivono attraverso quel setter. Quindi lo stato
+    // non conteneva mai gli spazi ASCII e togliere la `.trim()` lasciava il
+    // test verde. I browser reali sanitizzano allo stesso modo, quindi su
+    // spazi ASCII la `.trim()` sarebbe stata codice morto.
+    //
+    // Ma il sanitizer togli solo lo spazio bianco ASCII: uno spazio
+    // insecabile (U+00A0) sopravvive — ed e' esattamente quello che arriva
+    // incollando un link da una pagina web. `String.trim()` lo rimuove.
+    // Quindi la `.trim()` ha uno scopo reale, e questo test lo dimostra.
     const mutate = vi.fn();
     feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
     collegaMock.mockReturnValue({ ...COLLEGA_INERTE, mutate });
@@ -252,8 +262,11 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
 
     const campo = screen.getByLabelText("Indirizzo del calendario (iCal)");
     fireEvent.change(campo, {
-      target: { value: "  https://feed.example.com/c.ics  " },
+      target: { value: " https://feed.example.com/c.ics " },
     });
+    // Il sanitizer NON li ha toccati: sono ancora nel valore del campo.
+    expect(campo).toHaveValue(" https://feed.example.com/c.ics ");
+
     fireEvent.submit(campo.closest("form")!);
 
     expect(mutate.mock.calls[0][0].url).toBe("https://feed.example.com/c.ics");

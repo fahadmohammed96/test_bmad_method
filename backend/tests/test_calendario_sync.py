@@ -11,6 +11,7 @@ Nessun dato reale di Ospiti nei fixture (NFR-16).
 
 import gzip
 import ipaddress
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -33,8 +34,10 @@ from app.calendario.models import (
 )
 from app.calendario.schemas import StatoSincronizzazione
 from app.calendario.trasporto import (
+    NOME_THREAD_FETCH,
     ClientFeedHttp,
     EsitoHttpInattesoError,
+    TimeoutFeedError,
     UrlNonRaggiungibileError,
 )
 from app.calendario.uscita_rete import PoliticaUscitaRete, UrlFeedNonValidoError
@@ -141,6 +144,15 @@ def sincronizza(db: Session, feed: FeedIcal, trasporto: ClientFeedHttp):
 
 def prenotazioni(db: Session, feed: FeedIcal) -> list[Prenotazione]:
     return service.prenotazioni_del_feed(db, feed.host_id, feed.id)
+
+
+def _thread_di_fetch() -> list[threading.Thread]:
+    """Thread del trasporto ancora vivi: il presidio sulle perdite."""
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith(NOME_THREAD_FETCH)
+    ]
 
 
 class TestCollegamentoDelFeed:
@@ -1212,6 +1224,34 @@ class TestPoliticaDiUscitaDiRete:
         assert pinnato == atteso_pinnato
         assert intestazioni["Host"] == atteso_host
 
+    def test_un_feed_credenziato_manda_davvero_il_basic_auth(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # La regressione dello userinfo era pinnata su un'uguaglianza di
+        # stringa sul metodo privato. Questa è la PROPRIETÀ che la rendeva una
+        # regressione: httpx deriva il BasicAuth dallo userinfo dell'URL, e se
+        # il pinning lo cancella il portale risponde 401.
+        import base64
+
+        porta = int(server_feed.url("/x").rsplit(":", 1)[1].split("/")[0])
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(corpo=fixture_ical("airbnb-date-only.ics")),
+        )
+        feed = collega(
+            db_session,
+            contesto,
+            f"http://utente:segreta@feed.example.com:{porta}/calendario.ics",
+        )
+        trasporto = ClientFeedHttp(politica(), risolutore=lambda host: ["127.0.0.1"])
+
+        run = sincronizza(db_session, feed, trasporto)
+
+        assert run.esito is EsitoSyncRun.RIUSCITO
+        _, _, intestazioni = server_feed.richieste[0]
+        atteso = base64.b64encode(b"utente:segreta").decode()
+        assert intestazioni["Authorization"] == f"Basic {atteso}"
+
     def test_i_proxy_dell_ambiente_non_vengono_ereditati(
         self,
         db_session: Session,
@@ -1226,6 +1266,12 @@ class TestPoliticaDiUscitaDiRete:
         # risolverebbe il proxy.
         for variabile in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy"):
             monkeypatch.setenv(variabile, "http://127.0.0.1:9/")
+        # E si AZZERANO le esclusioni: con `no_proxy=*` o
+        # `NO_PROXY=localhost,127.0.0.1` — comuni nelle immagini CI e sulle
+        # macchine aziendali — httpx ripristina il transport diretto per il
+        # loopback, e il mutante senza `trust_env=False` sopravvive.
+        for esclusione in ("NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(esclusione, raising=False)
         url = server_feed.prepara(
             "/calendario.ics",
             RispostaPreparata(corpo=fixture_ical("airbnb-date-only.ics")),
@@ -1270,6 +1316,79 @@ class TestPoliticaDiUscitaDiRete:
         assert run.esito is EsitoSyncRun.FALLITO
         assert run.categoria_errore is CategoriaErroreSync.RISPOSTA_TROPPO_GRANDE
         assert prenotazioni(db_session, feed) == []
+
+    def test_l_azione_abbandonata_gira_in_un_thread_daemon_e_viene_chiusa(
+        self,
+    ) -> None:
+        """Presidio DETERMINISTICO sul meccanismo di abbandono.
+
+        Il test di integrazione qui sotto verifica l'invariante end-to-end (a
+        fetch concluso non restano thread), ma non può garantire che il thread
+        sia ancora vivo nell'istante in cui lo si ispeziona: la chiusura è
+        veloce e l'asserzione sul `daemon` diventerebbe vacua per una corsa.
+        Qui l'azione blocca su un `Event` che il test controlla, quindi il
+        thread è vivo con certezza quando si guardano le due proprietà.
+        """
+        trasporto = ClientFeedHttp(politica())
+        blocco = threading.Event()
+        chiusure: list[str] = []
+        try:
+            with pytest.raises(TimeoutFeedError):
+                trasporto._entro_la_scadenza(
+                    lambda: blocco.wait(30),
+                    time.monotonic() + 0.2,
+                    chiudi=lambda: chiusure.append("chiuso"),
+                )
+
+            superstiti = _thread_di_fetch()
+            assert superstiti, "il thread deve essere ancora vivo: è il caso da coprire"
+            # DAEMON: un thread non-daemon abbandonato blocca l'uscita
+            # dell'interprete, quindi un SIGTERM al worker resta appeso fino
+            # al SIGKILL — che ammazza il job in volo.
+            for superstite in superstiti:
+                assert superstite.daemon, f"{superstite.name} non è daemon"
+            # E la chiusura è invocata sul percorso di abbandono: è ciò che
+            # sgancia la connessione e fa uscire il thread.
+            assert chiusure == ["chiuso"]
+        finally:
+            blocco.set()
+        for superstite in superstiti:
+            superstite.join(5)
+        assert _thread_di_fetch() == []
+
+    def test_un_fetch_abbandonato_non_lascia_thread_ne_connessioni(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # È la proprietà su cui poggia tutto il meccanismo di scadenza, e non
+        # aveva presidio: i due test di drip asseriscono che il WORKER è
+        # libero, e restano verdi con thread e socket persi per giorni.
+        #
+        # Perché conta: `collega_feed` accoda un sync a ogni POST, senza tetto
+        # sul numero di Feed per Host. N feed ostili = N thread + N fd, e col
+        # poller della 2.2 diventa una perdita per ciclo di polling — a 15
+        # minuti di cadenza un solo feed sostiene ~1100 thread in stato
+        # stazionario.
+        url = server_feed.prepara(
+            "/calendario.ics", RispostaPreparata(sgocciola_intestazioni_secondi=0.05)
+        )
+        feed = collega(db_session, contesto, url)
+
+        run = sincronizza(db_session, feed, client(lettura=10.0, deadline=0.4))
+        assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
+
+        # Il thread abbandonato deve uscire da solo e in fretta: il client
+        # viene chiuso, quindi la read successiva solleva. Senza chiusura
+        # resterebbe fino a `MAX_INCOMPLETE_EVENT_SIZE` di httpcore (100 KiB ×
+        # il timeout di lettura ≈ 284 ore) — e su una costante privata, non un
+        # contratto. `daemon` e invocazione della chiusura sono verificati in
+        # modo deterministico dal test qui sopra.
+        scadenza = time.monotonic() + 5.0
+        while time.monotonic() < scadenza and _thread_di_fetch():
+            time.sleep(0.05)
+        assert _thread_di_fetch() == [], (
+            "thread di fetch superstiti dopo l'abbandono: la connessione non "
+            "è stata rilasciata"
+        )
 
     def test_un_portale_che_sgocciola_le_INTESTAZIONI_si_ferma_sulla_deadline(
         self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
@@ -1332,10 +1451,10 @@ class TestPoliticaDiUscitaDiRete:
     def test_la_deadline_non_si_moltiplica_per_i_redirect(
         self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
     ) -> None:
-        # Ogni hop consuma una FRAZIONE del budget: tre ritardi da 0,25s
-        # contro una scadenza di 0,6s. Con un budget PER HOP passerebbero
-        # tutti e tre (0,25 < 0,6) e il fetch riuscirebbe; con il budget
-        # dell'intero fetch il terzo hop non parte.
+        # Ogni hop consuma una FRAZIONE del budget: tre ritardi da 0,5s
+        # contro una scadenza di 1,2s. Con un budget PER HOP passerebbero
+        # tutti e tre (0,5 < 1,2) e il fetch RIUSCIREBBE; con il budget
+        # dell'intero fetch no.
         #
         # Senza i ritardi il test non discriminava: bastava che l'ultimo hop
         # sfondasse il proprio budget per restare TIMEOUT anche spostando il
@@ -1343,13 +1462,13 @@ class TestPoliticaDiUscitaDiRete:
         server_feed.prepara(
             "/uno.ics",
             RispostaPreparata(
-                stato=302, intestazioni={"Location": "/due.ics"}, ritardo_secondi=0.25
+                stato=302, intestazioni={"Location": "/due.ics"}, ritardo_secondi=0.5
             ),
         )
         server_feed.prepara(
             "/due.ics",
             RispostaPreparata(
-                stato=302, intestazioni={"Location": "/tre.ics"}, ritardo_secondi=0.25
+                stato=302, intestazioni={"Location": "/tre.ics"}, ritardo_secondi=0.5
             ),
         )
         server_feed.prepara(
@@ -1358,19 +1477,24 @@ class TestPoliticaDiUscitaDiRete:
                 corpo=calendario(
                     vevent("uid-1@example.com", dal="20260810", al="20260812")
                 ),
-                ritardo_secondi=0.25,
+                ritardo_secondi=0.5,
             ),
         )
         feed = collega(db_session, contesto, server_feed.url("/uno.ics"))
 
+        # Scala doppia rispetto al primo tentativo: la discriminazione
+        # per-hop/totale è identica (ogni ritardo è metà del budget), ma lo
+        # slack passa da ~100ms a ~700ms. Serve perché ogni hop costruisce ora
+        # un `SSLContext` nuovo (~37ms) e su un runner carico il fetch poteva
+        # morire prima che il secondo hop partisse.
         run = sincronizza(
-            db_session, feed, client(lettura=10.0, deadline=0.6, max_redirect=3)
+            db_session, feed, client(lettura=10.0, deadline=1.2, max_redirect=3)
         )
 
         # La proprietà è l'ESITO, non quanti hop sono partiti: il terzo hop
-        # può legittimamente iniziare (0,25 + 0,25 < 0,6) e scadere durante.
+        # può legittimamente iniziare (0,5 + 0,5 < 1,2) e scadere durante.
         # Con un budget PER HOP, invece, tutti e tre completerebbero — ogni
-        # ritardo è 0,25 contro 0,6 — e il fetch RIUSCIREBBE. È quella la
+        # ritardo è 0,5 contro 1,2 — e il fetch RIUSCIREBBE. È quella la
         # differenza che questo test misura.
         assert run.esito is EsitoSyncRun.FALLITO
         assert run.categoria_errore is CategoriaErroreSync.TIMEOUT

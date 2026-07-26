@@ -168,6 +168,18 @@ def _migrazioni_sospette(cartella: pathlib.Path) -> list[str]:
     return sospette
 
 
+def test_la_cartella_delle_migrazioni_non_e_vuota() -> None:
+    # Senza questo, puntare la guardia su un percorso rinominato la fa passare
+    # ispezionando ZERO bersagli. È la stessa classe chiusa per tenancy e per
+    # `registro_modelli`: una guardia che non trova nulla da controllare deve
+    # fallire, non tacere.
+    migrazioni = sorted((BACKEND / "alembic" / "versions").glob("*.py"))
+    assert len(migrazioni) >= 8, (
+        f"solo {len(migrazioni)} migrazioni trovate: la guardia sta guardando "
+        "nel posto sbagliato"
+    )
+
+
 def test_nessuna_migrazione_cancella_una_tabella_protetta() -> None:
     # Le migrazioni sono forward-only (AR-11) e le modifiche distruttive sono
     # vietate salvo AD-20: un `drop_table` o un `DELETE FROM` su una tabella

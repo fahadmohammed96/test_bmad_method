@@ -38,10 +38,9 @@ Le proprietà che vivono qui e da nessun'altra parte (NFR-17):
 """
 
 import logging
+import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as ScadenzaFuturo
 from dataclasses import dataclass
 from functools import partial
 from typing import Protocol, TypeVar
@@ -71,6 +70,11 @@ STATI_DI_REDIRECT = frozenset({301, 302, 303, 307, 308})
 CODIFICHE_AMMESSE = frozenset({"", "identity"})
 
 T = TypeVar("T")
+
+# Prefisso dei thread del trasporto: e' cio' su cui il presidio contro le
+# perdite conta i superstiti
+# (`test_un_fetch_abbandonato_non_lascia_thread_ne_connessioni`).
+NOME_THREAD_FETCH = "fetch-feed"
 
 
 class ErroreDiTrasporto(Exception):
@@ -134,20 +138,29 @@ class ClientFeedHttp:
         # Scadenza monotona calcolata UNA volta: il budget è dell'intero
         # fetch, quindi una catena di redirect non lo moltiplica.
         scadenza = time.monotonic() + self._politica.deadline_totale_secondi
-        for _ in range(self._politica.max_redirect + 1):
-            vetted = self._valida(corrente, scadenza)
-            esito = self._entro_la_scadenza(
-                # `partial` e non una lambda: la lambda catturerebbe le
-                # variabili del ciclo per riferimento (B023).
-                partial(self._un_hop, corrente, vetted, scadenza),
-                scadenza,
+        # Il client si costruisce QUI, fuori dall'azione che verrà abbandonata:
+        # è l'unico modo di avere un handle per chiuderlo. Costruito dentro,
+        # una scadenza lascerebbe indietro thread, socket e pool senza che il
+        # lato che abbandona possa farci niente.
+        client = self._nuovo_client(scadenza)
+        try:
+            for _ in range(self._politica.max_redirect + 1):
+                vetted = self._valida(corrente, scadenza)
+                esito = self._entro_la_scadenza(
+                    # `partial` e non una lambda: la lambda catturerebbe le
+                    # variabili del ciclo per riferimento (B023).
+                    partial(self._un_hop, client, corrente, vetted, scadenza),
+                    scadenza,
+                    chiudi=client.close,
+                )
+                if isinstance(esito, RispostaFeed):
+                    return esito
+                corrente = esito
+            raise UrlNonRaggiungibileError(
+                f"troppi redirect (>{self._politica.max_redirect})"
             )
-            if isinstance(esito, RispostaFeed):
-                return esito
-            corrente = esito
-        raise UrlNonRaggiungibileError(
-            f"troppi redirect (>{self._politica.max_redirect})"
-        )
+        finally:
+            client.close()
 
     # ------------------------------------------------------------------ tempo
 
@@ -157,7 +170,13 @@ class ClientFeedHttp:
             raise TimeoutFeedError("superata la scadenza complessiva del fetch")
         return residuo
 
-    def _entro_la_scadenza(self, azione: Callable[[], T], scadenza: float) -> T:
+    def _entro_la_scadenza(
+        self,
+        azione: Callable[[], T],
+        scadenza: float,
+        *,
+        chiudi: Callable[[], None] | None = None,
+    ) -> T:
         """Esegue `azione` e la ABBANDONA alla scadenza.
 
         È qui che il bound diventa reale. Nessun timeout di httpx limita il
@@ -167,24 +186,47 @@ class ClientFeedHttp:
         kilobyte senza emettere un solo evento di dato) hanno un tetto.
 
         L'attesa la si limita dove si può limitare davvero: su ciò che
-        attende. Alla scadenza questo metodo solleva e il worker riparte; il
-        lavoro abbandonato muore da sé, perché il timeout di lettura passato
-        all'hop è a sua volta limitato al residuo.
+        attende. Alla scadenza questo metodo solleva e il worker riparte.
+
+        **E il lavoro abbandonato non muore da sé.** I timeout per-operazione
+        non lo fermano — è la stessa ragione di due paragrafi sopra, e
+        crederlo era l'errore di questo modulo: `read=min(config, residuo)` è
+        un tetto per singola read, e contro chi sgocciola non scatta mai. A
+        fermarlo resterebbe solo `MAX_INCOMPLETE_EVENT_SIZE` di httpcore,
+        100 KiB, cioè ~102 400 read da un timeout ciascuna: centinaia di ore,
+        e su una costante privata che non è un contratto.
+
+        Quindi lo si chiude: `chiudi` sgancia la connessione e la read
+        successiva solleva, così il thread esce entro un ciclo di lettura. E il
+        thread è **daemon**: un abbandono non può bloccare l'uscita del
+        processo, altrimenti un `SIGTERM` al worker resterebbe appeso fino al
+        `SIGKILL` — che ammazza il job in volo.
         """
         residuo = self._residuo(scadenza)
-        esecutore = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fetch-feed")
-        try:
-            futuro = esecutore.submit(azione)
+        risultato: list[T] = []
+        errore: list[BaseException] = []
+
+        def esegui() -> None:
             try:
-                return futuro.result(timeout=residuo)
-            except ScadenzaFuturo as exc:
-                raise TimeoutFeedError(
-                    "superata la scadenza complessiva del fetch"
-                ) from exc
-        finally:
-            # `wait=False`: attendere il lavoro abbandonato riporterebbe
-            # esattamente il blocco che questo metodo esiste per evitare.
-            esecutore.shutdown(wait=False, cancel_futures=True)
+                risultato.append(azione())
+            except BaseException as exc:  # noqa: BLE001 — si ri-solleva sotto
+                # `BaseException` e non `Exception`: la guardia di isolamento
+                # di rete della suite (GS-1) ne deriva di proposito, e deve
+                # attraversare questo confine di thread intatta.
+                errore.append(exc)
+
+        thread = threading.Thread(
+            target=esegui, daemon=True, name=f"{NOME_THREAD_FETCH}-{id(azione):x}"
+        )
+        thread.start()
+        thread.join(residuo)
+        if thread.is_alive():
+            if chiudi is not None:
+                chiudi()
+            raise TimeoutFeedError("superata la scadenza complessiva del fetch")
+        if errore:
+            raise errore[0]
+        return risultato[0]
 
     # ------------------------------------------------------------- validazione
 
@@ -211,43 +253,48 @@ class ClientFeedHttp:
 
     # ------------------------------------------------------------------- fetch
 
-    def _timeout(self, scadenza: float) -> httpx.Timeout:
-        """Timeout per-operazione, mai più lunghi del budget che resta.
+    def _nuovo_client(self, scadenza: float) -> httpx.Client:
+        """Client per l'intero fetch, con i timeout per-operazione.
 
-        Non sono il bound (vedi `_entro_la_scadenza`): servono a far morire in
-        fretta il lavoro abbandonato invece di lasciarlo su una socket viva.
+        I timeout NON sono il bound e non fanno morire il lavoro abbandonato
+        (vedi `_entro_la_scadenza`): si azzerano a ogni byte. Sono il limite
+        della singola attesa — utile su un portale che non risponde affatto,
+        inutile su uno che sgocciola. Il `min()` col residuo evita solo di
+        promettere alla socket più tempo di quanto ne resti al fetch.
         """
         residuo = self._residuo(scadenza)
-        return httpx.Timeout(
+        timeout = httpx.Timeout(
             connect=min(self._politica.timeout_connessione_secondi, residuo),
             read=min(self._politica.timeout_lettura_secondi, residuo),
             write=min(self._politica.timeout_connessione_secondi, residuo),
             pool=min(self._politica.timeout_connessione_secondi, residuo),
         )
+        return httpx.Client(
+            follow_redirects=False,
+            timeout=timeout,
+            # Un `HTTPS_PROXY` nell'ambiente del worker farebbe risolvere il
+            # nome AL PROXY, azzerando l'intera denylist — `169.254.169.254`
+            # incluso. Su self-hosted un proxy nell'ambiente è lo scenario
+            # normale, non l'eccezione.
+            trust_env=False,
+            headers={
+                "Accept": "text/calendar, text/plain;q=0.5",
+                "Accept-Encoding": "identity",
+            },
+        )
 
     def _un_hop(
-        self, url: str, vetted: tuple[str, ...], scadenza: float
+        self,
+        client: httpx.Client,
+        url: str,
+        vetted: tuple[str, ...],
+        scadenza: float,
     ) -> RispostaFeed | str:
         pinnato, intestazioni, estensioni = self._richiesta_pinnata(url, vetted)
         try:
-            with (
-                httpx.Client(
-                    follow_redirects=False,
-                    timeout=self._timeout(scadenza),
-                    # Un `HTTPS_PROXY` nell'ambiente del worker farebbe risolvere
-                    # il nome AL PROXY, azzerando l'intera denylist —
-                    # `169.254.169.254` incluso. Su self-hosted un proxy
-                    # nell'ambiente è lo scenario normale, non l'eccezione.
-                    trust_env=False,
-                    headers={
-                        "Accept": "text/calendar, text/plain;q=0.5",
-                        "Accept-Encoding": "identity",
-                    },
-                ) as client,
-                client.stream(
-                    "GET", pinnato, headers=intestazioni, extensions=estensioni
-                ) as risposta,
-            ):
+            with client.stream(
+                "GET", pinnato, headers=intestazioni, extensions=estensioni
+            ) as risposta:
                 if risposta.status_code in STATI_DI_REDIRECT:
                     # `urljoin` sull'URL LOGICO, non su quello pinnato: un
                     # `Location` relativo si risolverebbe sull'indirizzo IP e
