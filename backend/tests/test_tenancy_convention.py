@@ -95,9 +95,50 @@ def test_ogni_metodo_di_repository_di_dominio_richiede_host_id() -> None:
     )
 
 
+# Quanti metodi la guardia deve almeno ISPEZIONARE. Verificare che i moduli
+# ci siano non basta: il filtro e' su `endswith("Repository")`, quindi
+# rinominare `PrenotazioneRepository` in `PrenotazioneStore` farebbe uscire
+# dieci metodi dal controllo lasciando tutti i test verdi. Un pavimento sul
+# numero di metodi ispezionati e' cio' che rende la cecita' rumorosa.
+PAVIMENTO_METODI_ISPEZIONATI = 12
+
+
+def _metodi_ispezionati() -> list[str]:
+    ispezionati = []
+    for modulo in _moduli_di_dominio():
+        try:
+            repository = importlib.import_module(f"app.{modulo}.repository")
+        except ModuleNotFoundError:
+            continue
+        for nome_classe, classe in inspect.getmembers(repository, inspect.isclass):
+            if not nome_classe.endswith("Repository"):
+                continue
+            if classe.__module__ != repository.__name__:
+                continue
+            ispezionati += [
+                f"{modulo}.{nome_classe}.{nome}"
+                for nome, _ in inspect.getmembers(classe, inspect.isfunction)
+                if not nome.startswith("_")
+            ]
+    return ispezionati
+
+
 def test_esiste_almeno_un_modulo_di_dominio_sorvegliato() -> None:
     # La guardia non deve mai svuotarsi in silenzio.
     assert "strutture" in _moduli_di_dominio()
+    assert "calendario" in _moduli_di_dominio()
+
+
+def test_la_guardia_ispeziona_davvero_i_repository() -> None:
+    ispezionati = _metodi_ispezionati()
+    assert len(ispezionati) >= PAVIMENTO_METODI_ISPEZIONATI, (
+        f"solo {len(ispezionati)} metodi ispezionati ({sorted(ispezionati)}): "
+        "una classe di repository e' sfuggita al filtro sul nome. Se il calo "
+        "e' voluto, abbassare il pavimento CON una motivazione scritta"
+    )
+    # Se una classe di repository di `calendario` venisse rinominata, questa
+    # riga cadrebbe invece di tacere.
+    assert any(voce.startswith("calendario.") for voce in ispezionati)
 
 
 def test_le_tabelle_esentate_non_acquisiscono_un_legame_con_host() -> None:

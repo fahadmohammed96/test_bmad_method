@@ -10,6 +10,7 @@ Nessun dato reale di Ospiti nei fixture (NFR-16).
 """
 
 import ipaddress
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -28,6 +29,7 @@ from app.calendario.models import (
     Prenotazione,
     StatoPrenotazione,
 )
+from app.calendario.schemas import StatoSincronizzazione
 from app.calendario.trasporto import ClientFeedHttp
 from app.calendario.uscita_rete import PoliticaUscitaRete, UrlFeedNonValidoError
 from app.core.date_range import utcnow
@@ -67,6 +69,7 @@ def politica(
     cap: int = 1_000_000,
     lettura: float = 5.0,
     max_redirect: int = 3,
+    deadline: float = 30.0,
     reti_consentite: tuple = LOOPBACK,
 ) -> PoliticaUscitaRete:
     return PoliticaUscitaRete(
@@ -74,6 +77,7 @@ def politica(
         timeout_lettura_secondi=lettura,
         dimensione_massima_byte=cap,
         max_redirect=max_redirect,
+        deadline_totale_secondi=deadline,
         reti_consentite=reti_consentite,
     )
 
@@ -565,6 +569,29 @@ class TestScomparsoNonERicevuto:
                 ),
                 CategoriaErroreSync.URL_NON_RAGGIUNGIBILE,
             ),
+            # Nona forma. Un VCALENDAR chiuso i cui VEVENT non portano `UID`
+            # supera sia il parser sia la guardia «nessun evento»: gli eventi
+            # ci sono, solo non sono identificabili. Senza il presidio, la
+            # riconciliazione parte con `uid_presenti` vuoto e la UPDATE
+            # degenera in «tutte» — e il run risulta RIUSCITO, quindi la UI
+            # non segnala nulla e i Conflitti decadono in silenzio.
+            (
+                RispostaPreparata(corpo=fixture_ical("senza-uid.ics")),
+                CategoriaErroreSync.FEED_SENZA_EVENTI,
+            ),
+            # Stessa porta, forma più sottile: l'`UID` c'è ma è vuoto, e
+            # `Vevent.uid` ritorna `None` in entrambi i casi.
+            (
+                RispostaPreparata(
+                    corpo=(
+                        b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+                        b"UID:   \r\nDTSTART;VALUE=DATE:20260810\r\n"
+                        b"DTEND;VALUE=DATE:20260812\r\nSUMMARY:Reserved\r\n"
+                        b"END:VEVENT\r\nEND:VCALENDAR\r\n"
+                    )
+                ),
+                CategoriaErroreSync.FEED_SENZA_EVENTI,
+            ),
         ],
     )
     def test_una_risposta_che_non_e_un_feed_completo_non_transiziona_nulla(
@@ -585,6 +612,58 @@ class TestScomparsoNonERicevuto:
         self._assert_dati_intatti(db_session, feed_popolato)
         assert run.esito is EsitoSyncRun.FALLITO
         assert run.categoria_errore is categoria
+
+    def test_senza_uid_utilizzabili_la_riconciliazione_non_parte_affatto(
+        self, db_session: Session, server_feed: ServerFeed, feed_popolato: FeedIcal
+    ) -> None:
+        # La forma stretta del difetto: gli eventi ci SONO (quindi la guardia
+        # «nessun evento» non basta), ma nessuno è identificabile.
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(corpo=fixture_ical("senza-uid.ics")),
+        )
+
+        run = sincronizza(db_session, feed_popolato, client())
+
+        assert run.prenotazioni_rimosse_dal_feed == 0
+        self._assert_dati_intatti(db_session, feed_popolato)
+        # E soprattutto: NON riuscito. Con esito riuscito la UI non
+        # segnalerebbe niente e i Conflitti decadrebbero in silenzio.
+        assert run.esito is EsitoSyncRun.FALLITO
+        assert run.categoria_errore is CategoriaErroreSync.FEED_SENZA_EVENTI
+
+    def test_un_solo_uid_valido_fra_molti_senza_uid_riconcilia_solo_quello(
+        self, db_session: Session, server_feed: ServerFeed, feed_popolato: FeedIcal
+    ) -> None:
+        # Il confine opposto: basta UN uid utilizzabile perché il feed sia
+        # riconciliabile, e allora la transizione degli scomparsi è corretta
+        # e dovuta. La guardia non deve diventare un'inibizione generale.
+        senza_uid = (
+            "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260701\r\n"
+            "DTEND;VALUE=DATE:20260702\r\nSUMMARY:Reserved\r\nEND:VEVENT\r\n"
+        )
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    senza_uid,
+                    vevent("uid-1@example.com", dal="20260810", al="20260812"),
+                )
+            ),
+        )
+
+        run = sincronizza(db_session, feed_popolato, client())
+
+        assert run.esito is EsitoSyncRun.RIUSCITO
+        assert run.eventi_malformati == 1
+        # `uid-2` è davvero scomparso dal feed: questa transizione è giusta.
+        assert run.prenotazioni_rimosse_dal_feed == 1
+        stati = {
+            riga.ical_uid: riga.stato
+            for riga in prenotazioni(db_session, feed_popolato)
+        }
+        assert stati["uid-1@example.com"] is StatoPrenotazione.ATTIVA
+        assert stati["uid-2@example.com"] is StatoPrenotazione.RIMOSSA_DAL_FEED
 
     def test_un_run_fallito_non_fa_avanzare_l_ultimo_sync_riuscito(
         self, db_session: Session, server_feed: ServerFeed, feed_popolato: FeedIcal
@@ -627,6 +706,136 @@ class TestScomparsoNonERicevuto:
 
         assert run.esito is EsitoSyncRun.RIUSCITO
         assert run.prenotazioni_rimosse_dal_feed == 0
+
+
+class TestOgniRunLasciaTraccia:
+    """AC 7 e AC 5: un VEVENT ostile non può cancellare il `sync_run`.
+
+    Il loop di normalizzazione gira dentro il SAVEPOINT per item del worker
+    (G-1): un'eccezione che sfugge annulla la riga `sync_run` insieme
+    all'errore, il Feed torna a «mai sincronizzato» senza categoria e il
+    polling del frontend si spegne. Il contenuto è di terze parti, quindi
+    l'insieme dei modi in cui può essere illeggibile non è enumerabile: qui si
+    provano i due noti e si pretende che la classe sia chiusa.
+    """
+
+    @pytest.fixture
+    def feed_popolato(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> FeedIcal:
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent("uid-1@example.com", dal="20260810", al="20260812")
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, server_feed.url("/calendario.ics"))
+        sincronizza(db_session, feed, client())
+        return feed
+
+    @pytest.mark.parametrize(
+        ("descrizione", "corpo"),
+        [
+            (
+                # timedelta esplode su una durata assurda: il regex accetta
+                # cifre illimitate, `timedelta` no.
+                "durata oltre i limiti di timedelta",
+                calendario(
+                    "BEGIN:VEVENT\r\nUID:ostile-durata@example.com\r\n"
+                    "DTSTART;VALUE=DATE:20260810\r\nDURATION:P99999999D\r\n"
+                    "SUMMARY:Reserved\r\nEND:VEVENT\r\n"
+                ),
+            ),
+            (
+                "uid oltre la lunghezza della colonna",
+                calendario(
+                    "BEGIN:VEVENT\r\nUID:" + "u" * 600 + "@example.com\r\n"
+                    "DTSTART;VALUE=DATE:20260810\r\n"
+                    "DTEND;VALUE=DATE:20260812\r\nSUMMARY:Reserved\r\n"
+                    "END:VEVENT\r\n"
+                ),
+            ),
+            (
+                "settimane oltre i limiti di timedelta",
+                calendario(
+                    "BEGIN:VEVENT\r\nUID:ostile-settimane@example.com\r\n"
+                    "DTSTART;VALUE=DATE:20260810\r\nDURATION:P99999999W\r\n"
+                    "SUMMARY:Reserved\r\nEND:VEVENT\r\n"
+                ),
+            ),
+        ],
+    )
+    def test_un_vevent_ostile_e_malformato_e_il_run_scrive_comunque(
+        self,
+        db_session: Session,
+        server_feed: ServerFeed,
+        feed_popolato: FeedIcal,
+        descrizione: str,
+        corpo: bytes,
+    ) -> None:
+        # Il feed contiene ANCHE l'evento buono, così l'uid resta presente e
+        # la Prenotazione viva non viene toccata.
+        completo = corpo.replace(
+            b"END:VCALENDAR\r\n",
+            vevent("uid-1@example.com", dal="20260810", al="20260812").encode()
+            + b"END:VCALENDAR\r\n",
+        )
+        server_feed.prepara("/calendario.ics", RispostaPreparata(corpo=completo))
+
+        run = sincronizza(db_session, feed_popolato, client())
+
+        # Il `sync_run` ESISTE: è la condizione perché l'Host veda qualcosa.
+        assert (
+            service.ultimo_run(db_session, feed_popolato.host_id, feed_popolato.id)
+            is not None
+        )
+        assert run.eventi_malformati == 1, descrizione
+        assert run.esito is EsitoSyncRun.RIUSCITO
+        # L'uid dell'evento ostile è comunque NEL feed: nulla è «scomparso».
+        assert run.prenotazioni_rimosse_dal_feed == 0
+        assert (
+            prenotazioni(db_session, feed_popolato)[0].stato is StatoPrenotazione.ATTIVA
+        )
+
+    def test_il_feed_non_torna_mai_sincronizzato_dopo_un_vevent_ostile(
+        self, db_session: Session, server_feed: ServerFeed, feed_popolato: FeedIcal
+    ) -> None:
+        # È il sintomo che l'Host vedrebbe: uno stato che regredisce e un
+        # polling che si spegne senza dire perché.
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    "BEGIN:VEVENT\r\nUID:ostile@example.com\r\n"
+                    "DTSTART;VALUE=DATE:20260810\r\nDURATION:P99999999D\r\n"
+                    "SUMMARY:Reserved\r\nEND:VEVENT\r\n",
+                    vevent("uid-1@example.com", dal="20260810", al="20260812"),
+                )
+            ),
+        )
+
+        sincronizza(db_session, feed_popolato, client())
+
+        stato = service.stato_del_feed(
+            db_session,
+            feed_popolato.host_id,
+            service.leggi_feed(db_session, feed_popolato.host_id, feed_popolato.id),
+        )
+        assert stato.stato is not StatoSincronizzazione.MAI_SINCRONIZZATO
+        assert stato.ultimo_tentativo_il is not None
+
+    def test_la_lunghezza_massima_dell_uid_e_quella_della_colonna(self) -> None:
+        # Il presidio non deve poter divergere dallo schema: se la colonna
+        # cambiasse, il troncamento a monte diventerebbe sbagliato in silenzio.
+        from app.calendario.models import Prenotazione as ModelloPrenotazione
+        from app.calendario.normalizzazione import LUNGHEZZA_MASSIMA_ICAL_UID
+
+        assert (
+            LUNGHEZZA_MASSIMA_ICAL_UID
+            == ModelloPrenotazione.__table__.c.ical_uid.type.length
+        )
 
 
 class TestPoliticaDiUscitaDiRete:
@@ -774,6 +983,138 @@ class TestPoliticaDiUscitaDiRete:
         assert run.esito is EsitoSyncRun.FALLITO
         assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
 
+    def test_la_connessione_va_all_indirizzo_gia_validato_non_a_una_nuova_dns(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # Pinning (DNS rebinding). Il risolutore viene chiamato UNA volta per
+        # hop e il suo esito è quello a cui si connette: se il secondo lookup
+        # fosse indipendente, un DNS che cambia risposta fra validazione e
+        # connessione porterebbe il fetch dove vuole.
+        porta = int(server_feed.url("/x").rsplit(":", 1)[1].split("/")[0])
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent("uid-1@example.com", dal="20260810", al="20260812")
+                )
+            ),
+        )
+        chiamate: list[str] = []
+
+        def risolutore(host: str) -> list[str]:
+            chiamate.append(host)
+            return ["127.0.0.1"]
+
+        feed = collega(
+            db_session, contesto, f"http://feed.example.com:{porta}/calendario.ics"
+        )
+        trasporto = ClientFeedHttp(politica(), risolutore=risolutore)
+
+        run = sincronizza(db_session, feed, trasporto)
+
+        assert run.esito is EsitoSyncRun.RIUSCITO
+        assert chiamate == ["feed.example.com"]
+        # L'identità del server resta quella vera: `Host` è il nome, non l'IP.
+        _, _, intestazioni = server_feed.richieste[0]
+        assert intestazioni["Host"] == f"feed.example.com:{porta}"
+
+    def test_un_redirect_da_https_a_http_e_rifiutato(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # L'URL del Feed porta il segreto in query: un declassamento lo
+        # metterebbe in chiaro sul filo. `http` è ammesso in assoluto, ma non
+        # DOPO `https`.
+        from app.calendario.trasporto import UrlNonRaggiungibileError
+
+        trasporto = ClientFeedHttp(politica())
+        with pytest.raises(UrlNonRaggiungibileError):
+            trasporto._vieta_declassamento(
+                "https://feed.example.com/c.ics", "http://feed.example.com/c.ics"
+            )
+        # Il caso simmetrico è lecito: si può salire, non scendere.
+        trasporto._vieta_declassamento(
+            "http://feed.example.com/c.ics", "https://feed.example.com/c.ics"
+        )
+
+    def test_si_chiede_identity_e_non_si_ereditano_i_proxy_dall_ambiente(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # `Accept-Encoding: identity` toglie la decompressione illimitata di
+        # `iter_bytes()`; `trust_env=False` impedisce che un HTTPS_PROXY
+        # nell'ambiente del worker azzeri la denylist facendo risolvere il
+        # nome al proxy.
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(corpo=fixture_ical("airbnb-date-only.ics")),
+        )
+        feed = collega(db_session, contesto, url)
+        sincronizza(db_session, feed, client())
+
+        _, _, intestazioni = server_feed.richieste[0]
+        assert intestazioni["Accept-Encoding"] == "identity"
+
+    def test_un_portale_che_sgocciola_si_ferma_sulla_deadline_complessiva(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # `httpx.Timeout` è solo PER-OPERAZIONE: un byte ogni frazione di
+        # secondo non fa scattare nulla, e ai valori di produzione un byte
+        # ogni 9 secondi tiene la connessione per mesi. `core/worker.py` è un
+        # ciclo sequenziale in-process: la connessione appesa ferma il worker
+        # di TUTTI i tenant, non solo quello dell'attaccante. L'AC dice
+        # «senza saturare il worker», quindi serve una deadline sull'intero
+        # fetch.
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=fixture_ical("airbnb-date-only.ics"), sgocciola_secondi=0.12
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+
+        inizio = time.monotonic()
+        run = sincronizza(db_session, feed, client(lettura=5.0, deadline=0.6))
+        trascorso = time.monotonic() - inizio
+
+        assert run.esito is EsitoSyncRun.FALLITO
+        assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
+        # La deadline deve MORDERE, non essere una decorazione: senza di essa
+        # il corpo (oltre 400 byte a 0.12s l'uno) impiegherebbe ~50 secondi.
+        assert trascorso < 5.0
+
+    def test_la_deadline_non_si_moltiplica_per_i_redirect(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # Il budget è dell'intero fetch: una catena di redirect lenti non deve
+        # poter comprare tempo un hop alla volta.
+        server_feed.prepara(
+            "/uno.ics",
+            RispostaPreparata(stato=302, intestazioni={"Location": "/due.ics"}),
+        )
+        server_feed.prepara(
+            "/due.ics",
+            RispostaPreparata(
+                corpo=fixture_ical("airbnb-date-only.ics"), sgocciola_secondi=0.12
+            ),
+        )
+        feed = collega(db_session, contesto, server_feed.url("/uno.ics"))
+
+        inizio = time.monotonic()
+        run = sincronizza(
+            db_session, feed, client(lettura=5.0, deadline=0.6, max_redirect=3)
+        )
+        trascorso = time.monotonic() - inizio
+
+        assert run.categoria_errore is CategoriaErroreSync.TIMEOUT
+        assert trascorso < 5.0
+
+    def test_la_deadline_arriva_dalla_configurazione(self) -> None:
+        from app.core.config import Settings
+
+        politica_configurata = PoliticaUscitaRete.da_configurazione(
+            Settings(feed_deadline_totale_secondi=3.5)
+        )
+        assert politica_configurata.deadline_totale_secondi == 3.5
+
     def test_le_credenziali_nell_url_non_finiscono_nei_log(
         self,
         db_session: Session,
@@ -792,7 +1133,16 @@ class TestPoliticaDiUscitaDiRete:
         with caplog.at_level("DEBUG"):
             sincronizza(db_session, feed, trasporto)
 
-        assert "segretissima" not in caplog.text
+        # `caplog.text` è reso con DEFAULT_LOG_FORMAT e gli attributi passati
+        # via `extra=` NON vi finiscono mai: asserire su di esso sarebbe
+        # tautologico — passerebbe anche loggando l'URL in chiaro, e anche
+        # cancellando del tutto le chiamate a `logger`. Si asserisce sui
+        # RECORD, e in positivo sulla forma redatta.
+        con_url = [record for record in caplog.records if hasattr(record, "url")]
+        assert con_url, "nessun log ha registrato l'URL: il presidio non è esercitato"
+        for record in con_url:
+            assert "segretissima" not in record.url
+            assert record.url == "https://***@feed.example.com/calendario.ics"
 
 
 class TestJobDurevole:

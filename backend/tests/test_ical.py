@@ -136,9 +136,15 @@ class TestSintassi:
         assert evento.valore("SUMMARY") == "a" * 66 + "b" * 20
 
     def test_le_proprieta_sconosciute_si_ignorano(self) -> None:
-        assert (
-            len(analizza_feed(_fixture("folding-e-confini-testuali.ics")).eventi) == 2
-        )
+        # «Si ignorano» significa: non finiscono fra le proprieta' dell'evento
+        # e non fanno saltare il parse. Contare gli eventi non lo dimostrava.
+        feed = analizza_feed(_fixture("folding-e-confini-testuali.ics"))
+        assert len(feed.eventi) == 2
+        nomi = {
+            proprieta.nome for evento in feed.eventi for proprieta in evento.proprieta
+        }
+        assert "X-PROPRIETA-SCONOSCIUTA" not in nomi
+        assert {"UID", "DTSTART", "DTEND"} <= nomi
 
     def test_un_sommario_vuoto_resta_vuoto_senza_errori(self) -> None:
         eventi = _eventi_per_uid("folding-e-confini-testuali.ics")
@@ -308,9 +314,16 @@ class TestSemantica:
         assert evento.soggiorno.check_in == date(2026, 9, 1)
         assert evento.soggiorno.check_out == date(2026, 9, 3)
 
-    def test_exdate_non_fa_esplodere_nulla(self) -> None:
+    def test_exdate_e_letto_ma_non_applicato(self) -> None:
+        # Comportamento DICHIARATO: senza espansione delle ricorrenze un
+        # EXDATE non ha niente da escludere. Il valore c'e' nel VEVENT e non
+        # tocca l'intervallo dell'occorrenza base.
         eventi = _eventi_per_uid("semantica-e-durata.ics")
-        assert normalizza(eventi["7777-ricorrente@example.com"]).ical_uid
+        vevent = eventi["7777-ricorrente@example.com"]
+        assert vevent.valore("EXDATE") == "20260915"
+        evento = normalizza(vevent)
+        assert evento.soggiorno.check_in == date(2026, 9, 1)
+        assert evento.soggiorno.check_out == date(2026, 9, 3)
 
 
 class TestSommario:

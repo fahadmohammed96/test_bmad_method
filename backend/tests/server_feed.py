@@ -25,6 +25,11 @@ class RispostaPreparata:
     chiudi_a_meta: bool = False
     # Non risponde affatto: il client deve fermarsi sul timeout di lettura.
     non_rispondere: bool = False
+    # Sgocciola il corpo un byte alla volta con questa pausa fra i byte.
+    # Ogni singolo byte arriva DENTRO il timeout di lettura, quindi nessun
+    # timeout per-operazione scatta mai: solo una deadline complessiva
+    # sull'intero fetch può fermarlo.
+    sgocciola_secondi: float | None = None
 
 
 class ServerFeed:
@@ -35,6 +40,9 @@ class ServerFeed:
         self.richieste: list[tuple[str, str, dict[str, str]]] = []
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        # Segnalato all'uscita: sblocca gli handler in attesa invece di
+        # lasciarli scadere.
+        self._chiusura = threading.Event()
 
     def prepara(self, percorso: str, risposta: RispostaPreparata) -> str:
         self._risposte[percorso] = risposta
@@ -49,6 +57,8 @@ class ServerFeed:
         risposte = self._risposte
         richieste = self.richieste
 
+        chiusura = self._chiusura
+
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
@@ -62,8 +72,12 @@ class ServerFeed:
                     return
                 if preparata.non_rispondere:
                     # Connessione aperta e silenziosa: il client deve
-                    # arrendersi sul timeout di lettura, non attendere.
-                    threading.Event().wait(30)
+                    # arrendersi sul timeout di lettura, non attendere. Il
+                    # silenzio finisce quando il server chiude (`chiusura`),
+                    # non dopo un'attesa fissa: un `Event` anonimo mai
+                    # segnalabile lascerebbe un thread appeso per 30 secondi
+                    # a ogni test che usa questa forma.
+                    chiusura.wait(30)
                     return
                 self.send_response(preparata.stato)
                 for chiave, valore in preparata.intestazioni.items():
@@ -76,13 +90,30 @@ class ServerFeed:
                     return
                 self.send_header("Content-Length", str(len(preparata.corpo)))
                 self.end_headers()
+                if preparata.sgocciola_secondi is not None:
+                    pausa = threading.Event()
+                    for byte in preparata.corpo:
+                        try:
+                            self.wfile.write(bytes([byte]))
+                            self.wfile.flush()
+                        except OSError:
+                            return  # il client ha chiuso: e' l'esito atteso
+                        pausa.wait(preparata.sgocciola_secondi)
+                    return
                 if preparata.corpo:
                     self.wfile.write(preparata.corpo)
 
             def log_message(self, formato: str, *argomenti: object) -> None:
                 """Silenzio: l'output del test non è un access log."""
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        # 16 > gli 8 client che la barrier del test di gara rilascia insieme:
+        # con la coda di ascolto di default (5) tre connessioni verrebbero
+        # rifiutate dal sistema operativo e il test misurerebbe quello.
+        class Server(ThreadingHTTPServer):
+            request_queue_size = 16
+            daemon_threads = True
+
+        self._server = Server(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
@@ -93,6 +124,7 @@ class ServerFeed:
         errore: BaseException | None,
         traccia: TracebackType | None,
     ) -> None:
+        self._chiusura.set()
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()

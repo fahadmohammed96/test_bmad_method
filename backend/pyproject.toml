@@ -23,6 +23,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    # Un test di gara che va in deadlock deve FALLIRE, non appendersi: senza
+    # questo `ThreadPoolExecutor.__exit__` attenderebbe all'infinito e la
+    # pipeline morirebbe per timeout del runner, che non dice niente.
+    "pytest-timeout>=2.3",
     "ruff>=0.8",
     "mypy>=1.14",
 ]

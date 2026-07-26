@@ -143,11 +143,29 @@ def test_nessuna_migrazione_cancella_una_tabella_protetta() -> None:
     # Le migrazioni sono forward-only (AR-11) e le modifiche distruttive sono
     # vietate salvo AD-20: un `drop_table` o un `DELETE FROM` su una tabella
     # protetta è la via più silenziosa per perdere Prenotazioni.
+    # Le forme si generano per ENTRAMBI gli stili di virgolette: autogenerate
+    # emette apici singoli, `ruff format` li normalizza a doppi. Una guardia
+    # che ne conosce uno solo e' appesa a un formattatore.
     sospette = []
     for percorso in (BACKEND / "alembic" / "versions").glob("*.py"):
         testo = percorso.read_text(encoding="utf-8")
         for tabella in TABELLE_PROTETTE:
-            for forma in (f'drop_table("{tabella}"', f"DELETE FROM {tabella}"):
-                if forma in testo:
-                    sospette.append(f"{percorso.name}: {forma}")
+            forme = [
+                f"drop_table('{tabella}'",
+                f'drop_table("{tabella}"',
+                f"DELETE FROM {tabella}",
+                f"delete_from('{tabella}'",
+                f'delete_from("{tabella}"',
+            ]
+            sospette += [
+                f"{percorso.name}: {forma}" for forma in forme if forma in testo
+            ]
     assert sospette == [], f"migrazioni distruttive su dati append-only: {sospette}"
+
+
+def test_la_guardia_anti_drop_table_riconosce_entrambi_gli_stili() -> None:
+    # Meta-verifica del presidio precedente: se domani qualcuno restringesse
+    # le forme a un solo stile di virgolette, questo test cadrebbe.
+    sorgente = pathlib.Path(__file__).read_text(encoding="utf-8")
+    assert "drop_table('{tabella}'" in sorgente
+    assert 'drop_table("{tabella}"' in sorgente

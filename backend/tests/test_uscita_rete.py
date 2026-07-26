@@ -219,7 +219,12 @@ class TestEsenzioniSorvegliate:
 
 
 class TestCredenzialiNellUrl:
-    """Le credenziali nell'URL non si riflettono in log ed errori (AD-16)."""
+    """Le credenziali nell'URL non si riflettono in log ed errori (AD-16).
+
+    Due posti, non uno. Lo userinfo RFC 3986 è quello ovvio; la **query** è
+    quella che conta, perché negli export delle OTA il link *è* la
+    credenziale: `.../calendar/ical/<id>.ics?s=<segreto>`.
+    """
 
     def test_url_redatto_nasconde_utente_e_password(self) -> None:
         redatto = url_redatto("https://utente:segretissima@feed.example.com/f.ics")
@@ -227,10 +232,24 @@ class TestCredenzialiNellUrl:
         assert "utente" not in redatto
         assert redatto == "https://***@feed.example.com/f.ics"
 
-    def test_url_redatto_lascia_intatto_un_url_senza_credenziali(self) -> None:
+    def test_url_redatto_nasconde_il_segreto_nella_query(self) -> None:
+        redatto = url_redatto(
+            "https://www.airbnb.it/calendar/ical/12345.ics?s=segreto-che-da-accesso"
+        )
+        assert "segreto-che-da-accesso" not in redatto
+        # Il path resta: serve a capire di quale feed si parli.
+        assert redatto == "https://www.airbnb.it/calendar/ical/12345.ics?***"
+
+    def test_url_redatto_nasconde_anche_il_fragment(self) -> None:
         assert (
-            url_redatto("https://feed.example.com/f.ics?token=x")
-            == "https://feed.example.com/f.ics?token=x"
+            url_redatto("https://feed.example.com/f.ics#token=x")
+            == "https://feed.example.com/f.ics"
+        )
+
+    def test_url_redatto_lascia_intatto_un_url_senza_segreti(self) -> None:
+        assert (
+            url_redatto("https://feed.example.com/calendario.ics")
+            == "https://feed.example.com/calendario.ics"
         )
 
     def test_un_url_con_credenziali_resta_valido(self) -> None:

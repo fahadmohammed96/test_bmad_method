@@ -27,6 +27,11 @@ from app.calendario.ical import Proprieta, Vevent
 from app.core.date_range import TZ_ROME, DateRange, rome_day
 
 LUNGHEZZA_MASSIMA_SOMMARIO = 500
+# L'uid NON si tronca: e' la chiave naturale, e troncarlo unirebbe due
+# Prenotazioni distinte. Un uid oltre la colonna e' un evento malformato,
+# rifiutato QUI — cioe' prima del database, dove un errore di lunghezza
+# aborterebbe la transazione e porterebbe via con se' il `sync_run`.
+LUNGHEZZA_MASSIMA_ICAL_UID = 500
 
 _DURATA = re.compile(
     r"^(?P<segno>[+-])?P"
@@ -128,6 +133,10 @@ def normalizza(vevent: Vevent) -> EventoFeed:
     uid = vevent.uid
     if uid is None:
         raise EventoNonNormalizzabileError("VEVENT senza UID: identità assente")
+    if len(uid) > LUNGHEZZA_MASSIMA_ICAL_UID:
+        raise EventoNonNormalizzabileError(
+            f"UID oltre {LUNGHEZZA_MASSIMA_ICAL_UID} caratteri: non memorizzabile"
+        )
     inizio = vevent.prima("DTSTART")
     if inizio is None:
         raise EventoNonNormalizzabileError("VEVENT senza DTSTART")
