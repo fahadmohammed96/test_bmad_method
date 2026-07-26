@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 const feedMock = vi.fn();
@@ -33,7 +34,7 @@ const FEED_BASE = {
 };
 
 function montaCon(feed: readonly unknown[]) {
-  feedMock.mockReturnValue({ isPending: false, data: feed });
+  feedMock.mockReturnValue({ isPending: false, isError: false, data: feed });
   collegaMock.mockReturnValue(COLLEGA_INERTE);
   render(<FeedIcalStruttura strutturaId="struttura-1" />);
 }
@@ -161,8 +162,30 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     ).toBeInTheDocument();
   });
 
+  it("su errore di caricamento NON afferma che non ci sono calendari", () => {
+    // La menzogna peggiore possibile su questa superficie: una Struttura con
+    // tre feed collegati che, su un 500 o una sessione scaduta, si presenta
+    // come «Nessun calendario collegato». Stessa classe di danno di NFR-2 —
+    // il prodotto dichiara certo ciò che non sa.
+    feedMock.mockReturnValue({
+      isPending: false,
+      isError: true,
+      error: new Error("calendari non disponibili"),
+      data: undefined,
+    });
+    collegaMock.mockReturnValue(COLLEGA_INERTE);
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    expect(
+      screen.queryByText("Nessun calendario collegato a questa Struttura."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /Non riusciamo a caricare i calendari/,
+    );
+  });
+
   it("mostra l'errore inline del collegamento sul campo", () => {
-    feedMock.mockReturnValue({ isPending: false, data: [] });
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
     collegaMock.mockReturnValue({
       ...COLLEGA_INERTE,
       isError: true,
@@ -172,5 +195,90 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Incolla l'indirizzo del calendario esportato dal portale",
     );
+  });
+
+  it("invia URL ripulito e Canale scelto, e svuota il campo al successo", async () => {
+    const mutate = vi.fn();
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
+    collegaMock.mockReturnValue({ ...COLLEGA_INERTE, mutate });
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    const campo = screen.getByLabelText("Indirizzo del calendario (iCal)");
+    await userEvent.type(campo, "  https://feed.example.com/c.ics  ");
+    await userEvent.selectOptions(screen.getByLabelText("Canale"), "booking");
+    await userEvent.click(screen.getByRole("button", { name: "Collega il calendario" }));
+
+    expect(mutate).toHaveBeenCalledTimes(1);
+    const [dati, opzioni] = mutate.mock.calls[0];
+    expect(dati).toEqual({
+      struttura_id: "struttura-1",
+      // Gli spazi incollati insieme all'URL non arrivano al backend.
+      url: "https://feed.example.com/c.ics",
+      canale: "booking",
+    });
+
+    // Il reset avviene su `onSuccess`, non a fuoco perso: un campo svuotato
+    // prima della conferma farebbe perdere l'URL su un errore.
+    expect(campo).toHaveValue("https://feed.example.com/c.ics");
+    act(() => opzioni.onSuccess());
+    expect(campo).toHaveValue("");
+  });
+
+  it("mentre carica non dice né che ci sono né che non ci sono calendari", () => {
+    // Lo stato `isPending` era scoperto: è il terzo caso, e come gli altri due
+    // non deve affermare nulla sullo stato del calendario.
+    feedMock.mockReturnValue({ isPending: true, isError: false, data: undefined });
+    collegaMock.mockReturnValue(COLLEGA_INERTE);
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Caricamento…");
+    expect(
+      screen.queryByText("Nessun calendario collegato a questa Struttura."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Non riusciamo a caricare i calendari/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("ripulisce dall'URL gli spazi che il sanitizer del browser NON tocca", () => {
+    // DECISIONE: la `.trim()` si TIENE, e ora e' pinnata per davvero.
+    //
+    // I due tentativi precedenti non pinnavano nulla, e la ragione e'
+    // istruttiva: la sanitizzazione non sta nel layer di battitura ma nel
+    // SETTER di `value` di jsdom per `input[type="url"]`, e sia `userEvent`
+    // sia `fireEvent.change` scrivono attraverso quel setter. Quindi lo stato
+    // non conteneva mai gli spazi ASCII e togliere la `.trim()` lasciava il
+    // test verde. I browser reali sanitizzano allo stesso modo, quindi su
+    // spazi ASCII la `.trim()` sarebbe stata codice morto.
+    //
+    // Ma il sanitizer togli solo lo spazio bianco ASCII: uno spazio
+    // insecabile (U+00A0) sopravvive — ed e' esattamente quello che arriva
+    // incollando un link da una pagina web. `String.trim()` lo rimuove.
+    // Quindi la `.trim()` ha uno scopo reale, e questo test lo dimostra.
+    const mutate = vi.fn();
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
+    collegaMock.mockReturnValue({ ...COLLEGA_INERTE, mutate });
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    const campo = screen.getByLabelText("Indirizzo del calendario (iCal)");
+    fireEvent.change(campo, {
+      target: { value: " https://feed.example.com/c.ics " },
+    });
+    // Il sanitizer NON li ha toccati: sono ancora nel valore del campo.
+    expect(campo).toHaveValue(" https://feed.example.com/c.ics ");
+
+    fireEvent.submit(campo.closest("form")!);
+
+    expect(mutate.mock.calls[0][0].url).toBe("https://feed.example.com/c.ics");
+  });
+
+  it("disabilita il bottone mentre il collegamento è in volo", () => {
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
+    collegaMock.mockReturnValue({ ...COLLEGA_INERTE, isPending: true });
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    expect(
+      screen.getByRole("button", { name: "Collega il calendario" }),
+    ).toBeDisabled();
   });
 });

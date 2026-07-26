@@ -9,7 +9,7 @@ constraint (lezione G-2 dell'Epic 1, test di gara A3-1).
 """
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import cast
 
 from sqlalchemy import Select, case, func, select, text, update
@@ -184,7 +184,7 @@ class PrenotazioneRepository:
         return "aggiornata"
 
     def marca_rimosse_dal_feed(
-        self, host_id: uuid.UUID, *, feed_id: uuid.UUID, uid_presenti: Iterable[str]
+        self, host_id: uuid.UUID, *, feed_id: uuid.UUID, uid_presenti: Sequence[str]
     ) -> int:
         """Transizione, non cancellazione (AD-4, AD-19): ritorna quante.
 
@@ -192,14 +192,24 @@ class PrenotazioneRepository:
         solo quelli normalizzati con successo: un VEVENT malformato ma con
         uid è comunque nel feed, e trattarlo come scomparso marcherebbe
         `rimossa_dal_feed` una Prenotazione viva.
+
+        Con `uid_presenti` **vuoto** questa funzione non fa nulla, e la
+        guardia è esplicita per una ragione precisa: SQLAlchemy rende un
+        `NOT IN ()` espandibile come `(ical_uid NOT IN (NULL) OR (1 = 1))`,
+        che è vero per ogni riga. La UPDATE degenererebbe in «tutte le
+        Prenotazioni attive del Feed», cioè l'opposto esatto del suo scopo.
+        Il chiamante non deve poterci arrivare — e se ci arriva, non deve
+        succedere niente.
         """
+        if not uid_presenti:
+            return 0
         istruzione = (
             update(Prenotazione)
             .where(
                 Prenotazione.host_id == host_id,
                 Prenotazione.feed_id == feed_id,
                 Prenotazione.stato == StatoPrenotazione.ATTIVA,
-                Prenotazione.ical_uid.not_in(list(uid_presenti)),
+                Prenotazione.ical_uid.not_in(uid_presenti),
             )
             .values(stato=StatoPrenotazione.RIMOSSA_DAL_FEED, aggiornata_il=utcnow())
         )

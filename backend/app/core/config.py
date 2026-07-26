@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     feed_timeout_lettura_secondi: float = 10.0
     feed_dimensione_massima_byte: int = 5 * 1024 * 1024
     feed_max_redirect: int = 3
+    # Tetto sull'INTERO fetch, redirect compresi. I timeout sopra sono
+    # per-operazione: un portale che sgocciola un byte appena dentro il
+    # timeout di lettura non ne farebbe scattare nessuno, e il worker è un
+    # ciclo sequenziale in-process — la connessione appesa fermerebbe i job
+    # di tutti gli Host, non solo di quello del Feed lento.
+    feed_deadline_totale_secondi: float = 30.0
     # Reti normalmente VIETATE (loopback, private, link-local) da ammettere
     # comunque, in CIDR separati da virgola. Vuoto in ogni ambiente reale:
     # esiste per i test, che parlano con un server HTTP su 127.0.0.1, e per

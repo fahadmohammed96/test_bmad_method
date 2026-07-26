@@ -14,6 +14,11 @@ export const calendarioCopy = {
   },
   collega: "Collega il calendario",
   nessunFeed: "Nessun calendario collegato a questa Struttura.",
+  // Distinto da `nessunFeed`: «non ci sono calendari» e «non riusciamo a
+  // leggerli» sono affermazioni diverse, e confonderle fa dire al
+  // prodotto una cosa falsa sullo stato del calendario dell'Host.
+  feedNonCaricati:
+    "Non riusciamo a caricare i calendari collegati a questa Struttura. Riprova fra poco: i calendari collegati non sono stati toccati.",
 
   // Progresso dell'import (UJ-1): dal collegamento alla prova che ha funzionato.
   importoInCorso: "Importazione in corso…",
@@ -37,7 +42,7 @@ export const calendarioCopy = {
     feed_non_valido:
       "Il calendario ricevuto è incompleto: non abbiamo modificato nulla delle tue prenotazioni.",
     feed_senza_eventi:
-      "Il calendario ricevuto non contiene prenotazioni: non abbiamo modificato nulla.",
+      "Il calendario ricevuto non contiene prenotazioni identificabili: non abbiamo modificato nulla delle tue prenotazioni.",
   },
 
   rimosseDalFeed: (quante: number) =>

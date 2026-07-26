@@ -5,8 +5,6 @@ dell'import, e che le credenziali eventualmente incollate nell'URL non tornino
 mai indietro in una risposta (NFR-17).
 """
 
-import ipaddress
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
@@ -242,11 +240,21 @@ class TestContrattoDeiCanali:
     def test_la_politica_di_default_non_ammette_reti_locali(self) -> None:
         # Difesa in profondità: anche se un ambiente puntasse il feed al
         # loopback, il default della configurazione non lo permette.
-        from app.calendario.uscita_rete import PoliticaUscitaRete
+        from app.calendario.uscita_rete import (
+            DestinazioneNonAmmessaError,
+            PoliticaUscitaRete,
+            valida_destinazione,
+            valida_formato,
+        )
 
         politica = PoliticaUscitaRete.da_configurazione(get_settings())
         assert politica.reti_consentite == ()
-        assert not any(
-            ipaddress.ip_address("127.0.0.1") in rete
-            for rete in politica.reti_consentite
-        )
+        # E la conseguenza che conta: con quella politica il loopback e' un
+        # indirizzo VIETATO. Asserirlo sull'esito, non sulla tupla vuota —
+        # `any()` su una tupla appena dichiarata vuota non puo' fallire.
+        with pytest.raises(DestinazioneNonAmmessaError):
+            valida_destinazione(
+                valida_formato("http://127.0.0.1/calendario.ics"),
+                politica,
+                lambda host: [],
+            )

@@ -23,6 +23,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    # Un test di gara che va in deadlock deve FALLIRE, non appendersi: senza
+    # questo `ThreadPoolExecutor.__exit__` attenderebbe all'infinito e la
+    # pipeline morirebbe per timeout del runner, che non dice niente.
+    "pytest-timeout>=2.3",
     "ruff>=0.8",
     "mypy>=1.14",
 ]
@@ -43,6 +47,15 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Tetto globale: i test di drip e `non_rispondere` toccano la rete locale e
+# senza questo un bound che regredisse li lascerebbe appesi finche' il runner
+# di CI non uccide il job — un fallimento che non dice cosa e' rotto.
+timeout = 120
+# `--strict-markers`: se `pytest-timeout` uscisse dal gruppo dev,
+# `@pytest.mark.timeout(60)` degraderebbe a warning e la protezione sul
+# deadlock del test di gara svanirebbe in silenzio. Cosi' invece la suite non
+# parte.
+addopts = "--strict-markers"
 
 [tool.mypy]
 python_version = "3.14"
