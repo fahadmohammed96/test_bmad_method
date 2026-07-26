@@ -30,3 +30,42 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   vigore dalla Story 1.3. Le PR mergiate prima (#12, #18) sono state verificate
   **retroattivamente** e l'esito è registrato nella matrice. Se una regola di gate arriva a
   metà Epic, la verifica arretrata va fatta e scritta, non condonata in silenzio.
+- 2026-07-25 — **Gli ID di rischi e finding si prefissano con l'Epic** dal test design dell'Epic
+  2 in poi: rischi `R2-x`, finding `E2-Gn` / `E2-Fn` / `E2-Cn`. Nell'Epic 1 erano `R-x` / `G-n`
+  / `F-n` / `C-n`, univoci solo dentro l'Epic — ma «G-2» ha ormai un significato preciso nelle
+  conversazioni di squadra, e riusare la sigla in un altro Epic renderebbe ambigua ogni
+  citazione futura. E la forma che verrebbe naturale — `G2-x` — **collide con le
+  `[DECISIONE G2-A…E]` del PRD**: il prefisso `E<n>-` risolve entrambe le cose. I rischi
+  tracciati restano `RT-n`, unici per progetto perché attraversano gli Epic per costruzione
+  (hanno un momento di rivalutazione, non una scadenza).
+- 2026-07-25 — **L'ambiente e2e non avvia il worker.** `frontend/playwright.config.ts` ha due
+  `webServer` (backend con migrazioni, frontend buildato) e nessun processo `python -m
+  app.worker`: negli e2e i **job durevoli non girano mai**. Nell'Epic 1 non mordeva; dall'Epic 2
+  ogni AC che dipende da un job (import on-demand, poller, notifica) non è osservabile in e2e
+  senza una decisione esplicita. Da ricordare **prima** di promettere copertura e2e su un flusso
+  asincrono.
+- 2026-07-25 — **A fine Epic 1 il backend non aveva una sola riga di codice HTTP in uscita**
+  (unico hit su `http` in `app/`: `frontend_origin` in `core/config.py`; `httpx` è solo dev, per
+  `TestClient`). Il fetch iCal dell'Epic 2 è la **prima** dipendenza di rete del progetto: client,
+  timeout, redirect, guardia SSRF, cap di dimensione **e il presidio che impedisce a un test di
+  raggiungere Internet** sono tutti greenfield. Anche l'unico precedente di validazione di input
+  non fidato è filesystem, non rete (`importa_comuni.py`).
+- 2026-07-25 — `TABELLE_DA_SVUOTARE` in `backend/tests/conftest.py` è una **stringa scritta a
+  mano** usata in `TRUNCATE … CASCADE`. Ogni tabella nuova va aggiunta a mano o i test si
+  sporcano fra loro, e il fallimento compare **altrove**, giorni dopo, travestito da flakiness.
+  Con un Epic che aggiunge cinque tabelle in un colpo solo serve una guardia che la confronti
+  con `Base.metadata.tables`.
+- 2026-07-25 — **Due miei run in parallelo sulla stessa issue hanno prodotto due test design
+  diversi dell'Epic 2** (PR #32 e #33, 1228 righe di diff fra i rami), rilevati da John prima
+  che arrivassero su `main`. Nessuno dei due era un superset dell'altro: la riconciliazione è
+  stata un confronto riga per riga, non una scelta fra due copie. Lezione operativa: quando
+  riprendo una issue, **prima di scrivere controllo se esiste già un ramo o una PR mia sullo
+  stesso deliverable** — `git branch -a` e le PR aperte del repo. Il costo di non farlo non è la
+  scrittura doppia, è che qualcun altro deve accorgersene.
+- 2026-07-25 — **Un test design scritto davvero prima del codice produce due output, non uno**:
+  la tabella di copertura (§3) e la lista dei **confini non specificati negli AC** (§4). Nel
+  test design dell'Epic 2 la seconda conta tredici voci, sette delle quali hanno la stessa
+  forma — l'AC descrive il caso normale e tace sul **ritorno dal caso degradato** (il feed che
+  torna, il sync mai riuscito, il conflitto fra due prenotazioni manuali). Quelle voci non le
+  risolvo io: tornano a John, che corregge `docs/epics.md`. Provare a scriverle come test le
+  avrebbe trasformate in decisioni di prodotto prese di nascosto dentro un documento di QA.
