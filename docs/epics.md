@@ -4,7 +4,7 @@ status: approved
 gate: G3
 gate_status: 'approvato da Fahad al gate G3 (2026-07-24). Esiti G2-A…E e G3-1…5 registrati (PRD §14, project-context §6). Fase 4 aperta ad Amelia.'
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-26
 author: John — Product Manager (leader squad)
 phase: '3 · Solutioning (co-artefatto del gate G3, con Winston)'
 stepsCompleted: ['step-01-validate-prerequisites', 'step-02-design-epics', 'step-03-create-stories', 'step-04-final-validation']
@@ -143,6 +143,8 @@ _Estratti dalla UX Spec `docs/ux-spec.md` (§1…§8) come input di prima classe
 
 _UX-DR trasversali (coperti da Story di fondazione/UI): UX-DR1, UX-DR2 → 1.3 (shell/dashboard frame) + widget per epic (2.8, 3.8, 4.4, 5.3); UX-DR15 → 1.3; UX-DR16 → non un requisito implementativo ma un target da confermare a G2-E (tracciato nella readiness)._
 
+_Anagrafica `ospite` (entità dell'ERD, non una FR a sé — decisione MYL-40 del 2026-07-26, PRD §14.2): **creazione** → Epic 2 — Story **2.3**; **scrittura volontaria dell'Host** → Story **2.4**; **lettura/presentazione** → 2.3, 2.7; consumatori a valle → Epic 3 (Alloggiati, via service) ed Epic 5 (Messaggi, FR-19). NFR applicati negli AC della 2.3: **NFR-11** (minimizzazione), **NFR-12** (retention parametrica), **NFR-14** (accesso del solo Host proprietario), **NFR-16** (nessun dato reale nei test)._
+
 ---
 
 ## Epic List
@@ -279,6 +281,18 @@ So that io capisca l'impatto della soglia dei tre immobili **prima** di trovarme
 
 L'Host collega i Feed iCal, vede tutte le Prenotazioni in un'unica griglia e viene avvisato e guidato sui Conflitti — senza falsa sincronia. Governato da AD-3, AD-4, AD-5, AD-10, AD-13 (canali notifiche), AD-14, AD-17, AD-19. Realizza UJ-1 (parte calendario), UJ-2.
 
+> **[DECISIONE DI PRODOTTO — Anagrafica `ospite`, 2026-07-26]** — decisione di Fahad su proposta di Murat (issue **MYL-40**), registrata in PRD **§14.2**.
+>
+> **Opzione B — anagrafica vera con contatti.** L'entità `ospite` (nome + email/telefono **quando disponibili**) è **materializzata in questo Epic**, non tenuta come campo denormalizzato sulla Prenotazione: l'Epic 3 (Alloggiati) e l'Epic 5 (Messaggi agli Ospiti) la richiedono come entità, e l'ERD la prevede già. Cinque vincoli **non negoziabili** accompagnano la scelta e valgono come acceptance criteria di ogni Story che la tocca:
+>
+> 1. **Proprietà e creazione.** `ospite` appartiene al modulo `calendario`, unico scrittore (AD-18), ed è **creata dalla Story 2.3**, che ne risponde negli AC. Nessuna Story può **mostrare** l'Ospite senza che un'altra ne dichiari la creazione.
+> 2. **Minimizzazione** (GDPR by design, `project-context.md` §5, NFR-11). Si salva **solo** ciò che arriva dal Feed o che l'Host inserisce volontariamente. Campi contatto **nullable**, mai obbligatori, **mai inventati né dedotti**. **Nessun documento d'identità in questa fase**: quello è `ospite_documento` (Epic 3, AD-11), con requisiti propri.
+> 3. **Retention** (NFR-12). Periodo esplicito legato al **ciclo della Prenotazione**, espresso come **parametro configurabile** (coerente con G2-D 30/90), mai hardcodato. Il valore iniziale è **provvisorio**, in attesa dell'esito di R-5.
+> 4. **Tenancy** (AD-2, AR-4). `ospite` è **tenant-owned**: `host_id` NOT NULL e guardia strutturale di tenancy come le altre entità. **Non** va nell'allowlist dei dati di riferimento.
+> 5. **Gate legale** (R-5). I contatti degli Ospiti sono dati personali **di terzi**, non del cliente: **base giuridica** del trattamento contatti e **retention** sono punti espliciti del mandato di verifica (`docs/implementation-readiness.md` R-5, PRD §14.2). È materia **privacy, non fiscale**.
+>
+> **Collocazione della creazione — deviazione dichiarata dal candidato indicato.** Il candidato naturale era la **Story 2.1** (import dai Feed), ma la 2.1 è **già consegnata** (MYL-37) e ha deliberatamente **non** introdotto l'entità: i VEVENT di Airbnb/Booking non portano un'identità Ospite affidabile, quindi il campo `sommario` conserva il testo opaco del feed e nulla più. Creare `ospite` nella 2.1 produrrebbe una tabella **senza alcun percorso di scrittura**. La creazione va perciò alla **prima Story non ancora avviata che la richiede — la 2.3** — e la prima scrittura volontaria dell'Host alla **2.4**. Il vincolo 1 resta soddisfatto: la 2.3 crea e mostra nello stesso perimetro.
+
 ### Story 2.1: Collegamento di un Feed iCal e import on-demand
 
 As an Host,
@@ -322,6 +336,12 @@ So that capisca a colpo d'occhio la mia situazione senza aprire 5-6 schede di br
 **When** l'Host apre il Calendario
 **Then** vede una griglia (mensile/settimanale) che aggrega le Prenotazioni di tutte le Strutture e Canali, con distinzione visiva per Canale (FR-4)
 **And** ogni Prenotazione mostra Canale d'origine, Struttura, date e Ospite (FR-4)
+**And** questa Story **crea l'anagrafica `ospite`** come tabella del modulo `calendario`, unico scrittore (AD-18): `host_id` NOT NULL sotto la guardia strutturale di tenancy — **non** è un dato di riferimento (AD-2, AR-4) — con `nome` e i contatti (`email`, `telefono`) **tutti nullable** e **nessun** campo di documento d'identità (quello è `ospite_documento`, Epic 3, AD-11) `[DECISIONE MYL-40 → PRD §14.2]`
+**And** l'anagrafica si popola **solo** con ciò che il Feed fornisce esplicitamente o che l'Host inserisce volontariamente (Story 2.4): nessun campo dedotto o inferito — in particolare il `sommario` del VEVENT resta **testo opaco** della Prenotazione e non viene mai promosso a nome di Ospite (NFR-11)
+**And** una Prenotazione **senza Ospite noto resta valida** e si presenta come "Ospite non indicato" — mai un placeholder che somigli a un nome, mai un errore; dove l'ERD ammette più Ospiti per Prenotazione la griglia mostra l'**Ospite principale** (l'unico noto, o quello indicato dall'Host) e l'eventuale conteggio degli altri
+**And** i dati dell'Ospite **non compaiono** in log, eventi di dominio, payload `outbox`/`job` o notifiche — gli eventi portano solo identificatori (AD-16, AD-17, NFR-11) — e ogni altro modulo li legge **solo** via service di `calendario` (AD-18)
+**And** l'accesso è limitato al solo Host proprietario (NFR-14) e nessun dato reale di Ospiti entra in fixture o test (NFR-16)
+**And** la **retention** dei dati personali dell'Ospite è un **parametro di configurazione** legato al ciclo della Prenotazione (coerente con G2-D, valore iniziale **provvisorio** in attesa di R-5): alla scadenza un **job durevole** (AD-10) azzera nome e contatti, lasciando intatte la Prenotazione e la sua storia — mai un periodo hardcodato, mai una cancellazione della Prenotazione (NFR-12, NFR-4, NFR-15)
 **And** il selettore Struttura filtra tra vista aggregata e singola Struttura senza cambiare schermata (UX-DR1)
 **And** è sempre visibile "dati aggiornati alle HH:MM" per i dati derivati da Feed (NFR-2, UX-DR6)
 **And** i dati derivati di dominio (stati, urgenze) arrivano dall'API e il frontend li presenta, mai li ricalcola (AD-14)
@@ -338,6 +358,7 @@ So that il calendario rifletta anche ciò che non arriva dai portali e concorra 
 **When** l'Host inserisce una Prenotazione manuale
 **Then** la Prenotazione è creata in stato `attiva` e partecipa alla rilevazione dei Conflitti (FR-7, AD-19)
 **And** una Prenotazione manuale che si sovrappone a una da Feed genera un Conflitto (FR-7 → FR-5)
+**And** l'Host **può** — non deve — indicare l'Ospite: nome e, se li ha, email/telefono sono campi **facoltativi** dell'inserimento, scritti nell'anagrafica creata dalla Story 2.3 passando dal service di `calendario` (AD-18); una Prenotazione manuale si salva anche **completamente senza Ospite**, e nessun campo contatto è mai obbligatorio o precompilato con un valore dedotto (NFR-11, `[DECISIONE MYL-40]`)
 **And** una Prenotazione manuale non si cancella fisicamente: si porta a stato `cancellata` (AD-19), emettendo `prenotazione.cessata`
 
 ### Story 2.5: Rilevazione dei Conflitti
@@ -380,7 +401,7 @@ So that eviti la doppia prenotazione, sapendo che il sistema non scrive al posto
 
 **Given** un Conflitto `rilevato`
 **When** l'Host apre la Finestra di riconciliazione
-**Then** vede le due Prenotazioni sovrapposte affiancate, ciascuna con Canale, Ospite (se noto), date e **timestamp di sincronizzazione della fonte** ("Airbnb — sincronizzato alle 14:32", "Booking — sincronizzato alle 09:10") (FR-6, NFR-2, UX-DR6)
+**Then** vede le due Prenotazioni sovrapposte affiancate, ciascuna con Canale, Ospite (se noto — dall'anagrafica creata dalla 2.3; "Ospite non indicato" quando manca), date e **timestamp di sincronizzazione della fonte** ("Airbnb — sincronizzato alle 14:32", "Booking — sincronizzato alle 09:10") (FR-6, NFR-2, UX-DR6)
 **And** sceglie quale Prenotazione tenere e riceve **istruzioni guidate passo-passo** per bloccare le date sull'altro Canale; il sistema **non esegue scritture automatiche sull'OTA** (FR-6 Out of Scope, Non-Goal §8)
 **And** la transizione `rilevato → gestito` avviene **solo per azione esplicita dell'Host**; il Conflitto resta nello storico, mai cancellato (FR-6, AD-5)
 **And** se la sovrapposizione **persiste** nei sync successivi oltre una finestra configurabile (default proposto **G3-5**: 24h) dopo `gestito`, si apre un **nuovo** Conflitto collegato al precedente — il sistema non si fida ciecamente della conferma umana (AD-5, UX UJ-2 edge)
