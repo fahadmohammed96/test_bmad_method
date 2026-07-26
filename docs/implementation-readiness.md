@@ -2,9 +2,9 @@
 title: 'Implementation Readiness Report — HostPilot'
 status: approved
 gate: G3
-gate_status: 'gate G3 approvato da Fahad (2026-07-24). Restano aperti solo R-5 (owner verifica legale) e il set G2-B — non bloccanti Epic 1/2.'
+gate_status: 'gate G3 approvato da Fahad (2026-07-24). R-5 (owner verifica legale) e il set G2-B chiusi il 2026-07-25 (issue MYL-33, registrati in PRD §14.1): nessun punto di gate resta aperto.'
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-25
 assessor: John — Product Manager (leader squad), con l'architettura di Winston
 phase: '3 · Solutioning (co-artefatto del gate G3)'
 stepsCompleted: ['step-01-document-discovery', 'step-02-prd-analysis', 'step-03-epic-coverage-validation', 'step-04-ux-alignment', 'step-05-epic-quality-review', 'step-06-final-assessment']
@@ -186,7 +186,7 @@ Questi non sono difetti di planning: sono i **bivi che il gate umano G3 deve chi
 - **R-2 — Estensioni del Glossario da registrare.** Stato Conflitto `decaduto`; stati Prenotazione `attiva/cancellata/rimossa_dal_feed`; archiviazione Struttura. Non contraddicono il PRD; vanno aggiunti al Glossario (PRD §4 o addendum) così le story/UI usano il vocabolario uniforme. *Owner: John, via PR.*
 - **R-3 — Pannello Account/preferenze di notifica senza FR.** UX §2.3 `[GAP PRD]`, Architecture §9.3 raccomanda una FR minima. Rappresentato come Story 1.3 ma senza FR nel PRD. **Raccomando a Fahad di ratificare una FR minima (es. FR-20) al G3** per tracciabilità. *Owner: Fahad (scope) + John.*
 - **R-4 — Decisioni architetturali [G3-1…5] da ratificare.** Stack (G3-1), precedenza Regole di prezzo (G3-2), retention default 30/90 (G3-3), monorepo (G3-4), parametri operativi sync 15'/ri-verifica 24h (G3-5). Le Story sono **parametriche**; la ratifica non cambia gli invarianti dello spine. *Owner: Fahad, con raccomandazioni di Winston in Architecture §10.*
-- **R-5 — Verifica legale + retention (G2-D) come gate di rilascio compliance.** Le fonti normative sono editoriali, non primarie (PRD §12.1). Catturato come **Story 3.9** (gate di rilascio, non di sviluppo): va **assegnato un owner** (commercialista/legale) e schedulato prima del go-live delle feature di compliance verso terzi. *Owner: Fahad (ingaggio legale).*
+- **R-5 — Verifica legale + retention (G2-D) come gate di rilascio compliance.** Le fonti normative sono editoriali, non primarie (PRD §12.1). Catturato come **Story 3.9** (gate di rilascio, non di sviluppo). **CHIUSO il 2026-07-25** (MYL-33, PRD §14.1): owner = **il commercialista di Fahad**, con mandato esplicito (termini Alloggiati 24h/6h, tassa di soggiorno dei Comuni G2-B, ISTAT, CIN, regime fiscale/soglia 3 immobili) e obbligo di segnalare se la **retention documenti Ospiti (G2-D)** richiede un **parere privacy separato** — è GDPR, non materia fiscale. Ingaggio a cura di Fahad, risposta attesa **entro la fine dell'Epic 2**. Resta un gate di **rilascio**, non di sviluppo. *Owner: Fahad (ingaggio) → commercialista (risposta).*
 - **R-6 — Billing dell'abbonamento SaaS.** Il prodotto è "in abbonamento" ma nessuna FR copre pagamento/gestione abbonamenti. Assunzione: pilota gestito manualmente (nessun impatto architetturale ora). **Da decidere post-pilota.** *Owner: Fahad, post-pilota.*
 - **R-7 — Strategia di test per usabilità (NFR-5, G2-E) e accessibilità (NFR-8).** Target usabilità non fissati (G2-E); criteri a11y distribuiti senza verifica dedicata. **Raccomando di coinvolgere Murat (modulo TEA)** per una strategia di test risk-based su compliance, a11y e usabilità prima/durante la Fase 4. *Owner: John (routing) → Murat.*
 - **R-8 — Aspettativa "channel manager".** Il push prezzi/disponibilità verso OTA è Non-Goal esplicito (PRD §8/§9.2) ma emotivamente rilevante per l'host. Nessun blocco: assicurarsi che la UX comunichi bene l'aspettativa (export manuale). *Owner: Sally/John in Fase 4.*
