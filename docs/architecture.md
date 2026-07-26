@@ -4,7 +4,7 @@ status: approved
 gate: G3
 gate_status: 'approvata da Fahad al gate G3 (2026-07-24). Decisioni §10 [G3-1…5] ratificate; stack registrato in docs/project-context.md §6.'
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 author: Winston — System Architect
 phase: '3 · Solutioning'
 depends_on:
@@ -13,7 +13,7 @@ depends_on:
   - docs/project-brief.md (approvato, gate G1)
   - docs/project-context.md (costituzione di progetto)
 related:
-  - docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md (spine: invarianti AD-1…AD-16, contratto di consistenza per la Fase 4)
+  - docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md (spine: invarianti AD-1…AD-21, contratto di consistenza per la Fase 4)
   - Epics/Stories + Implementation Readiness (John + Winston) — stesso gate G3
 ---
 
@@ -25,7 +25,7 @@ related:
 
 Questo documento è l'artefatto architetturale della **Fase 3 (Solutioning)**, scritto per Fahad (gate **G3**), per John (Epics/Stories e readiness) e per Amelia (Fase 4 — Implementation). Progetta **contro i requisiti reali** del PRD (FR-1…FR-19, NFR-1…NFR-17) e i flussi della UX Spec (UJ-1…UJ-5), che referenzia per ID senza duplicarli.
 
-Il contratto vincolante per l'implementazione è lo **spine** (`docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`): 20 invarianti **AD-1…AD-20** con regole verificabili, passati da un reviewer gate a 5 lenti indipendenti (riconciliazione PRD e UX, rubrica, verifica web, attacco avversariale) i cui esiti sono applicati qui. Questo documento li spiega, motiva i trade-off e presenta le **decisioni aperte per il G3** (§10). Le scelte di prodotto restano di Fahad: dove c'è un bivio, do opzioni con trade-off e un consiglio, non un verdetto.
+Il contratto vincolante per l'implementazione è lo **spine** (`docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`): 21 invarianti **AD-1…AD-21** con regole verificabili — AD-1…AD-20 passati da un reviewer gate a 5 lenti indipendenti (riconciliazione PRD e UX, rubrica, verifica web, attacco avversariale) i cui esiti sono applicati qui; AD-21 registrato il 2026-07-26 come conseguenza architetturale della decisione di Fahad sull'anagrafica Ospite (MYL-40, PRD §14.2). Questo documento li spiega, motiva i trade-off e presenta le **decisioni aperte per il G3** (§10). Le scelte di prodotto restano di Fahad: dove c'è un bivio, do opzioni con trade-off e un consiglio, non un verdetto.
 
 Il log decisionale completo (alternative valutate e motivazioni) è in `docs/architecture/architecture-HostPilot-2026-07-24/.memlog.md`.
 
@@ -113,7 +113,8 @@ Punti che sono **invarianti**, non dettagli:
 - **Denaro** in centesimi interi (`importo_cent`), mai float — tassa di soggiorno e prezzi non ammettono errori di arrotondamento binario.
 - **Stati come literal del Glossario**: `rilevato/gestito/decaduto` (Conflitto — `decaduto` è l'estensione architetturale per la sovrapposizione che cessa da sola, §3.2), `da_fare/in_sospeso/completato/non_applicabile` (Adempimento, con motivazione obbligatoria su `non_applicabile`), `attiva/cancellata/rimossa_dal_feed` (Prenotazione, AD-19), enum Postgres.
 - **Un solo modulo scrittore per entità** (AD-18): ogni entità dell'ERD ha un proprietario unico che è l'unico a scriverla; gli altri moduli leggono via service. Elimina alla radice la divergenza "chi possiede l'Ospite" tra import calendario e form Alloggiati.
-- **Archiviare, mai distruggere** (AD-20): le Strutture con dati collegati si archiviano (escono dal conteggio Regime fiscale e dal cap attive), non si cancellano; audit compliance, registro tassa e storico sono append-only. Le uniche cancellazioni distruttive sono la purge di retention dei documenti (§7) e la cancellazione GDPR su richiesta.
+- **Archiviare, mai distruggere** (AD-20): le Strutture con dati collegati si archiviano (escono dal conteggio Regime fiscale e dal cap attive), non si cancellano; audit compliance, registro tassa e storico sono append-only. Le uniche cancellazioni distruttive sono tre: la purge di retention dei documenti (§7), l'azzeramento dei campi personali dell'anagrafica `ospite` alla scadenza della sua retention (AD-21, §7 — si azzerano i campi, mai si cancella la riga) e la cancellazione GDPR su richiesta.
+- **Anagrafica `ospite`** (AD-21 — decisione MYL-40 del 2026-07-26, PRD §14.2): entità tenant-owned (`host_id` NOT NULL, AD-2 — mai un dato di riferimento), scritta solo dal modulo `calendario` (AD-18); `nome`, `email`, `telefono` **tutti nullable**, popolati solo da ciò che il Feed fornisce esplicitamente o che l'Host inserisce volontariamente — mai dedotti dal `sommario` del VEVENT, che resta testo opaco della Prenotazione; nessun campo documento (quelli vivono solo in `OSPITE_DOCUMENTO`, Epic 3). Ha una retention propria per **azzeramento dei campi** (§7), distinta da quella dei documenti.
 
 ### 2.2 Configurazione normativa come dati (AD-9, NFR-4)
 
@@ -214,6 +215,7 @@ Realizza la policy del PRD §7 (NFR-10…NFR-16) come architettura, non come pro
 - **Cifratura**: a campo, AES-256-GCM con envelope encryption — DEK per record, KEK nel secret manager, rotazione senza ri-cifratura di massa (NFR-13). TLS in transito ovunque (assunzione PRD confermata).
 - **Retention automatica senza buchi**: un job di purge (durevole, AD-10) elimina i dati documento **N giorni dopo `completato`** e in ogni caso **non oltre M giorni dal check-out** anche se l'Adempimento non è mai stato completato — nessun dato sensibile resta in vita indefinitamente per un adempimento abbandonato (NFR-12); la purge non chiude l'Adempimento, che resta aperto senza dati. N e M sono configurazione ([DECISIONE G2-D] — default cautelativi proposti: **N = 30**, **M = 90 giorni**, da confermare col legale prima dell'implementazione compliance). La UI comunica la cancellazione automatica col valore reale del parametro (UX §5.2).
 - **Evidenza senza dati**: l'audit dell'avvenuta comunicazione (`EVENTO_COMPLIANCE`, NFR-7) conserva solo prova non sensibile — timestamp, esito, hash della ricevuta — così lo storico sopravvive alla purge dei dati personali (NFR-12 e NFR-7 insieme, senza tensione).
+- **Anagrafica Ospite — retention distinta, per azzeramento** (AD-21; decisione MYL-40, PRD §14.2): nome e contatti dell'entità `ospite` (tutti facoltativi) hanno una retention **propria**, separata da quella dei documenti — dato diverso, periodo diverso, base giuridica diversa (i contatti servono a Messaggi e precompilazione, non a un obbligo legale: la qualificazione è nel mandato **R-5 esteso**, materia privacy). Il periodo è un parametro di configurazione legato al ciclo della Prenotazione; la decorrenza è il `check_out`, o l'uscita dallo stato `attiva` se precedente (definita una sola volta, in AD-21); valore iniziale provvisorio proposto 90 giorni, in attesa di R-5. Alla scadenza un job durevole (AD-10) **azzera i campi personali**: la riga `ospite`, la Prenotazione e la sua storia restano intatte — mai una DELETE di riga (AD-20, coerente con la guardia strutturale GS-6 del test design Epic 2). La cancellazione su richiesta dell'interessato (NFR-15) riusa la stessa procedura di azzeramento, con evidenza.
 - **Non-esposizione**: vietato scrivere i campi documento in log, eventi, outbox o risposte API di default; la UI li ri-espone solo per azione esplicita di audit (UX §5.2). Accesso scopato all'Host proprietario (AD-2, NFR-14); cancellazione su richiesta dell'interessato = stessa procedura della purge (NFR-15).
 - **Base giuridica** (NFR-10): obbligo legale — nessun uso secondario; nessun dato reale nei fixture/test (NFR-16, project-context §7).
 
