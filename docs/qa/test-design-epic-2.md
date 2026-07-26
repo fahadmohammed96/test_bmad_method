@@ -320,7 +320,7 @@ Legenda livelli: **U** unit · **I** integration (PG reale) · **C** contract (C
 Epic: GS-1, GS-2 e GS-5 vanno consegnate **qui**, non rimandate. Nell'Epic 1 la guardia di
 tenancy (G-3) è stata rimandata di due Story ed è costata un finding P0.
 
-### Story 2.2 — Poller periodico di sincronizzazione durevole e resiliente
+### Story 2.2 — Poller periodico di sincronizzazione durevole e resiliente (consegnata, PR #40 — gate **PASS**, merge umano pendente)
 
 | # | AC (sintesi) | AD/FR | Livello | Prio | Perché a questo livello |
 | :---: | --- | --- | --- | :---: | --- |
@@ -336,6 +336,46 @@ tenancy (G-3) è stata rimandata di due Story ed è costata un finding P0.
 | 10 | Intervallo **adattivo** fino a 5' in prossimità di un check-in (default G3-5) | AD-10, G3-5 | U | P2 | È una funzione pura da `(now, prossimo check-in)` a intervallo: unit, e nient'altro. **→ §4.2-8**: «in prossimità» non è quantificato, quindi oggi la funzione non ha una specifica |
 | 11 | † Un Feed **mai** sincronizzato con successo espone uno stato esplicito, mai un orario inventato o un vuoto ambiguo | NFR-2 | I + Cmp | **P0** | È il caso in cui la falsa sincronia fa il danno massimo, ed è la stessa filosofia del `configurazione_non_disponibile` dell'Epic 1: il sistema dice «non so». **→ §4.2-3**: nessun AC lo copre |
 | 12 | † Backoff e `max_attempts`: un Feed permanentemente rotto **non blocca** gli altri Feed né la coda; l'esaurimento dei tentativi è uno stato visibile, non un silenzio | AD-10, NFR-1 | I | P1 | Proprietà di regime della coda: si osserva solo con più job reali in tabella |
+
+#### Esito del gate — Story 2.2, PR #40 (26/07/2026)
+
+Due giri di cross-review. Primo giro **BOCCIA** (sei P1); fix-batch `epic2-2.2-p1`; secondo giro
+**PASS**. Il merge resta di Fahad.
+
+| AC | Verdetto | Copertura consegnata |
+| :---: | :---: | --- |
+| 1 | ✅ FULL | `TestUnCicloDurevolePerFeed`, `TestRiprogrammazione` — «configurabile» provato cambiando il parametro e vedendo cambiare il `due_at` |
+| 2 | ✅ FULL | `TestBootstrapIdempotente` + gara **A3-3** (8 thread, barriera fra i client) |
+| 3 | ✅ FULL | gara **A3-2**; rosso verificato togliendo `skip_locked=True` → `BrokenBarrierError` in 10s |
+| 4 | ✅ FULL | `test_calendario_condizionale.py` — header asseriti **come arrivati al server** |
+| 5 | ✅ FULL | ritorno anticipato prima di `_riconcilia`; `test_un_304_lascia_le_prenotazioni_esattamente_come_stavano` fa lo snapshot dei dati, non dell'etichetta |
+| 6 | ✅ FULL | `TestUnFallimentoNonErodeIDati`, parametrizzato su 503 / 200 vuoto / troncato |
+| 7 | ✅ FULL | campo API + `FeedIcalStruttura.test.tsx` |
+| 8 | ⚠️ implementato, **non chiudibile** | contatore + soglia + log strutturato. L'AC resta non verificabile: **§4.2-9** |
+| 9 | ⚠️ PARTIAL | I e S (GS-7) consegnati; livello **E** rinviato alla 2.3 — richiede due superfici, e oggi ne esiste una |
+| 10 | ⚠️ implementato, **non chiudibile** | funzione pura (14 test) **più** la composizione con la lettura di stato (9 test), aggiunta nel fix-batch. L'AC resta non quantificato: **§4.2-8** |
+| 11 | ✅ FULL | il sistema dice «non so», mai un orario inventato |
+| 12 | ⚠️ PARTIAL | la coda non si blocca ed è provato; **ma** `esegui_sync` non solleva sugli errori di trasporto, quindi il job termina `COMPLETED` anche col portale giù e il backoff non entra mai in gioco sul percorso reale. La metà «esaurimento visibile» è coperta da un handler sintetico |
+
+**R2-C — il rischio P0 dell'Epic — è chiuso**, e sull'**interazione** fra gli AC 4/5 e l'AC 6,
+non AC per AC: il 304 lo produce il server confrontando l'`If-None-Match` realmente inviato, e
+l'asserzione è sui dati (uid → stato, date) prima/dopo, non sull'esito. Coperta anche la
+direzione opposta (`test_dopo_un_304_un_200_con_meno_eventi_riconcilia_di_nuovo`), che impedisce
+alla guardia di degenerare in un'inibizione generale.
+
+**GS-7 anticipata dalla 2.3, con perimetro ridotto dichiarato:** copre le superfici aggiunte
+dentro `app/calendario/schemas.py` (presidia 2.3, 2.4, 2.5). **Non** copre la superficie scritta
+in un altro modulo, che è il caso per cui E2-G8 esiste: **E2-G8 resta assegnato alla 2.3**.
+
+**Non chiuso da questa Story, e non è debito nascosto:** AC 9 livello E (2.3) · E2-G6, equità
+della coda fra tenant (P2, aperto) · A11, un feed reale in un ambiente vero (decisione di Fahad,
+§8.3) · **MYL-49 non è chiusa**: la guardia sulla base della PR è corretta e verificata sulla PR
+viva, ma finché non esiste una ruleset che la renda bloccante su target `**`, su una PR verso un
+ramo di story la X rossa resta informativa e il bottone Merge attivo. È configurazione del
+repository, a carico di Fahad.
+
+**Dodici finding P2** sono rimasti fuori dal fix-batch per disciplina di scope e hanno il loro
+momento in A9. Nessuno tocca la correttezza del codice consegnato.
 
 ### Story 2.3 — Calendario unificato multi-Struttura
 
@@ -661,6 +701,26 @@ di misura non dichiarate (4, 5, 11, 13). Nessuna è un errore di scrittura: sono
 esplorati**. Trovarle adesso costa un giro di documento; trovarle dopo costa un fix-batch — che
 è precisamente il conto dell'Epic 1 (retrospettiva §3.6: quattro batch reattivi contro uno
 pianificato).
+
+**Emersa in review della 2.2, non dalla lettura degli AC** — la aggiungo qui perché è la stessa
+classe (un confine non esplorato che va deciso da chi possiede il prodotto), ma va detto che non
+l'avevo vista leggendo `docs/epics.md`: si vede solo guardando il codice del 304 in esercizio.
+
+14. **Un 304 per sempre è indistinguibile da un Feed aggiornato.** La 2.2 tratta correttamente il
+    304 in risposta a una richiesta condizionale come run riuscito con dati intatti — è la scelta
+    giusta, e l'alternativa (accettare anche un 304 non sollecitato) sarebbe peggiore. Ma non
+    esiste alcun contrappeso: un portale che restituisce un `Last-Modified` statico, o un `ETag`
+    debole che non cambia mai, produce 304 all'infinito. `ultimo_sync_riuscito_il` continua ad
+    avanzare, `fallimenti_consecutivi` resta 0, lo stato resta `riuscito`, e il calendario è
+    stale a tempo indeterminato **senza che nessuna superficie lo segnali**. È esattamente la
+    falsa sincronia contro cui è scritta l'intera Story, entrata dalla porta di servizio.
+    *Proposta:* un refresh **incondizionato** forzato ogni N run — o dopo X ore dall'ultima
+    riconciliazione vera — con N/X configurabili. Non lo decido io perché cambia il contratto di
+    NFR-2 su cosa significhi «aggiornato»: oggi significa «il portale ci ha confermato che i dati
+    sono correnti», e un refresh forzato ammette che quella conferma possa mentire. Finché la
+    decisione non c'è, il buco resta e va tracciato: è l'unico rimasto scoperto nella 2.2.
+    (Sollevato da Amelia e da me nella cross-review della PR #40; la 2.2 non lo implementa, ed è
+    corretto che non l'abbia fatto senza una decisione.)
 
 ---
 
