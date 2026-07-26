@@ -4,7 +4,7 @@ Backend di **HostPilot** — monolite modulare a strati con eventi di dominio
 (transactional outbox) + worker, stesso codebase (AD-1). Consumato dal
 frontend Next.js via client TypeScript generato dall'OpenAPI (AD-14).
 Contratto vincolante: `docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`
-(AD-1…AD-20 + Consistency Conventions).
+(AD-1…AD-21 + Consistency Conventions).
 
 # Stack
 
@@ -67,7 +67,9 @@ Contratto vincolante: `docs/architecture/architecture-HostPilot-2026-07-24/ARCHI
 # Dati e migrazioni
 
 - Migrazioni Alembic **forward-only** (AR-11): `downgrade()` solleva errore
-- Modifiche distruttive vietate salvo AD-20 (purge retention GDPR)
+- Modifiche distruttive vietate salvo la lista esaustiva di AD-20: purge
+  `ospite_documento` (AD-11), azzeramento campi anagrafica `ospite`
+  (AD-21 — mai la riga), cancellazione GDPR su richiesta
 - Ogni evento outbox si scrive NELLA STESSA transazione della modifica di stato
 
 # Test

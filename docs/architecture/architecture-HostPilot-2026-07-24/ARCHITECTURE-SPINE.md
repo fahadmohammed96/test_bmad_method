@@ -7,7 +7,7 @@ paradigm: 'monolite modulare a strati, event-augmented (transactional outbox)'
 scope: 'Intero prodotto HostPilot — MVP pilota (1-3 Strutture per Host)'
 status: approved
 created: '2026-07-24'
-updated: '2026-07-25'
+updated: '2026-07-26'
 binds: ['FR-1…FR-19', 'NFR-1…NFR-17', 'UJ-1…UJ-5']
 sources: ['docs/prd.md', 'docs/ux-spec.md', 'docs/project-brief.md', 'docs/project-context.md']
 companions: ['docs/architecture.md']
@@ -118,7 +118,7 @@ Le frecce piene sono dipendenze sincrone ammesse (chi può chiamare chi), sempre
 
 - **Binds:** privacy, adempimenti (NFR-6, NFR-10…NFR-16, G2-D)
 - **Prevents:** dati identità sparsi per il DB, esposti nei log o conservati per sempre.
-- **Rule:** i campi del documento vivono SOLO nella tabella segregata `ospite_documento` (soli campi richiesti dal tracciato Alloggiati), cifrati a campo AES-256-GCM con envelope encryption (DEK per record, KEK nel secret manager). Un job di retention li elimina N giorni dopo `completato` E COMUNQUE non oltre M giorni dal check-out anche se l'Adempimento non è mai stato completato (N, M configurabili — G2-D; la purge non chiude l'Adempimento: resta aperto senza dati sensibili). L'evidenza dell'invio conserva solo prova non sensibile (timestamp, esito, hash ricevuta). Vietato scrivere questi campi in log, eventi, outbox o risposte API di default; la UI li ri-espone solo per azione esplicita di audit.
+- **Rule:** i campi del documento vivono SOLO nella tabella segregata `ospite_documento` (soli campi richiesti dal tracciato Alloggiati), cifrati a campo AES-256-GCM con envelope encryption (DEK per record, KEK nel secret manager). Un job di retention li elimina N giorni dopo `completato` E COMUNQUE non oltre M giorni dal check-out anche se l'Adempimento non è mai stato completato (N, M configurabili — G2-D; la purge non chiude l'Adempimento: resta aperto senza dati sensibili). L'evidenza dell'invio conserva solo prova non sensibile (timestamp, esito, hash ricevuta). Vietato scrivere questi campi in log, eventi, outbox o risposte API di default; la UI li ri-espone solo per azione esplicita di audit. La retention dell'**anagrafica** Ospite (nome/contatti) è un regime DISTINTO — dato diverso, periodo diverso, base giuridica diversa — governato da AD-21: questo AD non la copre e non la sostituisce.
 
 ### AD-12 — Regime fiscale: valore derivato, parametri in configurazione
 
@@ -172,7 +172,13 @@ Le frecce piene sono dipendenze sincrone ammesse (chi può chiamare chi), sempre
 
 - **Binds:** strutture, adempimenti, calendario (FR-1, FR-2, NFR-7)
 - **Prevents:** un CASCADE conforme a FR-1 ("l'Host può eliminare Strutture") che distrugge audit di compliance, registro tassa e storico versamenti.
-- **Rule:** una Struttura con dati collegati non si cancella: si porta a `archiviata` (esclusa dal conteggio Regime fiscale e dal cap attive; i Feed smettono di sincronizzare). `evento_compliance`, `movimento_tassa`, gli Adempimenti storici e i `sync_run` sono append-only e sopravvivono all'archiviazione. Le UNICHE cancellazioni distruttive ammesse nel sistema sono: la purge di retention di `ospite_documento` (AD-11) e la cancellazione dati su richiesta GDPR (procedura dedicata, con evidenza).
+- **Rule:** una Struttura con dati collegati non si cancella: si porta a `archiviata` (esclusa dal conteggio Regime fiscale e dal cap attive; i Feed smettono di sincronizzare). `evento_compliance`, `movimento_tassa`, gli Adempimenti storici e i `sync_run` sono append-only e sopravvivono all'archiviazione. Le UNICHE cancellazioni distruttive ammesse nel sistema sono TRE: la purge di retention di `ospite_documento` (AD-11); l'azzeramento dei campi personali dell'anagrafica `ospite` alla scadenza della sua retention (AD-21 — si azzerano i CAMPI, mai si cancella la riga `ospite` né la Prenotazione); la cancellazione dati su richiesta GDPR (procedura dedicata, con evidenza). Ogni futura forma di distruzione di dato deve essere aggiunta esplicitamente a questa lista, o è vietata.
+
+### AD-21 — Anagrafica Ospite: minimizzazione, retention per azzeramento dei campi
+
+- **Binds:** calendario (FR-4, FR-19, NFR-10, NFR-11, NFR-12, NFR-14, NFR-15; decisione MYL-40 — PRD §14.2). _Registrato il 2026-07-26, dopo il gate G3, come conseguenza architetturale della decisione di Fahad su MYL-40._
+- **Prevents:** contatti Ospite trattati senza base giuridica qualificata; nomi "dedotti" dal testo opaco dei Feed; dati personali dell'anagrafica conservati per sempre; una retention implementata come DELETE che rompe lo storico delle Prenotazioni, l'identità dei Conflitti (AD-5) e l'append-preserving (AD-4, AD-20).
+- **Rule:** `ospite` (anagrafica: `nome`, `email`, `telefono` — TUTTI nullable, mai obbligatori) è tenant-owned — `host_id` NOT NULL sotto la guardia strutturale AD-2, mai nell'allowlist dei dati di riferimento — e la scrive solo `calendario` (AD-18). Si persiste SOLO ciò che il Feed fornisce esplicitamente o che l'Host inserisce volontariamente: nessun campo dedotto o inferito — il `sommario` del VEVENT resta testo opaco della Prenotazione, mai promosso a nome — e nessun campo documento (quelli vivono solo in `ospite_documento`, AD-11). La retention è un parametro di configurazione legato al ciclo della Prenotazione (mai una costante nel codice — stessa disciplina di AD-9; valore iniziale provvisorio in attesa di R-5, proposta nel Deferred): la decorrenza è il `check_out`, o l'uscita dallo stato `attiva` (AD-19) se precedente — definita QUI e in nessun altro punto. Alla scadenza un job durevole (AD-10, handler idempotente) **azzera i campi personali**: la riga `ospite`, la Prenotazione e la sua storia restano intatte — l'azzeramento non è MAI una cancellazione di riga (AD-20). La cancellazione su richiesta GDPR (NFR-15) riusa la stessa procedura di azzeramento, con evidenza. I dati dell'anagrafica non compaiono in log, eventi, payload `outbox`/`job` o notifiche (soli identificatori — AD-16, AD-17); ogni altro modulo li legge solo via service di `calendario`.
 
 ## Consistency Conventions
 
@@ -280,7 +286,7 @@ Envelope operativo (vincolante quanto gli AD):
 | --- | --- | --- |
 | FR-1, FR-2 (Strutture, Comune/Regione, cap 3) | strutture | AD-2, AD-9, AD-12, AD-20 |
 | FR-3 (import iCal) | calendario | AD-4, AD-10, AD-19 |
-| FR-4 (calendario unificato) | calendario + frontend | AD-3, AD-4, AD-14 |
+| FR-4 (calendario unificato) | calendario + frontend | AD-3, AD-4, AD-14, AD-21 |
 | FR-5, FR-6, FR-7 (Conflitti e riconciliazione) | calendario | AD-3, AD-5, AD-19 |
 | FR-8, FR-9, FR-10 (Regole di prezzo) | prezzi | AD-6 |
 | FR-11 (Alloggiati Web) | adempimenti/plugins + privacy | AD-7, AD-8, AD-11, AD-17 |
@@ -290,11 +296,11 @@ Envelope operativo (vincolante quanto gli AD):
 | FR-15, FR-16 (cruscotto, automazione) | adempimenti + notifiche | AD-7, AD-8, AD-10 |
 | FR-17 (Regime fiscale) | strutture | AD-12 |
 | FR-18 (Turni di pulizia) | operativita | AD-1, AD-10, AD-19 |
-| FR-19 (Messaggi automatici) | operativita + notifiche | AD-13, AD-10, AD-19 |
+| FR-19 (Messaggi automatici) | operativita + notifiche | AD-13, AD-10, AD-19, AD-21 |
 | NFR-1…NFR-3 (sync, verità temporale, notifiche) | calendario + notifiche | AD-4, AD-5, AD-10 |
 | NFR-17 (uscita di rete sul fetch dei Feed) | calendario (worker) | AD-4 |
 | NFR-4 (configurabilità normativa) | config_normativa | AD-9 |
-| NFR-6, NFR-10…16 (GDPR) | privacy | AD-11, AD-15, AD-16 |
+| NFR-6, NFR-10…16 (GDPR) | privacy + calendario (anagrafica `ospite`) | AD-11, AD-21, AD-15, AD-16 |
 | NFR-7 (osservabilità compliance) | adempimenti | AD-16 |
 | NFR-5, NFR-8, NFR-9 (usabilità, a11y, i18n) | frontend | UX Spec §1, §6 (vincoli), AD-14 |
 
@@ -307,6 +313,7 @@ Envelope operativo (vincolante quanto gli AD):
 - **Adapter SOAP WS_ALLOGGIATI (invio automatico)** — fast-follow dietro `AdempimentoPlugin.submit` (AD-7); l'MVP parte in compilazione assistita. Richiede WSKEY per Host e verifica legale preventiva.
 - **Set iniziale Comuni/Regioni configurati (G2-B)** — decisione di prodotto; l'architettura degrada in sicurezza (AD-9) qualunque sia il set.
 - **Retention esatta documenti (G2-D)** — parametro di configurazione (AD-11); default cautelativo proposto 30 giorni, da confermare col legale.
+- **Valore della retention dell'anagrafica `ospite`** — parametro di configurazione (AD-21), decorrenza definita nell'AD; valore iniziale provvisorio proposto **90 giorni** (stesso ordine del bound M di G2-D: cautelativo, modificabile senza rilascio; trade-off: lo storico calendario perde i nomi dopo la scadenza — un periodo più lungo è possibile solo se R-5 qualifica la base giuridica dei contatti). Conferma nel mandato R-5 esteso (materia privacy — PRD §14.2), come G2-D.
 - **RLS Postgres** — difesa in profondità complementare ad AD-2, attivabile post-MVP senza cambiare il modello.
 - **Allowlist domini OTA / proxy di egress dedicato (NFR-17)** — alternative alla denylist corrente per l'uscita di rete del fetch Feed (AD-4): l'allowlist è più stretta ma rompe i portali minori e i channel manager; il proxy di egress costa infrastruttura. Opzioni aperte di Fahad, registrate come alternative note — non debito tecnico.
 - **Billing dell'abbonamento SaaS** — nessuna FR nel PRD; pilota gestito manualmente; da progettare post-pilota.
