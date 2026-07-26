@@ -1,7 +1,7 @@
 ---
 title: 'Story 1.6 — Segnalazione del Regime fiscale derivato dal numero di Strutture'
 epic: 'Epic 1: Fondamenta della piattaforma e gestione delle Strutture'
-status: in_review
+status: done
 created: 2026-07-25
 updated: 2026-07-25
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
@@ -57,3 +57,4 @@ So that io capisca l'impatto della soglia dei tre immobili **prima** di trovarme
 ### Change log
 
 - 2026-07-25 — Story creata, implementata test-first e consegnata in PR (branch `story/1.6-regime-fiscale`). **Chiude l'Epic 1.**
+- 2026-07-25 — Mergiata su `main` con il verdetto del Test Architect; stato portato a **`done`** alla chiusura dell'Epic 1 a debito zero (azione **A7** della retrospettiva; evidenza in `docs/qa/test-design-epic-1.md` §7.5 copertura AC e §7.6 dichiarazione).

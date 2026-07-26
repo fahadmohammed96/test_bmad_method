@@ -1,7 +1,7 @@
 ---
 title: 'Story 1.4 — Registrazione delle Strutture con cap di 3 unità'
 epic: 'Epic 1: Fondamenta della piattaforma e gestione delle Strutture'
-status: in_review
+status: done
 created: 2026-07-25
 updated: 2026-07-25
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
@@ -73,3 +73,4 @@ Verifica dopo le correzioni: backend **108 passed** + ruff/mypy puliti, contratt
 
 - 2026-07-25 — Story creata, implementata test-first e consegnata in PR (branch `story/1.4-strutture`).
 - 2026-07-25 — Correzioni CI/Sonar sullo stesso branch (lockfile, hardening supply-chain del workflow, code smell).
+- 2026-07-25 — Mergiata su `main` con il verdetto del Test Architect; stato portato a **`done`** alla chiusura dell'Epic 1 a debito zero (azione **A7** della retrospettiva; evidenza in `docs/qa/test-design-epic-1.md` §7.5 copertura AC e §7.6 dichiarazione).
