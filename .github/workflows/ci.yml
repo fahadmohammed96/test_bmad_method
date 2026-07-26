@@ -13,9 +13,10 @@
 #   `uv run --no-sync --no-build` (nessun re-sync, nessuna build implicita);
 # - `permissions:` esplicito e minimo (azione A2 della retrospettiva Epic 1):
 #   un workflow di CI ha accesso al repository, ai segreti e alla rete, ed è
-#   la superficie di attacco più privilegiata del progetto. Senza questo
-#   blocco il GITHUB_TOKEN gira con i permessi di default del repository,
-#   che possono includere la scrittura;
+#   la superficie di attacco più privilegiata del progetto. Senza un blocco
+#   esplicito il GITHUB_TOKEN gira con i permessi di default del repository,
+#   che possono includere la scrittura. Qui il default è **nessun permesso**,
+#   e ogni job si concede il proprio;
 # - nessun dato controllato da chi apre la PR (titolo, corpo, nome del ramo)
 #   viene interpolato con `${{ }}` dentro uno `run:`: passa da `env:`, perché
 #   l'interpolazione avviene PRIMA che la shell veda lo script e un corpo con
@@ -27,11 +28,16 @@ on:
   push:
     branches: [main]
 
-# Nessun job di questa pipeline scrive sul repository: leggono il codice,
-# installano da lockfile e girano test. Un job che dovesse davvero scrivere
-# dichiarerà il permesso che gli serve al proprio livello, non qui.
-permissions:
-  contents: read
+# Default DENY: il `GITHUB_TOKEN` nasce senza alcun permesso, e ogni job si
+# concede esplicitamente quello che gli serve (Sonar `githubactions:S8264`).
+#
+# `contents: read` a livello di workflow — la forma precedente — lo dava anche
+# ai job che non toccano il repository, e non è la stessa cosa: `base-della-pr`
+# legge SOLO il payload dell'evento, e un job senza `contents` non può clonare
+# il repository nemmeno per sbaglio. La postura minima di A2 resta, applicata
+# più stretta di prima: nessun job scrive, e chi non legge non ha nemmeno la
+# lettura.
+permissions: {}
 
 jobs:
   # La base della PR è `main` (MYL-49). Difesa strutturale contro l'incidente
@@ -47,6 +53,9 @@ jobs:
   base-della-pr:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # Esplicito e vuoto, non omesso: «questo job non ha bisogno di
+    # niente» è un'affermazione, e va scritta.
+    permissions: {}
     steps:
       - name: La base della PR è `main`
         # Il corpo della PR passa da una VARIABILE D'AMBIENTE, mai
@@ -92,6 +101,9 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
+    # Fa `actions/checkout`: gli serve leggere il repository, e nient'altro.
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: backend
@@ -144,6 +156,9 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    # Fa `actions/checkout`: gli serve leggere il repository, e nient'altro.
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: frontend
@@ -167,6 +182,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # Fa `actions/checkout`: gli serve leggere il repository, e nient'altro.
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:18
@@ -212,6 +230,9 @@ jobs:
 
   api-contract:
     runs-on: ubuntu-latest
+    # Fa `actions/checkout`: gli serve leggere il repository, e nient'altro.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5

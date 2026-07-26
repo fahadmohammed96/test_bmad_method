@@ -300,6 +300,13 @@ nella docstring.
 - **Il trattino `—` è stato tolto dalla UI.** Nel ramo «riuscito» un timestamp
   assente veniva reso come `—`, che si legge come un valore. Ora si dice che
   non si sa.
+- **I permessi della CI sono passati a default-deny** dopo il primo giro di
+  Sonar (`githubactions:S8264`, unico finding, Security Rating C sul nuovo
+  codice). `permissions: contents: read` a livello di workflow lo dava anche
+  ai job che non toccano il repository: ora il workflow è `permissions: {}` e
+  i quattro job che fanno `actions/checkout` se lo concedono al proprio
+  livello, mentre `base-della-pr` dichiara `{}` esplicito. Il finding era
+  corretto e la postura di A2 ne esce più stretta, non più larga.
 
 ### Change log
 
