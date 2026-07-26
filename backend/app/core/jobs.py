@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 
-from sqlalchemy import DateTime, Enum, Integer, String, Text, select
+from sqlalchemy import DateTime, Enum, Index, Integer, String, Text, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -38,6 +38,22 @@ class JobStatus(enum.Enum):
 
 class Job(Base):
     __tablename__ = "job"
+    __table_args__ = (
+        # Indice PARZIALE sui soli job in attesa: è la query di `claim_due`,
+        # e la coda a regime è quasi tutta fatta di righe `completed` che un
+        # indice pieno indicizzerebbe per niente.
+        #
+        # Dichiarato qui e non solo nella migrazione 0001: un indice che vive
+        # nel database e non nei modelli è deriva, e `alembic check` in CI
+        # (MYL-44) la segnala come una `remove_index` da applicare — cioè
+        # propone di cancellare l'indice che serve.
+        Index(
+            "ix_job_due",
+            "status",
+            "due_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
     job_type: Mapped[str] = mapped_column(String(200), nullable=False)

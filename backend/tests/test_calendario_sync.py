@@ -10,13 +10,10 @@ Nessun dato reale di Ospiti nei fixture (NFR-16).
 """
 
 import gzip
-import ipaddress
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import timedelta
-from pathlib import Path
 
 import httpx
 import pytest
@@ -43,107 +40,21 @@ from app.calendario.trasporto import (
 from app.calendario.uscita_rete import PoliticaUscitaRete, UrlFeedNonValidoError
 from app.core.date_range import utcnow
 from app.core.jobs import Job, JobStatus
-from app.identity.models import Host
-from app.strutture.models import Struttura
 from app.strutture.service import StrutturaNonTrovataError
+from tests.calendario import (
+    Contesto,
+    calendario,
+    client,
+    collega,
+    crea_host,
+    crea_struttura,
+    fixture_ical,
+    politica,
+    prenotazioni,
+    sincronizza,
+    vevent,
+)
 from tests.server_feed import RispostaPreparata, ServerFeed
-
-FIXTURES = Path(__file__).parent / "fixtures" / "ical"
-LOOPBACK = (ipaddress.ip_network("127.0.0.0/8"),)
-
-
-def fixture_ical(nome: str) -> bytes:
-    return (FIXTURES / nome).read_bytes()
-
-
-def calendario(*eventi: str) -> bytes:
-    corpo = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + "".join(eventi) + "END:VCALENDAR\r\n"
-    return corpo.encode("utf-8")
-
-
-def vevent(uid: str, *, dal: str, al: str, extra: str = "") -> str:
-    return (
-        "BEGIN:VEVENT\r\n"
-        f"UID:{uid}\r\n"
-        f"DTSTART;VALUE=DATE:{dal}\r\n"
-        f"DTEND;VALUE=DATE:{al}\r\n"
-        f"SUMMARY:Prenotazione inventata {uid}\r\n"
-        f"{extra}"
-        "END:VEVENT\r\n"
-    )
-
-
-def politica(
-    *,
-    cap: int = 1_000_000,
-    lettura: float = 5.0,
-    max_redirect: int = 3,
-    deadline: float = 30.0,
-    reti_consentite: tuple = LOOPBACK,
-) -> PoliticaUscitaRete:
-    return PoliticaUscitaRete(
-        timeout_connessione_secondi=2.0,
-        timeout_lettura_secondi=lettura,
-        dimensione_massima_byte=cap,
-        max_redirect=max_redirect,
-        deadline_totale_secondi=deadline,
-        reti_consentite=reti_consentite,
-    )
-
-
-def client(**kwargs) -> ClientFeedHttp:
-    """Client REALE con la politica del test: il confine resta la socket."""
-    return ClientFeedHttp(politica(**kwargs))
-
-
-@dataclass(frozen=True, slots=True)
-class Contesto:
-    host_id: uuid.UUID
-    struttura_id: uuid.UUID
-
-
-def _host(db: Session, email: str) -> Host:
-    host = Host(email=email, password_hash="$argon2id$finto")
-    db.add(host)
-    db.flush()
-    return host
-
-
-def _struttura(db: Session, host_id: uuid.UUID, nome: str) -> Struttura:
-    struttura = Struttura(
-        host_id=host_id, nome=nome, comune="Testopoli", regione="Emilia-Romagna"
-    )
-    db.add(struttura)
-    db.flush()
-    return struttura
-
-
-@pytest.fixture
-def contesto(db_session: Session) -> Contesto:
-    host = _host(db_session, "host.di.prova@example.com")
-    struttura = _struttura(db_session, host.id, "Appartamento di prova")
-    db_session.commit()
-    return Contesto(host_id=host.id, struttura_id=struttura.id)
-
-
-def collega(
-    db: Session, contesto: Contesto, url: str, canale: CanaleFeed = CanaleFeed.AIRBNB
-) -> FeedIcal:
-    return service.collega_feed(
-        db,
-        contesto.host_id,
-        service.DatiFeed(struttura_id=contesto.struttura_id, url=url, canale=canale),
-    )
-
-
-def sincronizza(db: Session, feed: FeedIcal, trasporto: ClientFeedHttp):
-    run = service.esegui_sync(db, feed.host_id, feed.id, client=trasporto)
-    db.commit()
-    return run
-
-
-def prenotazioni(db: Session, feed: FeedIcal) -> list[Prenotazione]:
-    return service.prenotazioni_del_feed(db, feed.host_id, feed.id)
 
 
 def _thread_di_fetch() -> list[threading.Thread]:
@@ -207,7 +118,7 @@ class TestCollegamentoDelFeed:
     def test_non_si_collega_un_feed_alla_struttura_di_un_altro_host(
         self, db_session: Session, contesto: Contesto
     ) -> None:
-        altro = _host(db_session, "altro.host@example.com")
+        altro = crea_host(db_session, "altro.host@example.com")
         db_session.commit()
         with pytest.raises(StrutturaNonTrovataError):
             service.collega_feed(
@@ -1611,8 +1522,8 @@ class TestTenancy:
         feed = collega(db_session, contesto, url)
         sincronizza(db_session, feed, client())
 
-        altro = _host(db_session, "altro.host@example.com")
-        sua_struttura = _struttura(db_session, altro.id, "Altra")
+        altro = crea_host(db_session, "altro.host@example.com")
+        sua_struttura = crea_struttura(db_session, altro.id, "Altra")
         db_session.commit()
 
         assert service.lista_feed(db_session, altro.id, sua_struttura.id) == []

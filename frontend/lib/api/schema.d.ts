@@ -124,6 +124,12 @@ export interface paths {
          *     Una Prenotazione uscita da `attiva` resta visibile: farla sparire senza
          *     traccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host
          *     (AD-20).
+         *
+         *     La risposta porta con sé lo stato di sincronizzazione e l'orario
+         *     dell'ultimo sync riuscito: questa è una superficie che mostra dati da
+         *     Feed, e UX-DR6 vuole «dati aggiornati alle HH:MM» su ognuna. La guardia
+         *     `tests/test_superfici_feed_convention.py` (GS-7) impone che resti vero
+         *     anche per le superfici che non esistono ancora.
          */
         get: operations["prenotazioni_api_v1_feed_ical__feed_id__prenotazioni_get"];
         put?: never;
@@ -530,6 +536,8 @@ export interface components {
             eventi_malformati: number;
             /** Eventi Ricorrenti Non Espansi */
             eventi_ricorrenti_non_espansi: number;
+            /** Fallimenti Consecutivi */
+            fallimenti_consecutivi: number;
             /**
              * Id
              * Format: uuid
@@ -652,6 +660,28 @@ export interface components {
              * Format: uuid
              */
             struttura_id: string;
+        };
+        /**
+         * PrenotazioniDelFeedOutput
+         * @description Prenotazioni di un Feed **con** la loro verità temporale (NFR-2, UX-DR6).
+         *
+         *     Un envelope e non una lista nuda. UX-DR6 chiede l'etichetta «dati
+         *     aggiornati alle HH:MM» su OGNI superficie che mostra dati da Feed, e una
+         *     lista nuda di Prenotazioni non ha un posto dove metterla: il consumatore
+         *     dovrebbe procurarsi il timestamp da una seconda chiamata e correlarlo a
+         *     mano, cioè avrebbe due letture che possono divergere e nessuna che dica
+         *     quale delle due vale.
+         *
+         *     `stato_sync` viaggia insieme per la stessa ragione: senza, un Feed mai
+         *     sincronizzato e uno sincronizzato senza prenotazioni arrivano entrambi
+         *     come lista vuota e timestamp nullo — e sono affermazioni diverse.
+         */
+        PrenotazioniDelFeedOutput: {
+            /** Prenotazioni */
+            prenotazioni: components["schemas"]["PrenotazioneOutput"][];
+            stato_sync: components["schemas"]["StatoSincronizzazione"];
+            /** Ultimo Sync Riuscito Il */
+            ultimo_sync_riuscito_il: string | null;
         };
         /**
          * RegimeFiscaleOutput
@@ -1031,7 +1061,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PrenotazioneOutput"][];
+                    "application/json": components["schemas"]["PrenotazioniDelFeedOutput"];
                 };
             };
             /** @description Validation Error */

@@ -35,6 +35,13 @@ Le proprietà che vivono qui e da nessun'altra parte (NFR-17):
    non scrive mai verso le OTA» resta vero per costruzione.
 6. **Nessuna fiducia nell'ambiente.** Un `HTTPS_PROXY` farebbe risolvere il
    nome al proxy, azzerando l'intera denylist.
+7. **Un `304` si accetta solo se glielo abbiamo chiesto.** La richiesta
+   condizionale (`If-None-Match` / `If-Modified-Since`) e la lettura del
+   `304` sono la stessa decisione e vivono nella stessa funzione: un `304`
+   non sollecitato non afferma «nulla è cambiato», perché non c'è nulla che
+   il portale possa aver confrontato. Trattarlo comunque come «tutto
+   uguale» congelerebbe il Feed per sempre, con esito riuscito — cioè la
+   falsa sincronia di NFR-2 nella forma che nessuna superficie segnala.
 """
 
 import logging
@@ -107,6 +114,36 @@ class EsitoHttpInattesoError(ErroreDiTrasporto):
 
 
 @dataclass(frozen=True, slots=True)
+class Validatori:
+    """Token di cache HTTP di un fetch riuscito (RFC 9110 §8.8).
+
+    Si rimandano al portale perché possa rispondere `304 Not Modified`
+    invece di ritrasmettere il calendario intero. Sono OPACHI: l'`ETag` è una
+    stringa arbitraria del server e `Last-Modified` è una data HTTP che va
+    rimandata **verbatim** — riformattarla la renderebbe diversa da quella
+    che il portale ha emesso e il confronto fallirebbe sempre, in silenzio.
+    """
+
+    etag: str | None = None
+    last_modified: str | None = None
+
+    def __bool__(self) -> bool:
+        return bool(self.etag or self.last_modified)
+
+    def intestazioni(self) -> dict[str, str]:
+        """Le intestazioni condizionali da mandare, o nessuna."""
+        richiesta: dict[str, str] = {}
+        if self.etag:
+            richiesta["If-None-Match"] = self.etag
+        if self.last_modified:
+            richiesta["If-Modified-Since"] = self.last_modified
+        return richiesta
+
+
+NESSUN_VALIDATORE = Validatori()
+
+
+@dataclass(frozen=True, slots=True)
 class RispostaFeed:
     stato: int
     corpo: bytes
@@ -114,11 +151,20 @@ class RispostaFeed:
     etag: str | None
     last_modified: str | None
 
+    @property
+    def non_modificato(self) -> bool:
+        """`304`: il portale conferma che i validatori mandati sono ancora
+        validi. Non c'è corpo, e non deve essercene: leggerne uno sarebbe la
+        prova che questa risposta non è quella che dice di essere."""
+        return self.stato == 304
+
 
 class ClientFeed(Protocol):
     """Confine iniettabile: il service dipende da questo, non da httpx."""
 
-    def scarica(self, url: str) -> RispostaFeed: ...
+    def scarica(
+        self, url: str, *, validatori: Validatori = NESSUN_VALIDATORE
+    ) -> RispostaFeed: ...
 
 
 class ClientFeedHttp:
@@ -133,7 +179,9 @@ class ClientFeedHttp:
         self._politica = politica
         self._risolutore = risolutore
 
-    def scarica(self, url: str) -> RispostaFeed:
+    def scarica(
+        self, url: str, *, validatori: Validatori = NESSUN_VALIDATORE
+    ) -> RispostaFeed:
         corrente = url
         # Scadenza monotona calcolata UNA volta: il budget è dell'intero
         # fetch, quindi una catena di redirect non lo moltiplica.
@@ -149,7 +197,9 @@ class ClientFeedHttp:
                 esito = self._entro_la_scadenza(
                     # `partial` e non una lambda: la lambda catturerebbe le
                     # variabili del ciclo per riferimento (B023).
-                    partial(self._un_hop, client, corrente, vetted, scadenza),
+                    partial(
+                        self._un_hop, client, corrente, vetted, scadenza, validatori
+                    ),
                     scadenza,
                     chiudi=client.close,
                 )
@@ -289,8 +339,10 @@ class ClientFeedHttp:
         url: str,
         vetted: tuple[str, ...],
         scadenza: float,
+        validatori: Validatori = NESSUN_VALIDATORE,
     ) -> RispostaFeed | str:
         pinnato, intestazioni, estensioni = self._richiesta_pinnata(url, vetted)
+        intestazioni |= validatori.intestazioni()
         try:
             with client.stream(
                 "GET", pinnato, headers=intestazioni, extensions=estensioni
@@ -300,6 +352,32 @@ class ClientFeedHttp:
                     # `Location` relativo si risolverebbe sull'indirizzo IP e
                     # perderebbe l'host originale.
                     return self._prossimo_hop(url, risposta)
+                if risposta.status_code == 304:
+                    # Un 304 vale SOLO come risposta a una richiesta
+                    # condizionale. Se non abbiamo mandato validatori non
+                    # c'è nulla che il portale possa aver confrontato: quel
+                    # 304 non afferma «è tutto uguale», afferma solo che il
+                    # portale sta rispondendo a una domanda che non gli è
+                    # stata fatta. Accettarlo come run riuscito congelerebbe
+                    # il Feed per sempre — l'import non ripartirebbe mai e il
+                    # sistema continuerebbe a dichiararsi aggiornato.
+                    if not validatori:
+                        raise EsitoHttpInattesoError(304)
+                    return RispostaFeed(
+                        stato=304,
+                        # Un 304 NON porta corpo (RFC 9110 §15.4.5) e non lo
+                        # si legge: il chiamante non deve avere in mano
+                        # qualcosa che somigli a un calendario da riconciliare.
+                        corpo=b"",
+                        content_type=None,
+                        # Il portale PUÒ rinfrescare i validatori su un 304:
+                        # se lo fa li si tiene, altrimenti restano i nostri.
+                        etag=risposta.headers.get("etag") or validatori.etag,
+                        last_modified=(
+                            risposta.headers.get("last-modified")
+                            or validatori.last_modified
+                        ),
+                    )
                 if risposta.status_code != 200:
                     raise EsitoHttpInattesoError(risposta.status_code)
                 self._rifiuta_codifica_inattesa(risposta)

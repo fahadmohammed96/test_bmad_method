@@ -360,6 +360,10 @@
             "title": "Eventi Ricorrenti Non Espansi",
             "type": "integer"
           },
+          "fallimenti_consecutivi": {
+            "title": "Fallimenti Consecutivi",
+            "type": "integer"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -420,6 +424,7 @@
           "ultimo_sync_riuscito_il",
           "ultimo_tentativo_il",
           "categoria_errore",
+          "fallimenti_consecutivi",
           "prenotazioni_attive",
           "prenotazioni_rimosse_dal_feed",
           "eventi_malformati",
@@ -693,6 +698,40 @@
           "stato"
         ],
         "title": "PrenotazioneOutput",
+        "type": "object"
+      },
+      "PrenotazioniDelFeedOutput": {
+        "description": "Prenotazioni di un Feed **con** la loro verità temporale (NFR-2, UX-DR6).\n\nUn envelope e non una lista nuda. UX-DR6 chiede l'etichetta «dati\naggiornati alle HH:MM» su OGNI superficie che mostra dati da Feed, e una\nlista nuda di Prenotazioni non ha un posto dove metterla: il consumatore\ndovrebbe procurarsi il timestamp da una seconda chiamata e correlarlo a\nmano, cioè avrebbe due letture che possono divergere e nessuna che dica\nquale delle due vale.\n\n`stato_sync` viaggia insieme per la stessa ragione: senza, un Feed mai\nsincronizzato e uno sincronizzato senza prenotazioni arrivano entrambi\ncome lista vuota e timestamp nullo — e sono affermazioni diverse.",
+        "properties": {
+          "prenotazioni": {
+            "items": {
+              "$ref": "#/components/schemas/PrenotazioneOutput"
+            },
+            "title": "Prenotazioni",
+            "type": "array"
+          },
+          "stato_sync": {
+            "$ref": "#/components/schemas/StatoSincronizzazione"
+          },
+          "ultimo_sync_riuscito_il": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Sync Riuscito Il"
+          }
+        },
+        "required": [
+          "stato_sync",
+          "ultimo_sync_riuscito_il",
+          "prenotazioni"
+        ],
+        "title": "PrenotazioniDelFeedOutput",
         "type": "object"
       },
       "RegimeFiscaleOutput": {
@@ -1399,7 +1438,7 @@
     },
     "/api/v1/feed-ical/{feed_id}/prenotazioni": {
       "get": {
-        "description": "Prenotazioni importate dal Feed, comprese quelle non più attive.\n\nUna Prenotazione uscita da `attiva` resta visibile: farla sparire senza\ntraccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host\n(AD-20).",
+        "description": "Prenotazioni importate dal Feed, comprese quelle non più attive.\n\nUna Prenotazione uscita da `attiva` resta visibile: farla sparire senza\ntraccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host\n(AD-20).\n\nLa risposta porta con sé lo stato di sincronizzazione e l'orario\ndell'ultimo sync riuscito: questa è una superficie che mostra dati da\nFeed, e UX-DR6 vuole «dati aggiornati alle HH:MM» su ognuna. La guardia\n`tests/test_superfici_feed_convention.py` (GS-7) impone che resti vero\nanche per le superfici che non esistono ancora.",
         "operationId": "prenotazioni_api_v1_feed_ical__feed_id__prenotazioni_get",
         "parameters": [
           {
@@ -1418,11 +1457,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PrenotazioneOutput"
-                  },
-                  "title": "Response Prenotazioni Api V1 Feed Ical  Feed Id  Prenotazioni Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/PrenotazioniDelFeedOutput"
                 }
               }
             },

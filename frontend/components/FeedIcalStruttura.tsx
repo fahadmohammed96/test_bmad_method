@@ -45,27 +45,55 @@ function EsitoImport({ feed }: Readonly<{ feed: FeedIcal }>) {
         {categoria && (
           <p className="text-sm text-danger">{calendarioCopy.errore[categoria]}</p>
         )}
-        {feed.ultimo_sync_riuscito_il && (
+        {/* Da quando il poller gira da solo, «non riuscito» senza un QUANDO
+            non dice niente: un tentativo fallito due minuti fa e uno fallito
+            tre giorni fa hanno la stessa etichetta e conseguenze opposte. */}
+        {feed.ultimo_tentativo_il && (
+          <p className="text-sm text-muted">
+            {calendarioCopy.ultimoTentativo(
+              formatOraIt(new Date(feed.ultimo_tentativo_il)),
+            )}
+          </p>
+        )}
+        {/* Un fallimento capita; una serie è un guasto, e va detto con
+            parole diverse (AR-10). È lo stesso segnale su cui il backend
+            fa scattare l'alert interno. */}
+        {feed.fallimenti_consecutivi > 1 && (
+          <p className="text-sm text-danger">
+            {calendarioCopy.fallimentiConsecutivi(feed.fallimenti_consecutivi)}
+          </p>
+        )}
+        {feed.ultimo_sync_riuscito_il ? (
           <p className="text-sm text-muted">
             {calendarioCopy.importate(
               feed.prenotazioni_attive,
               formatOraIt(new Date(feed.ultimo_sync_riuscito_il)),
             )}
           </p>
+        ) : (
+          // AC 11: mai un orario inventato né un vuoto ambiguo. Un Feed che
+          // non ha MAI avuto un sync riuscito è il caso in cui la falsa
+          // sincronia fa il danno massimo: il sistema dice «non so».
+          <p className="text-sm text-muted">{calendarioCopy.maiAggiornato}</p>
         )}
       </div>
     );
   }
   return (
     <div className="flex flex-col gap-1">
-      <p className="text-sm">
-        {calendarioCopy.importate(
-          feed.prenotazioni_attive,
-          feed.ultimo_sync_riuscito_il
-            ? formatOraIt(new Date(feed.ultimo_sync_riuscito_il))
-            : "—",
-        )}
-      </p>
+      {/* Il timestamp non dovrebbe mai mancare su un run riuscito, ma se
+          mancasse un trattino si leggerebbe come un valore: si dice che non
+          si sa, invece di scrivere qualcosa al posto dell'orario (NFR-2). */}
+      {feed.ultimo_sync_riuscito_il ? (
+        <p className="text-sm">
+          {calendarioCopy.importate(
+            feed.prenotazioni_attive,
+            formatOraIt(new Date(feed.ultimo_sync_riuscito_il)),
+          )}
+        </p>
+      ) : (
+        <p className="text-sm text-muted">{calendarioCopy.maiAggiornato}</p>
+      )}
       {feed.prenotazioni_rimosse_dal_feed > 0 && (
         <p className="text-sm text-muted">
           {calendarioCopy.rimosseDalFeed(feed.prenotazioni_rimosse_dal_feed)}

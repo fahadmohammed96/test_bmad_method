@@ -179,12 +179,39 @@ class TestLettura:
         assert corpo["prenotazioni_attive"] == 1
         assert corpo["ultimo_sync_riuscito_il"] is not None
 
-        prenotazioni = client.get(f"/api/v1/feed-ical/{feed_id}/prenotazioni").json()
+        risposta = client.get(f"/api/v1/feed-ical/{feed_id}/prenotazioni").json()
+        # AC 9 / UX-DR6: anche QUESTA superficie mostra dati da Feed, quindi
+        # porta con sé quando sono stati aggiornati. Una lista nuda
+        # costringerebbe il consumatore a una seconda chiamata e a correlarla
+        # a mano — due letture che possono divergere e nessuna che dica quale
+        # vale. La guardia GS-7 impone che resti vero anche per le superfici
+        # che non esistono ancora.
+        assert risposta["ultimo_sync_riuscito_il"] == corpo["ultimo_sync_riuscito_il"]
+        assert risposta["stato_sync"] == "riuscito"
+        prenotazioni = risposta["prenotazioni"]
         assert len(prenotazioni) == 1
         assert prenotazioni[0]["check_in"] == "2026-08-10"
         assert prenotazioni[0]["check_out"] == "2026-08-14"
         assert prenotazioni[0]["notti"] == 4
         assert prenotazioni[0]["stato"] == "attiva"
+
+    def test_le_prenotazioni_di_un_feed_MAI_sincronizzato_dicono_non_so(
+        self, client: TestClient
+    ) -> None:
+        # AC 11: lista vuota e timestamp nullo sono la stessa risposta di un
+        # Feed sincronizzato che non ha prenotazioni. `stato_sync` è ciò che
+        # distingue «non ce ne sono» da «non lo sappiamo ancora».
+        _accedi(client)
+        struttura_id = _struttura(client)
+        feed_id = _collega(
+            client, struttura_id, "https://feed.example.com/mai.ics"
+        ).json()["id"]
+
+        risposta = client.get(f"/api/v1/feed-ical/{feed_id}/prenotazioni").json()
+
+        assert risposta["prenotazioni"] == []
+        assert risposta["ultimo_sync_riuscito_il"] is None
+        assert risposta["stato_sync"] == "in_corso"
 
     def test_un_url_verso_la_rete_interna_fallisce_come_irraggiungibile(
         self, client: TestClient, pg_engine: Engine
@@ -212,6 +239,37 @@ class TestLettura:
         assert corpo["categoria_errore"] == "url_non_raggiungibile"
         assert corpo["ultimo_sync_riuscito_il"] is None
         assert "privat" not in dettaglio.text.lower()
+        # AC 7 e 8: l'errore è VISIBILE sulla Struttura, e il contatore
+        # distingue «un tentativo andato male» da «questo Feed ha smesso di
+        # funzionare» — senza, i due casi arrivano identici alla superficie.
+        assert corpo["fallimenti_consecutivi"] == 1
+
+    def test_il_contatore_di_fallimenti_torna_a_zero_su_un_feed_sano(
+        self,
+        client: TestClient,
+        pg_engine: Engine,
+        server_feed: ServerFeed,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HOSTPILOT_FEED_RETI_CONSENTITE", "127.0.0.0/8")
+        get_settings.cache_clear()
+        try:
+            _accedi(client)
+            struttura_id = _struttura(client)
+            url = server_feed.prepara(
+                "/calendario.ics", RispostaPreparata(corpo=FEED_MINIMO)
+            )
+            feed_id = _collega(client, struttura_id, url).json()["id"]
+            with Session(pg_engine) as db:
+                run_due_jobs(db)
+                db.commit()
+        finally:
+            get_settings.cache_clear()
+
+        assert (
+            client.get(f"/api/v1/feed-ical/{feed_id}").json()["fallimenti_consecutivi"]
+            == 0
+        )
 
 
 class TestContrattoDeiCanali:

@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, select
+from sqlalchemy import DateTime, Index, Integer, String, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -27,6 +27,18 @@ EventHandler = Callable[[Session, str, dict], None]
 
 class OutboxEvent(Base):
     __tablename__ = "outbox"
+    __table_args__ = (
+        # Indice PARZIALE sui soli eventi non ancora consegnati: è la query
+        # di `deliver_pending`, e a regime la tabella è quasi tutta fatta di
+        # eventi già consegnati. Dichiarato qui e non solo nella migrazione
+        # 0001 perché un indice assente dai modelli è deriva, e `alembic
+        # check` in CI (MYL-44) proporrebbe di cancellarlo.
+        Index(
+            "ix_outbox_pending",
+            "occurred_at",
+            postgresql_where=text("delivered_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
     event_name: Mapped[str] = mapped_column(String(200), nullable=False)

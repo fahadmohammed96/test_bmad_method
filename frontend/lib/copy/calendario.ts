@@ -30,6 +30,17 @@ export const calendarioCopy = {
 
   // NFR-2: il sistema dice «non so» invece di tacere in modo ambiguo.
   nonRiuscito: "Ultimo tentativo non riuscito",
+  // Da quando il poller gira da solo (Story 2.2) «non riuscito» senza un
+  // QUANDO non dice niente: un tentativo fallito due minuti fa e uno fallito
+  // tre giorni fa portano la stessa etichetta e conseguenze opposte.
+  ultimoTentativo: (orario: string) => `Ultimo tentativo alle ${orario}`,
+  // Un fallimento capita; una serie è un guasto, e merita parole diverse
+  // (AR-10). È lo stesso segnale su cui il backend fa scattare l'alert.
+  fallimentiConsecutivi: (quanti: number) =>
+    `Non riusciamo a sincronizzare questo calendario da ${quanti} tentativi di fila: controlla che il link sia ancora valido nel portale.`,
+  // Il caso in cui la falsa sincronia fa il danno massimo: mai un orario
+  // inventato, mai un trattino che si legge come un valore.
+  maiAggiornato: "Non abbiamo mai ricevuto le prenotazioni di questo calendario.",
   errore: {
     url_non_raggiungibile:
       "Non riusciamo a raggiungere questo indirizzo. Controlla di averlo copiato per intero dal portale.",

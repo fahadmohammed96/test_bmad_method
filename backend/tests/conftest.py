@@ -143,6 +143,29 @@ def server_feed() -> Iterator[ServerFeed]:
         yield server
 
 
+@pytest.fixture
+def contesto(db_session: Session):
+    """Un Host con una Struttura: il minimo per collegare un Feed.
+
+    Vive qui e non in un file di test perché tre file la usano. Una fixture
+    importata da un modulo di test diventa una ridefinizione a ogni funzione
+    che la chiede come parametro (F811): le fixture si condividono dal
+    conftest, gli helper puri da `tests/calendario.py`.
+
+    Import LOCALE, non in testa al file: `tests.calendario` importa `app.*`, e
+    più sopra questo modulo punta `HOSTPILOT_DATABASE_URL` al database di test
+    PRIMA che qualunque cosa di `app` venga importata. Un import in testa
+    invertirebbe quell'ordine e la suite parlerebbe col database di sviluppo.
+    """
+    from tests.calendario import crea_contesto
+
+    return crea_contesto(
+        db_session,
+        email="host.di.prova@example.com",
+        nome="Appartamento di prova",
+    )
+
+
 @pytest.fixture(scope="session")
 def pg_engine() -> Iterator[Engine]:
     url = _test_db_url()

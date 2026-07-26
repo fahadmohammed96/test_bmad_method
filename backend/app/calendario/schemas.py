@@ -51,6 +51,11 @@ class FeedIcalOutput(BaseModel):
     ultimo_sync_riuscito_il: datetime | None
     ultimo_tentativo_il: datetime | None
     categoria_errore: CategoriaErroreSync | None
+    # Quanti sync sono falliti di fila dall'ultimo riuscito (AR-10, NFR-1).
+    # Distingue «un tentativo andato male», che capita, da «questo Feed ha
+    # smesso di funzionare», che richiede una mossa dell'Host — senza, i due
+    # casi arrivano alla stessa superficie con lo stesso aspetto.
+    fallimenti_consecutivi: int
     prenotazioni_attive: int
     prenotazioni_rimosse_dal_feed: int
     eventi_malformati: int
@@ -69,3 +74,25 @@ class PrenotazioneOutput(BaseModel):
     notti: int
     sommario: str | None
     stato: StatoPrenotazione
+
+
+class PrenotazioniDelFeedOutput(BaseModel):
+    """Prenotazioni di un Feed **con** la loro verità temporale (NFR-2, UX-DR6).
+
+    Un envelope e non una lista nuda. UX-DR6 chiede l'etichetta «dati
+    aggiornati alle HH:MM» su OGNI superficie che mostra dati da Feed, e una
+    lista nuda di Prenotazioni non ha un posto dove metterla: il consumatore
+    dovrebbe procurarsi il timestamp da una seconda chiamata e correlarlo a
+    mano, cioè avrebbe due letture che possono divergere e nessuna che dica
+    quale delle due vale.
+
+    `stato_sync` viaggia insieme per la stessa ragione: senza, un Feed mai
+    sincronizzato e uno sincronizzato senza prenotazioni arrivano entrambi
+    come lista vuota e timestamp nullo — e sono affermazioni diverse.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    stato_sync: StatoSincronizzazione
+    ultimo_sync_riuscito_il: datetime | None
+    prenotazioni: list[PrenotazioneOutput]

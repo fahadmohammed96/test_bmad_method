@@ -6,15 +6,12 @@ i repository dei moduli di dominio.
 
 import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.date_range import utcnow
+from app.core.lock import NAMESPACE_CAP_STRUTTURE, blocca_per_id
 from app.strutture.models import RegimeLettura, StatoStruttura, Struttura
-
-# Namespace applicativo dei lock consultivi: distingue questo lock da
-# qualunque altro uso futuro di pg_advisory_xact_lock nel prodotto.
-NAMESPACE_LOCK_CAP_STRUTTURE = 1001
 
 
 class StrutturaRepository:
@@ -31,11 +28,12 @@ class StrutturaRepository:
 
         Una collisione di hash fra Host diversi serializzerebbe due
         creazioni non correlate: un costo trascurabile, mai un errore.
+
+        Il namespace vive in `app.core.lock`, non qui: dal secondo advisory
+        lock del prodotto la loro distinzione è una proprietà globale, e una
+        costante per modulo non la rende verificabile (RT-3).
         """
-        self._db.execute(
-            text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:chiave))"),
-            {"namespace": NAMESPACE_LOCK_CAP_STRUTTURE, "chiave": str(host_id)},
-        )
+        blocca_per_id(self._db, NAMESPACE_CAP_STRUTTURE, host_id)
 
     def by_id(self, host_id: uuid.UUID, struttura_id: uuid.UUID) -> Struttura | None:
         return self._db.scalars(
