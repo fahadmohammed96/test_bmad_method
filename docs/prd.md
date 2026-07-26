@@ -497,11 +497,19 @@ Cinque **vincoli non negoziabili** accompagnano la scelta e valgono come accepta
 **Estensione del mandato R-5** (si aggiunge ai cinque punti di §14.1, senza sostituirli):
 
 - **base giuridica** del trattamento dei **contatti** dell'Ospite (nome, email, telefono) per Messaggi automatici e precompilazione degli Adempimenti — trattamento **distinto** dall'obbligo legale che copre i documenti d'identità (NFR-10);
-- **retention** dell'anagrafica Ospite (parametro di §14.2 punto 3), separata dalla retention dei documenti di G2-D.
+- **retention** dell'anagrafica Ospite (parametro di §14.2 punto 3), separata dalla retention dei documenti di G2-D. **Domanda con una cifra**, dal 2026-07-26: l'architettura propone **90 giorni dalla decorrenza definita in AD-21** come valore iniziale provvisorio — il parere deve dire se è difendibile, non partire da zero.
 
 **Collocazione della creazione: Story 2.3** — deviazione dichiarata rispetto al candidato indicato nella decisione. Il candidato naturale era la Story 2.1 (import dai Feed), ma la 2.1 è **già consegnata** e ha deliberatamente **non** introdotto l'entità: i VEVENT di Airbnb/Booking non portano un'identità Ospite affidabile (il `SUMMARY` è testo opaco del portale, conservato come `sommario` della Prenotazione). Creare l'anagrafica nella 2.1 produrrebbe una tabella **senza percorso di scrittura**, e derivarne un nome dal `SUMMARY` violerebbe il vincolo 2 ("mai dedotti"). La creazione va quindi alla **prima Story non ancora avviata che la richiede — la 2.3, che la crea e la mostra** — e la prima scrittura volontaria dell'Host alla **2.4**.
 
-**Conseguenza per lo spine, non risolta qui** (segnalata a Winston): **AD-20** elenca come **uniche** cancellazioni distruttive ammesse la purge di `ospite_documento` (AD-11) e la cancellazione su richiesta GDPR. L'azzeramento periodico dei dati personali dell'anagrafica (punto 3) è una **terza** forma di distruzione di dato personale: va registrata in AD-11/AD-20, altrimenti l'AC della 2.3 e lo spine si contraddicono. Non la scrivo io: l'architettura è artefatto di Winston.
+**Conseguenza per lo spine — CHIUSA il 2026-07-26** (issue MYL-46, architettura di Winston). Il punto era: **AD-20** elencava come **uniche** cancellazioni distruttive ammesse la purge di `ospite_documento` (AD-11) e la cancellazione su richiesta GDPR, mentre l'azzeramento periodico dei dati personali dell'anagrafica (punto 3) è una **terza** forma di distruzione di dato personale — l'AC della Story 2.3 e lo spine si contraddicevano. Registrata nello spine come invariante dedicato **AD-21** ("Anagrafica Ospite: minimizzazione, retention per azzeramento dei campi"), **non** come estensione di AD-11: dato, proprietario, meccanismo e base giuridica sono diversi da quelli dei documenti d'identità. AD-20 elenca ora **tre** cancellazioni ammesse e distingue l'**azzeramento dei campi personali** (alla scadenza) dalla **cancellazione della riga** (mai).
+
+Tre precisazioni dell'architettura che valgono come lettura di prodotto del punto 3 — **la fonte è AD-21, questo documento non la duplica**:
+
+- **decorrenza** della retention: il `check_out`, o l'uscita dallo stato `attiva` se precedente — così una Prenotazione cancellata mesi prima del soggiorno non trattiene i contatti fino a un check-out che non avverrà;
+- **valore iniziale proposto: 90 giorni** (Deferred dello spine, stesso ordine del bound M di G2-D). Trade-off da conoscere: **dopo la scadenza lo storico del calendario perde i nomi degli Ospiti** e mostra "Ospite non indicato"; un periodo più lungo è difendibile solo se R-5 qualifica la base giuridica dei contatti. Resta un parametro: cambiarlo non richiede un rilascio;
+- **cancellazione su richiesta dell'interessato** (NFR-15): riusa la stessa procedura di azzeramento, con evidenza.
+
+Il **numero** resta quindi da confermare a **R-5** (estensione del mandato, sopra): la conferma legale ha ora una cifra concreta da accettare o spostare, non una domanda aperta.
 
 ---
 

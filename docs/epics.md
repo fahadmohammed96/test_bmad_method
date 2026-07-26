@@ -18,7 +18,7 @@ inputDocuments:
 depends_on:
   - docs/prd.md (FR-1…FR-19, NFR-1…NFR-16, UJ-1…UJ-5) — gate G2
   - docs/ux-spec.md (UX-DR estratte da §1…§8) — gate G2
-  - docs/architecture.md + ARCHITECTURE-SPINE.md (AD-1…AD-20) — gate G3
+  - docs/architecture.md + ARCHITECTURE-SPINE.md (invarianti AD-n; AD-1…AD-21 al 2026-07-26 — AD-21 aggiunto dopo il G3) — gate G3
 related:
   - docs/implementation-readiness.md (verifica di readiness, stesso gate G3)
 ---
@@ -33,7 +33,7 @@ Questo documento decompone i requisiti di **HostPilot** (PRD `docs/prd.md`, UX S
 
 **Vincoli ereditati** (`docs/project-context.md` §2, §4): il metodo è guidato dai documenti e i gate sono umani. Le decisioni di prodotto ancora aperte — **G2-A…E** (PRD §14) e **G3-1…5** (Architecture §10) — **non sono decise qui**: le Stories sono scritte in modo **parametrico** rispetto a esse (come l'architettura), e la loro chiusura è attesa a G3. Documento in italiano, consegnato via Pull Request verso `main`; nessuno scaffolding applicativo prima dell'approvazione del G3.
 
-> **Nota di lettura per Amelia (Fase 4):** il contratto vincolante per l'implementazione è lo **spine** (AD-1…AD-20 + Consistency Conventions). Dove una Story cita un AD, quell'invariante è legge, non suggerimento. I sostantivi del Glossario PRD §4 restano **in italiano verbatim** in codice/DB/API (spine).
+> **Nota di lettura per Amelia (Fase 4):** il contratto vincolante per l'implementazione è lo **spine** — **tutti** gli invarianti `AD-n` elencati in `ARCHITECTURE-SPINE.md`, più le Consistency Conventions. Vale la lista del documento, **non** un intervallo ricopiato qui: lo spine cresce quando una decisione lo richiede (AD-21 è stato aggiunto il 2026-07-26, dopo il G3, per l'anagrafica `ospite`), e un intervallo scritto a mano escluderebbe in silenzio gli invarianti più recenti. Dove una Story cita un AD, quell'invariante è legge, non suggerimento. I sostantivi del Glossario PRD §4 restano **in italiano verbatim** in codice/DB/API (spine).
 
 ---
 
@@ -143,7 +143,7 @@ _Estratti dalla UX Spec `docs/ux-spec.md` (§1…§8) come input di prima classe
 
 _UX-DR trasversali (coperti da Story di fondazione/UI): UX-DR1, UX-DR2 → 1.3 (shell/dashboard frame) + widget per epic (2.8, 3.8, 4.4, 5.3); UX-DR15 → 1.3; UX-DR16 → non un requisito implementativo ma un target da confermare a G2-E (tracciato nella readiness)._
 
-_Anagrafica `ospite` (entità dell'ERD, non una FR a sé — decisione MYL-40 del 2026-07-26, PRD §14.2): **creazione** → Epic 2 — Story **2.3**; **scrittura volontaria dell'Host** → Story **2.4**; **lettura/presentazione** → 2.3, 2.7; consumatori a valle → Epic 3 (Alloggiati, via service) ed Epic 5 (Messaggi, FR-19). NFR applicati negli AC della 2.3: **NFR-11** (minimizzazione), **NFR-12** (retention parametrica), **NFR-14** (accesso del solo Host proprietario), **NFR-16** (nessun dato reale nei test)._
+_Anagrafica `ospite` (entità dell'ERD, non una FR a sé — decisione MYL-40 del 2026-07-26, PRD §14.2): **creazione** → Epic 2 — Story **2.3**; **scrittura volontaria dell'Host** → Story **2.4**; **lettura/presentazione** → 2.3, 2.7; consumatori a valle → Epic 3 (Alloggiati, via service) ed Epic 5 (Messaggi, FR-19). NFR applicati negli AC della 2.3: **NFR-11** (minimizzazione), **NFR-12** (retention parametrica), **NFR-14** (accesso del solo Host proprietario), **NFR-16** (nessun dato reale nei test). L'invariante architetturale corrispondente è **AD-21** (spine, registrato il 2026-07-26): dove questo documento e AD-21 sembrano dire cose diverse, vale AD-21._
 
 ---
 
@@ -279,7 +279,7 @@ So that io capisca l'impatto della soglia dei tre immobili **prima** di trovarme
 
 ## Epic 2: Calendario unificato e anti double-booking
 
-L'Host collega i Feed iCal, vede tutte le Prenotazioni in un'unica griglia e viene avvisato e guidato sui Conflitti — senza falsa sincronia. Governato da AD-3, AD-4, AD-5, AD-10, AD-13 (canali notifiche), AD-14, AD-17, AD-19. Realizza UJ-1 (parte calendario), UJ-2.
+L'Host collega i Feed iCal, vede tutte le Prenotazioni in un'unica griglia e viene avvisato e guidato sui Conflitti — senza falsa sincronia. Governato da AD-3, AD-4, AD-5, AD-10, AD-13 (canali notifiche), AD-14, AD-17, AD-19, **AD-21** (anagrafica `ospite`: minimizzazione e retention per azzeramento). Realizza UJ-1 (parte calendario), UJ-2.
 
 > **[DECISIONE DI PRODOTTO — Anagrafica `ospite`, 2026-07-26]** — decisione di Fahad su proposta di Murat (issue **MYL-40**), registrata in PRD **§14.2**.
 >
@@ -287,7 +287,7 @@ L'Host collega i Feed iCal, vede tutte le Prenotazioni in un'unica griglia e vie
 >
 > 1. **Proprietà e creazione.** `ospite` appartiene al modulo `calendario`, unico scrittore (AD-18), ed è **creata dalla Story 2.3**, che ne risponde negli AC. Nessuna Story può **mostrare** l'Ospite senza che un'altra ne dichiari la creazione.
 > 2. **Minimizzazione** (GDPR by design, `project-context.md` §5, NFR-11). Si salva **solo** ciò che arriva dal Feed o che l'Host inserisce volontariamente. Campi contatto **nullable**, mai obbligatori, **mai inventati né dedotti**. **Nessun documento d'identità in questa fase**: quello è `ospite_documento` (Epic 3, AD-11), con requisiti propri.
-> 3. **Retention** (NFR-12). Periodo esplicito legato al **ciclo della Prenotazione**, espresso come **parametro configurabile** (coerente con G2-D 30/90), mai hardcodato. Il valore iniziale è **provvisorio**, in attesa dell'esito di R-5.
+> 3. **Retention** (NFR-12). Periodo esplicito legato al **ciclo della Prenotazione**, espresso come **parametro configurabile** (coerente con G2-D 30/90), mai hardcodato. Il valore iniziale è **provvisorio**, in attesa dell'esito di R-5. **Registrata nello spine come `AD-21`** il 2026-07-26 (issue MYL-46): la retention si esegue **azzerando i campi personali**, mai cancellando la riga `ospite` o la Prenotazione — AD-20 elenca ora tre cancellazioni distruttive ammesse, non due. **Decorrenza e valore del parametro vivono in AD-21 e in nessun altro punto**: questo documento non li duplica.
 > 4. **Tenancy** (AD-2, AR-4). `ospite` è **tenant-owned**: `host_id` NOT NULL e guardia strutturale di tenancy come le altre entità. **Non** va nell'allowlist dei dati di riferimento.
 > 5. **Gate legale** (R-5). I contatti degli Ospiti sono dati personali **di terzi**, non del cliente: **base giuridica** del trattamento contatti e **retention** sono punti espliciti del mandato di verifica (`docs/implementation-readiness.md` R-5, PRD §14.2). È materia **privacy, non fiscale**.
 >
@@ -336,12 +336,12 @@ So that capisca a colpo d'occhio la mia situazione senza aprire 5-6 schede di br
 **When** l'Host apre il Calendario
 **Then** vede una griglia (mensile/settimanale) che aggrega le Prenotazioni di tutte le Strutture e Canali, con distinzione visiva per Canale (FR-4)
 **And** ogni Prenotazione mostra Canale d'origine, Struttura, date e Ospite (FR-4)
-**And** questa Story **crea l'anagrafica `ospite`** come tabella del modulo `calendario`, unico scrittore (AD-18): `host_id` NOT NULL sotto la guardia strutturale di tenancy — **non** è un dato di riferimento (AD-2, AR-4) — con `nome` e i contatti (`email`, `telefono`) **tutti nullable** e **nessun** campo di documento d'identità (quello è `ospite_documento`, Epic 3, AD-11) `[DECISIONE MYL-40 → PRD §14.2]`
+**And** questa Story **crea l'anagrafica `ospite`** come tabella del modulo `calendario`, unico scrittore (AD-18), secondo l'invariante **AD-21**: `host_id` NOT NULL sotto la guardia strutturale di tenancy — **non** è un dato di riferimento (AD-2, AR-4) — con `nome` e i contatti (`email`, `telefono`) **tutti nullable** e **nessun** campo di documento d'identità (quello è `ospite_documento`, Epic 3, AD-11) `[DECISIONE MYL-40 → PRD §14.2; spine AD-21]`
 **And** l'anagrafica si popola **solo** con ciò che il Feed fornisce esplicitamente o che l'Host inserisce volontariamente (Story 2.4): nessun campo dedotto o inferito — in particolare il `sommario` del VEVENT resta **testo opaco** della Prenotazione e non viene mai promosso a nome di Ospite (NFR-11)
 **And** una Prenotazione **senza Ospite noto resta valida** e si presenta come "Ospite non indicato" — mai un placeholder che somigli a un nome, mai un errore; dove l'ERD ammette più Ospiti per Prenotazione la griglia mostra l'**Ospite principale** (l'unico noto, o quello indicato dall'Host) e l'eventuale conteggio degli altri
 **And** i dati dell'Ospite **non compaiono** in log, eventi di dominio, payload `outbox`/`job` o notifiche — gli eventi portano solo identificatori (AD-16, AD-17, NFR-11) — e ogni altro modulo li legge **solo** via service di `calendario` (AD-18)
 **And** l'accesso è limitato al solo Host proprietario (NFR-14) e nessun dato reale di Ospiti entra in fixture o test (NFR-16)
-**And** la **retention** dei dati personali dell'Ospite è un **parametro di configurazione** legato al ciclo della Prenotazione (coerente con G2-D, valore iniziale **provvisorio** in attesa di R-5): alla scadenza un **job durevole** (AD-10) azzera nome e contatti, lasciando intatte la Prenotazione e la sua storia — mai un periodo hardcodato, mai una cancellazione della Prenotazione (NFR-12, NFR-4, NFR-15)
+**And** la **retention** dei dati personali dell'Ospite segue **AD-21**, che ne è l'unica fonte per periodo e decorrenza: è un **parametro di configurazione** legato al ciclo della Prenotazione (mai un periodo hardcodato — valore iniziale **provvisorio** in attesa di R-5), e alla scadenza un **job durevole** e idempotente (AD-10) **azzera i campi personali** (`nome`, `email`, `telefono`) lasciando **intatte** la riga `ospite`, la Prenotazione e la sua storia — l'azzeramento non è **mai** una `DELETE` di riga, ed è una delle tre sole cancellazioni distruttive che AD-20 ammette (NFR-12, NFR-4, NFR-15)
 **And** il selettore Struttura filtra tra vista aggregata e singola Struttura senza cambiare schermata (UX-DR1)
 **And** è sempre visibile "dati aggiornati alle HH:MM" per i dati derivati da Feed (NFR-2, UX-DR6)
 **And** i dati derivati di dominio (stati, urgenze) arrivano dall'API e il frontend li presenta, mai li ricalcola (AD-14)
@@ -358,7 +358,7 @@ So that il calendario rifletta anche ciò che non arriva dai portali e concorra 
 **When** l'Host inserisce una Prenotazione manuale
 **Then** la Prenotazione è creata in stato `attiva` e partecipa alla rilevazione dei Conflitti (FR-7, AD-19)
 **And** una Prenotazione manuale che si sovrappone a una da Feed genera un Conflitto (FR-7 → FR-5)
-**And** l'Host **può** — non deve — indicare l'Ospite: nome e, se li ha, email/telefono sono campi **facoltativi** dell'inserimento, scritti nell'anagrafica creata dalla Story 2.3 passando dal service di `calendario` (AD-18); una Prenotazione manuale si salva anche **completamente senza Ospite**, e nessun campo contatto è mai obbligatorio o precompilato con un valore dedotto (NFR-11, `[DECISIONE MYL-40]`)
+**And** l'Host **può** — non deve — indicare l'Ospite: nome e, se li ha, email/telefono sono campi **facoltativi** dell'inserimento, scritti nell'anagrafica creata dalla Story 2.3 passando dal service di `calendario` (AD-18, AD-21); una Prenotazione manuale si salva anche **completamente senza Ospite**, e nessun campo contatto è mai obbligatorio o precompilato con un valore dedotto (NFR-11, `[DECISIONE MYL-40]`)
 **And** una Prenotazione manuale non si cancella fisicamente: si porta a stato `cancellata` (AD-19), emettendo `prenotazione.cessata`
 
 ### Story 2.5: Rilevazione dei Conflitti
