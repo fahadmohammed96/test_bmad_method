@@ -9,6 +9,7 @@
 
 import importlib
 import inspect
+import pathlib
 import pkgutil
 
 import app
@@ -75,15 +76,7 @@ def _moduli_di_dominio() -> list[str]:
 def test_ogni_metodo_di_repository_di_dominio_richiede_host_id() -> None:
     fuori_norma = []
     for modulo in _moduli_di_dominio():
-        try:
-            repository = importlib.import_module(f"app.{modulo}.repository")
-        except ModuleNotFoundError:
-            continue
-        for nome_classe, classe in inspect.getmembers(repository, inspect.isclass):
-            if not nome_classe.endswith("Repository"):
-                continue
-            if classe.__module__ != repository.__name__:
-                continue
+        for nome_classe, classe in _classi_di_repository(modulo):
             for nome_metodo, metodo in inspect.getmembers(classe, inspect.isfunction):
                 if nome_metodo.startswith("_"):
                     continue
@@ -95,9 +88,44 @@ def test_ogni_metodo_di_repository_di_dominio_richiede_host_id() -> None:
     )
 
 
+def _classi_di_repository(modulo: str) -> list[tuple[str, type]]:
+    """OGNI classe pubblica definita in `app/<modulo>/repository.py`.
+
+    Nessun filtro su `endswith("Repository")`: era cieco a un rename —
+    `PrenotazioneRepository` -> `PrenotazioneStore` faceva uscire dieci metodi
+    dal controllo con tutti i test verdi. Un pavimento numerico non bastava
+    (servivano due rinomine per farlo mordere) e andava tenuto aggiornato a
+    mano. Ispezionare tutto rende la rinomina catturata per costruzione.
+    """
+    try:
+        repository = importlib.import_module(f"app.{modulo}.repository")
+    except ModuleNotFoundError:
+        return []
+    return [
+        (nome, classe)
+        for nome, classe in inspect.getmembers(repository, inspect.isclass)
+        if not nome.startswith("_") and classe.__module__ == repository.__name__
+    ]
+
+
 def test_esiste_almeno_un_modulo_di_dominio_sorvegliato() -> None:
     # La guardia non deve mai svuotarsi in silenzio.
     assert "strutture" in _moduli_di_dominio()
+    assert "calendario" in _moduli_di_dominio()
+
+
+def test_la_guardia_ispeziona_ogni_classe_di_ogni_repository() -> None:
+    # Se un modulo di dominio ha un `repository.py`, almeno una sua classe
+    # deve essere sotto controllo: un file di repository senza classi
+    # ispezionate e' una guardia che tace.
+    for modulo in _moduli_di_dominio():
+        percorso = pathlib.Path(app.__path__[0]) / modulo / "repository.py"
+        if not percorso.exists():
+            continue
+        assert _classi_di_repository(modulo), (
+            f"app/{modulo}/repository.py non espone classi ispezionabili: "
+            "la guardia sui metodi non controlla nulla"
+        )
 
 
 def test_le_tabelle_esentate_non_acquisiscono_un_legame_con_host() -> None:

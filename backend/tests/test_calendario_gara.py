@@ -91,6 +91,10 @@ def feed_pronto(
 
 
 class TestUpsertIdempotenteSottoConcorrenza:
+    # Un deadlock del database appenderebbe `ThreadPoolExecutor.__exit__`
+    # all'infinito. Sbaglia dal lato sicuro — non passa in verde — ma un hang
+    # non deve essere l'unica difesa: il timeout lo trasforma in un rosso.
+    @pytest.mark.timeout(60)
     def test_otto_sync_in_gara_lasciano_una_sola_prenotazione(
         self,
         pg_engine: Engine,

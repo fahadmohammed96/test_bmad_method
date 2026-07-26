@@ -40,7 +40,6 @@ from app.calendario.models import (
 )
 from app.calendario.normalizzazione import (
     EventoFeed,
-    EventoNonNormalizzabileError,
     normalizza,
 )
 from app.calendario.repository import (
@@ -64,7 +63,7 @@ from app.calendario.uscita_rete import (
     valida_formato,
 )
 from app.core.config import get_settings
-from app.core.date_range import EmptyDateRangeError, utcnow
+from app.core.date_range import utcnow
 from app.strutture import service as strutture_service
 
 logger = logging.getLogger(__name__)
@@ -300,12 +299,25 @@ def esegui_sync(
             categoria=CategoriaErroreSync.FEED_NON_VALIDO,
         )
 
-    if not analizzato.eventi:
-        # Un calendario chiuso ma senza eventi è indistinguibile da un export
-        # andato male, e il costo dei due errori non è simmetrico: trattarlo
-        # come «tutto scomparso» svuoterebbe il calendario, mentre trattarlo
-        # come run fallito costa un errore visibile su un Feed che davvero
-        # non ha prenotazioni. Si sceglie il secondo.
+    # TUTTI gli uid letti dal feed, compresi quelli di eventi che non si
+    # normalizzano: un evento malformato è comunque presente nel feed, e
+    # trattarlo come scomparso marcherebbe `rimossa_dal_feed` una
+    # Prenotazione viva.
+    uid_presenti = [
+        vevent.uid for vevent in analizzato.eventi if vevent.uid is not None
+    ]
+    if not uid_presenti:
+        # Due casi, una sola conclusione. Un calendario chiuso ma senza eventi
+        # e un calendario i cui eventi non portano un `UID` utilizzabile sono
+        # entrambi indistinguibili da un export andato male, e in entrambi
+        # l'insieme degli uid presenti è vuoto — cioè l'insieme rispetto al
+        # quale si decide chi è «scomparso».
+        #
+        # Il costo dei due errori non è simmetrico: trattarli come «tutto
+        # scomparso» svuoterebbe il calendario e farebbe `decadere` i
+        # Conflitti aperti, con esito RIUSCITO e quindi in silenzio; trattarli
+        # come run fallito costa un errore visibile su un Feed che davvero non
+        # ha prenotazioni identificabili. Si sceglie il secondo.
         return _scrivi_run(
             db,
             feed,
@@ -319,28 +331,36 @@ def esegui_sync(
         feed,
         iniziato_il=iniziato_il,
         esito=EsitoSyncRun.RIUSCITO,
-        conteggi=_riconcilia(db, feed, analizzato),
+        conteggi=_riconcilia(db, feed, analizzato, uid_presenti),
     )
 
 
 def _riconcilia(
-    db: Session, feed: FeedIcal, analizzato: ical.FeedAnalizzato
+    db: Session,
+    feed: FeedIcal,
+    analizzato: ical.FeedAnalizzato,
+    uid_presenti: list[str],
 ) -> EsitoImport:
     """Upsert degli eventi e transizione degli scomparsi. Mai una DELETE."""
     prenotazioni = PrenotazioneRepository(db)
     importate = aggiornate = ricomparse = malformati = ricorrenti = 0
-    # TUTTI gli uid letti dal feed, compresi quelli di eventi che non si
-    # normalizzano: un evento malformato è comunque presente nel feed, e
-    # trattarlo come scomparso marcherebbe `rimossa_dal_feed` una
-    # Prenotazione viva.
-    uid_presenti: list[str] = []
 
     for vevent in analizzato.eventi:
-        if vevent.uid is not None:
-            uid_presenti.append(vevent.uid)
         try:
             evento = normalizza(vevent)
-        except (EventoNonNormalizzabileError, EmptyDateRangeError) as exc:
+        except Exception as exc:
+            # `normalizza` è PURA: nessun I/O, nessuna sessione. Qui si può
+            # catturare largo senza rischiare di proseguire su una transazione
+            # abortita, e va fatto: il contenuto è di terze parti, quindi
+            # l'insieme dei modi in cui può essere illeggibile non è
+            # enumerabile a priori. Un'eccezione che sfugge risalirebbe fino
+            # al SAVEPOINT per item del worker, annullando la riga `sync_run`
+            # insieme all'errore — e il Feed tornerebbe a
+            # «mai sincronizzato» senza categoria d'errore, cioè il
+            # fallimento silenzioso che AC 7 e AC 5 vietano.
+            #
+            # L'uid resta in `uid_presenti` (calcolato a monte): un evento
+            # illeggibile è comunque NEL feed, non scomparso.
             malformati += 1
             logger.info(
                 "VEVENT non normalizzabile: registrato come malformato",

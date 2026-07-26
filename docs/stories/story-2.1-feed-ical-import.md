@@ -4,6 +4,7 @@ epic: 'Epic 2: Calendario unificato e anti double-booking'
 status: in_review
 created: 2026-07-26
 updated: 2026-07-26
+review: 'BOCCIATA da Murat sulla PR #35; corretta col fix-batch epic2-batch1'
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - docs/epics.md (Story 2.1, AC completi)
@@ -235,8 +236,288 @@ doppia prenotazione ospitata, se cade il secondo è un'etichetta.
   modellato su RFC 5545 e sulla forma documentata degli export, **non**
   catturato da feed reali (punto A11, che resta aperto).
 
+### Fix-batch `epic2-batch1` — cross-review di Murat sulla PR #35 (BOCCIA)
+
+Un P0 che avevo mancato, quattro P1 e la lista P2. Scope rigido: solo i
+finding elencati nel batch.
+
+**P0 — la nona forma.** `marca_rimosse_dal_feed` filtrava con
+`ical_uid NOT IN (uid_presenti)`, e con la lista **vuota** SQLAlchemy rende
+l'IN espandibile come `(ical_uid NOT IN (NULL) OR (1 = 1))`: vero per ogni
+riga. Un VCALENDAR chiuso i cui VEVENT non portano `UID` passava tutti i
+cancelli a monte — non è troncato, e `analizzato.eventi` non è vuoto — e
+arrivava alla riconciliazione con l'insieme vuoto: **tutte** le Prenotazioni
+attive del Feed marcate `rimossa_dal_feed`, con esito **RIUSCITO**. Peggio
+della versione chiusa in prima battuta: là il run risulta fallito e l'Host
+vede l'errore, qui la UI non segnala niente e i Conflitti decadono in
+silenzio.
+
+La beffa era nel mio stesso docstring: avevo capito che un malformato **con**
+uid è nel feed e non va trattato come scomparso, e il caso in cui la
+malformazione **è** l'UID mancante invertiva quella guardia in una
+cancellazione di massa. Nessun test aveva `uid_presenti` vuoto —
+`eventi-malformati.ics` contiene anche un evento buono.
+
+Chiuso su due livelli: il service decide su «nessun evento **identificabile**»
+(non più «nessun evento») e scrive `FEED_SENZA_EVENTI`; il repository ha una
+guardia `if not uid_presenti: return 0`, perché quella riga SQL non deve poter
+mai più significare «tutte». Nona e decima forma aggiunte al parametrize di
+`TestScomparsoNonERicevuto`, più il confine opposto: con **un solo** uid
+valido fra tanti senza uid la riconciliazione avviene, ed è giusta.
+
+**P1-1 — nessun `sync_run` perso.** Il loop catturava due sole eccezioni;
+qualunque altra risaliva al SAVEPOINT per item e portava via la riga
+`sync_run`, riportando il Feed a «mai sincronizzato» senza categoria d'errore
+(AC 7 e AC 5 violati). Tre inneschi da contenuto di terze parti, tutti
+riprodotti: `DURATION:P99999999D` e `P99999999W` (`OverflowError` sulla somma
+di date) e un `ical_uid` oltre i 500 caratteri della colonna (`DataError`).
+Rimedio: `normalizza` è **pura**, quindi il loop cattura largo senza rischiare
+di proseguire su una transazione abortita; l'uid oltre colonna si rifiuta
+**prima** del database (`LUNGHEZZA_MASSIMA_ICAL_UID`, con un test che la lega
+allo schema) — l'uid non si tronca, è la chiave naturale. L'uid resta in
+`uid_presenti`: un evento illeggibile è comunque nel feed.
+
+**P1-2 — deadline wall-clock.** `httpx.Timeout` è per-operazione: un byte
+appena dentro il timeout di lettura non fa scattare nulla. Aggiunta
+`feed_deadline_totale_secondi` (configurazione, NFR-4), monotona, calcolata
+**una volta** in `scarica` e controllata per hop **e dentro** il loop di
+`iter_bytes`. Due test con un server che sgocciola, uno dei quali verifica che
+una catena di redirect non moltiplichi il budget.
+
+**P1-3 — pinning dell'indirizzo vetted.** `valida_destinazione` già ritornava
+gli indirizzi approvati e `_valida` li buttava: c'erano due `getaddrinfo`
+indipendenti per hop e nulla legava il secondo al primo. Ora si connette
+all'indirizzo approvato, con `Host` esplicito e `sni_hostname` perché la
+verifica del certificato resti sul nome. Il `Location` relativo si risolve
+sull'URL **logico**, non su quello pinnato. DNS rebinding chiuso.
+
+**P1-4 — `isError` sulla lista Feed.** Su 500 o sessione scaduta la UI
+mostrava «Nessun calendario collegato»: affermava il falso sullo stato del
+calendario di una Struttura che ha tre feed. Copy distinta
+(`feedNonCaricati`), e coperti anche submit, trim dell'URL, reset su
+`onSuccess` e bottone disabilitato — aggiunto `@testing-library/user-event`.
+
+**P2 chiusi:** `alembic/env.py` non importava `app.calendario.models` e
+`alembic check` proponeva `remove_table` su tutte e tre le tabelle nuove — la
+mia stessa classe di «assenze», corretta nelle guardie e non lì. I modelli ora
+si **scoprono** (`app/registro_modelli.py`, usato anche dalle guardie: una
+sola sorgente di verità) con una guardia che fallisce se `env.py` torna a
+elencarli a mano. Poi: `trust_env=False`, `Accept-Encoding: identity`,
+divieto di declassamento `https → http` fra hop, `fec0::/10` e
+`not is_global` **aggiunto** ai controlli espliciti, `url_redatto` che redige
+anche **query e fragment** (negli export OTA il link *è* la credenziale), e
+tutte le action di `ci.yml` pinnate al commit SHA — il commento in testa
+affermava un controllo che valeva solo per `setup-uv`.
+
+**P2 di qualità dei test:** `test_le_credenziali_nell_url_non_finiscono_nei_log`
+era tautologico (gli attributi `extra=` non finiscono in `caplog.text`) e ora
+asserisce sui `records`, in positivo sulla forma redatta — verificato contro
+entrambe le mutazioni che prima sopravvivevano; `any()` su una tupla già
+asserita vuota sostituito dall'asserzione sulla conseguenza; pavimento sul
+numero di metodi che la guardia di tenancy **ispeziona** davvero (un rename di
+classe la rendeva cieca); guardia anti-`drop_table` indipendente dallo stile
+di virgolette; `pytest.mark.timeout(60)` sul test di gara perché un deadlock
+sia un rosso e non un hang; server di test con `request_queue_size = 16` (gli
+8 client della barrier eccedevano la coda di default) e handler sbloccato alla
+chiusura invece che dopo 30 secondi fissi; due smoke test con nomi che
+promettevano semantica non asserita ora la asseriscono.
+
+**Non chiuso, e perché.** `alembic check` resta rosso su cinque voci di deriva
+**preesistenti** e non mie: gli indici parziali `ix_job_due` e
+`ix_outbox_pending` (creati nella migrazione 0001 con `postgresql_where`, non
+dichiarati sui modelli) e la rappresentazione di `regime_lettura.host_id`
+(unique + index, Story 1.6). Le tre `remove_table` che erano il finding sono
+scomparse. È informazione per MYL-44: il cancello non si può accendere senza
+prima ripulire quella deriva.
+
+### Fix-batch `epic2-batch2` — secondo giro di cross-review (BOCCIA su PR #36)
+
+Tre bloccanti e una lista di P2. Scope rigido: solo i finding del batch.
+
+**Bloccante 1 — la scadenza non copriva la fase di testa.** I checkpoint erano
+due (prima dell'hop, dentro `iter_bytes`) e in mezzo c'era
+`client.stream(...)`, che blocca finché la testa della risposta non è
+completa. Un byte di **intestazione** ogni 9s sta dentro `read=10s` e non
+incontra nessun controllo: ~100 KiB di h11 × 9s ≈ 256 ore di worker
+inchiodato. Rosso visto prima con un server che sgocciola le intestazioni: il
+test si appende, e `pytest-timeout` lo localizza su `client.stream`.
+
+La diagnosi che conta è di Murat e la riporto perché è la lezione: *un insieme
+di controlli non limita il tempo che passa fra due controlli.* Chiamare «bound
+wall-clock» dei checkpoint era l'errore. Ora ogni attesa passa da
+`_entro_la_scadenza`, che la esegue e la **abbandona** al residuo del budget —
+DNS compreso, che era l'altra attesa non budgetata (`getaddrinfo` non accetta
+timeout). I timeout per-operazione restano, limitati al residuo, ma non sono
+il bound: servono a far morire in fretta il lavoro abbandonato.
+
+**Bloccante 2 — il controllo sul declassamento era testato sul seam sbagliato.**
+Il test chiamava `_vieta_declassamento` direttamente e prendeva tre fixture
+senza usarne nessuna: cancellare la riga che invocava il controllo nel ciclo
+lasciava tutto verde. Il controllo è stato **fuso** in `_prossimo_hop`, che
+calcola la destinazione del redirect: il prossimo hop non si calcola più senza
+passare dal controllo. Le due mutazioni ora mordono entrambe — togliere il
+controllo fa cadere il caso `https → http` del parametrize, togliere il
+calcolo fa cadere tre test dei redirect.
+
+Il `trust_env=False` invece si può verificare sul comportamento, e ora lo è:
+con quattro variabili di proxy nell'ambiente il fetch al server locale
+**riesce**; se l'ambiente fosse onorato, httpx instraderebbe al proxy
+inesistente e fallirebbe.
+
+**Bloccante 3 — due test che non potevano fallire.** La sentinella della
+guardia anti-`drop_table` rileggeva il **proprio** sorgente e cercava un
+letterale che stava sulla riga dell'assert: sempre presente. Ora la guardia
+prende la cartella come parametro e la sentinella le fa esaminare una
+migrazione finta in `tmp_path`, per quattro forme distruttive, più il caso
+innocuo che non deve segnalare. E `test_le_proprieta_sconosciute_si_ignorano`
+guardava una proprietà che stava a livello VCALENDAR, fuori dai VEVENT che
+l'assert ispezionava. Spostata dentro il VEVENT il test è andato **rosso** — e
+ha mostrato che la mia asserzione era falsa sul disegno: il parser le
+proprietà sconosciute le **raccoglie**, è il normalizzatore a non guardarle.
+Il test ora asserisce le due proprietà vere.
+
+**P2 chiusi.** Guardia di tenancy senza filtro sul nome e senza pavimenti
+numerici da aggiornare (ispeziona ogni classe pubblica di
+`app/*/repository.py`: una rinomina è catturata per costruzione, e con il
+pavimento a 12 contro 20 metodi ne servivano due per farlo mordere). Guardia
+del repository pinnata da due test che la chiamano **direttamente**, saltando
+il cortocircuito del service. `test_la_deadline_non_si_moltiplica_per_i_redirect`
+riscritto con tre hop che consumano una frazione del budget — e l'assertion
+sul numero di hop era sbagliata: il terzo hop può legittimamente partire, la
+proprietà è l'esito. `registro_modelli` con i bersagli derivati dal
+**filesystem** invece che dalla funzione sotto test, e `app/core/` scoperto
+invece che elencato (era l'ultimo elenco a mano, e la guardia lo escludeva dal
+proprio scopo). Guardia su `env.py` con `ast` invece del match di stringa, più
+la sentinella sulle tre forme di import che il match non vedeva.
+`pytest-timeout` configurato globalmente (`timeout = 120`) con
+`--strict-markers`, così se uscisse dal gruppo dev la suite non parte invece
+di degradare a warning.
+
+Sul trasporto: `Content-Encoding` diverso da `identity` **rifiutato** (una
+bomba zlib passava il pre-check sul dichiarato e si espandeva 13× il tetto, e
+un chunk che decodifica a vuoto salta anche i checkpoint); pinning che
+conserva lo **userinfo** (era una regressione del batch 1: un Feed credenziato
+prendeva 401) e mette le **quadre** all'IPv6 anche nell'header `Host`;
+`fec0::/10` e `not is_global` coperti da test che verificano entrambe le metà
+— quali indirizzi sono vietati *solo* grazie a `is_global` e quali risultano
+globali e hanno bisogno dei check espliciti.
+
+Minori: il test del log pretende ora **entrambe** le sedi (`trasporto` e
+`service`), non una qualsiasi; il margine del test di drip separato dal timeout
+di lettura (coincidevano, quindi l'unico modo di dare il colore sbagliato
+cadeva sul confine dell'assert); `isPending` della lista Feed coperto; il
+`trim()` dell'URL pinnato con `fireEvent` invece di `userEvent`, perché
+`input type="url"` in jsdom normalizza già gli spazi e il test non pinnava
+nulla; handler del server di test che non stampa più tracebacks quando il
+client abbandona la connessione.
+
+**Correzione accettata sul `DURATION`.** Avevo ragione sulla riga che salta ma
+i commenti dicevano «timedelta esplode», e non è vero: `timedelta.max.days` è
+999 999 999, quindi né `P99999999D` né `P99999999W` lo sfiorano — falliscono
+entrambi sulla somma con la data. Erano **un solo** percorso, non due.
+Aggiunto `P9999999999D`, che a dieci cifre fa saltare `timedelta` per davvero.
+
+**Non chiuso.** `alembic check` resta rosso sulle cinque voci preesistenti
+(`ix_job_due`/`ix_outbox_pending` e `regime_lettura.host_id`): le tre
+`remove_table` sono confermate assenti. Murat le ha portate su MYL-44.
+
+### Fix-batch `epic2-batch3` — terzo giro di cross-review (BOCCIA su PR #36)
+
+Un P1, due chiusure da **decidere**, quattro test che passavano per il motivo
+sbagliato, un margine.
+
+**P1 — l'abbandono liberava il worker ma non rilasciava la connessione.** Il
+`httpx.Client` si costruiva **dentro** l'azione abbandonata, quindi il lato che
+abbandona non aveva alcun handle: `cancel_futures` scarta solo le future non
+avviate, e thread, socket e pool restavano nel thread orfano. E il docstring
+affermava il contrario — «il lavoro abbandonato muore da sé perché il timeout
+di lettura è limitato al residuo» — che è **falso** per la stessa ragione
+scritta due paragrafi sopra: i timeout per-operazione si azzerano a ogni byte.
+Lo stesso errore del giro precedente, un livello più in basso. A fermare il
+thread restava solo `MAX_INCOMPLETE_EVENT_SIZE` di httpcore: 100 KiB × il
+timeout di lettura ≈ 284 ore, e su una costante privata.
+
+Tre cose insieme: il client si costruisce in `scarica` (fuori dall'azione), si
+**chiude** sul percorso di scadenza — così la read successiva solleva e il
+thread esce entro un ciclo di lettura — e il thread è **daemon**, perché quelli
+di `ThreadPoolExecutor` non lo sono e un hook atexit li fa `join`: un abbandono
+bloccava l'uscita del processo, quindi un `SIGTERM` al worker restava appeso
+fino al `SIGKILL`.
+
+Il presidio che mancava, e che è la proprietà su cui poggia tutto il giro
+precedente: `test_un_fetch_abbandonato_non_lascia_thread_ne_connessioni` conta i
+superstiti con `threading.enumerate()`, più
+`test_l_azione_abbandonata_gira_in_un_thread_daemon_e_viene_chiusa` che è
+**deterministico** — l'azione blocca su un `Event` del test, quindi il thread è
+vivo con certezza quando si ispezionano `daemon` e chiusura. Tre mutazioni
+verificate: `daemon=False` cade, chiusura non invocata cade, e togliendo
+**entrambe** le chiusure il test di integrazione trova i superstiti.
+
+**Decisione 1 — `not is_global` si tiene, ma il commento diceva il falso.** Il
+test sceglieva tre indirizzi che hanno `is_private=True` e cadono già sul check
+esplicito: cancellando la clausola la suite restava verde. La clausola non ha
+copertura odierna dimostrabile — l'unica classe candidata, la CGNAT, è già
+nella lista esplicita. Vale come **assicurazione in avanti**: quando la IANA
+assegna una nuova destinazione speciale, `is_global` la prende con un
+aggiornamento della stdlib e la lista no. Commento riscritto in quei termini, e
+la clausola pinnata per come è osservabile — una sottoclasse di un indirizzo
+**vero** con `is_global` sovrascritto (uno stub solleverebbe `TypeError` dentro
+`ip_network.__contains__` e il test misurerebbe quello). Cancellare la riga ora
+fa cadere quel test.
+
+**Decisione 2 — la `.trim()` si tiene, e ora è pinnata.** La sanitizzazione sta
+nel **setter** di `value` di jsdom per `input[type="url"]`, quindi sia
+`userEvent` sia `fireEvent.change` la subiscono: su spazi ASCII la `.trim()`
+sarebbe codice morto anche in produzione, perché i browser reali fanno lo
+stesso. Ma il sanitizer non tocca lo spazio **insecabile** (U+00A0) — che è
+esattamente quello che arriva incollando un link da una pagina web — e
+`String.trim()` lo rimuove. Quindi la `.trim()` ha uno scopo reale, e il test
+lo dimostra: togliendola, il test cade con
+`expected ' https://…' to be 'https://…'`.
+
+**I quattro test che passavano per il motivo sbagliato.** La guardia di
+`registro_modelli` confrontava lo scan del filesystem col `Base.metadata` del
+processo corrente, già popolato dagli import di collection: escludere
+`calendario` dalla scoperta restava **verde in suite completa**. Ora la
+scoperta gira in un interprete fresco (`subprocess`) e si confronta ciò che
+riporta quel processo — verificato, la mutazione cade anche in suite completa.
+La sentinella su `env.py` esercitava solo l'helper: estratto `_import_a_mano`
+che prende il **sorgente**, parametrizzato su cinque forme evasive più quattro
+legittime; cancellando il ramo `ast.Import` due casi cadono. Il test dei proxy
+azzera anche `NO_PROXY`/`no_proxy`. La guardia sulle migrazioni ha un pavimento
+sul numero di file: puntata su un percorso rinominato non passa più
+ispezionando zero bersagli.
+
+**Margine.** Il test sui redirect scalato a `ritardo=0.5` / `deadline=1.2`: la
+discriminazione per-hop/totale è identica (ogni ritardo resta metà del budget),
+lo slack passa da ~100 ms a ~700 ms — serviva perché ogni hop costruisce un
+`SSLContext` nuovo.
+
+**Extra descritto in review, incluso perché è la proprietà giusta:** la
+regressione dello userinfo era pinnata su un'uguaglianza di stringa sul metodo
+privato; ora c'è anche il test che asserisce l'`Authorization: Basic`
+effettivamente **ricevuto** dal server.
+
+**Sparito per costruzione:** `except ScadenzaFuturo` non esiste più — con il
+thread grezzo non c'è una `TimeoutError` builtin che possa confondere un
+`socket.timeout` sollevato dentro l'azione con la scadenza complessiva.
+
 ### Change log
 
 - 2026-07-26 — Story creata, implementata test-first e consegnata in PR
   (branch `story/2.1-feed-ical-import`). Prima Story dell'Epic 2, primo codice
   di rete in uscita del progetto.
+- 2026-07-26 — Cross-review di Murat: **BOCCIA**. Fix-batch `epic2-batch1`
+  con il P0 sugli uid vuoti, quattro P1 e la lista P2. Rosso visto prima su
+  P0, P1-1, P1-2 e P1-4.
+- 2026-07-26 — Secondo giro di cross-review: **BOCCIA**. Fix-batch
+  `epic2-batch2`: scadenza sulla socket (non checkpoint), controllo del
+  declassamento fuso nel calcolo del prossimo hop, due test vacui resi
+  mordenti, piu' la lista P2. Rosso visto prima su tutti e tre i
+  bloccanti.
+- 2026-07-26 — Terzo giro di cross-review: **BOCCIA**. Fix-batch
+  `epic2-batch3`: il thread abbandonato non rilasciava la connessione
+  (client fuori dall'azione + `close()` + daemon + presidio sui thread),
+  due chiusure risolte decidendo, quattro test resi mordenti, margine
+  del test sui redirect. Voce di sidecar sbagliata **corretta sul
+  posto**.

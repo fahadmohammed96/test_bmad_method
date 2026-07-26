@@ -23,6 +23,8 @@ Due difese indipendenti:
 import ast
 import pathlib
 
+import pytest
+
 from tests.modello import carica_modelli
 
 Base = carica_modelli()
@@ -139,15 +141,86 @@ def test_il_modulo_proprietario_non_cancella_nulla() -> None:
     )
 
 
+def _migrazioni_sospette(cartella: pathlib.Path) -> list[str]:
+    """Migrazioni che distruggono dati append-only, nella cartella data.
+
+    Prende la cartella come parametro perche' la sentinella qui sotto la punti
+    su una migrazione finta: una guardia si verifica facendole trovare
+    qualcosa, non rileggendo il proprio sorgente.
+    """
+    sospette = []
+    for percorso in sorted(cartella.glob("*.py")):
+        testo = percorso.read_text(encoding="utf-8")
+        for tabella in TABELLE_PROTETTE:
+            # ENTRAMBI gli stili di virgolette: autogenerate emette apici
+            # singoli, `ruff format` li normalizza a doppi. Una guardia che ne
+            # conosce uno solo e' appesa a un formattatore.
+            forme = [
+                f"drop_table('{tabella}'",
+                f'drop_table("{tabella}"',
+                f"DELETE FROM {tabella}",
+                f"delete_from('{tabella}'",
+                f'delete_from("{tabella}"',
+            ]
+            sospette += [
+                f"{percorso.name}: {forma}" for forma in forme if forma in testo
+            ]
+    return sospette
+
+
+def test_la_cartella_delle_migrazioni_non_e_vuota() -> None:
+    # Senza questo, puntare la guardia su un percorso rinominato la fa passare
+    # ispezionando ZERO bersagli. È la stessa classe chiusa per tenancy e per
+    # `registro_modelli`: una guardia che non trova nulla da controllare deve
+    # fallire, non tacere.
+    migrazioni = sorted((BACKEND / "alembic" / "versions").glob("*.py"))
+    assert len(migrazioni) >= 8, (
+        f"solo {len(migrazioni)} migrazioni trovate: la guardia sta guardando "
+        "nel posto sbagliato"
+    )
+
+
 def test_nessuna_migrazione_cancella_una_tabella_protetta() -> None:
     # Le migrazioni sono forward-only (AR-11) e le modifiche distruttive sono
     # vietate salvo AD-20: un `drop_table` o un `DELETE FROM` su una tabella
-    # protetta è la via più silenziosa per perdere Prenotazioni.
-    sospette = []
-    for percorso in (BACKEND / "alembic" / "versions").glob("*.py"):
-        testo = percorso.read_text(encoding="utf-8")
-        for tabella in TABELLE_PROTETTE:
-            for forma in (f'drop_table("{tabella}"', f"DELETE FROM {tabella}"):
-                if forma in testo:
-                    sospette.append(f"{percorso.name}: {forma}")
+    # protetta e' la via piu' silenziosa per perdere Prenotazioni.
+    sospette = _migrazioni_sospette(BACKEND / "alembic" / "versions")
     assert sospette == [], f"migrazioni distruttive su dati append-only: {sospette}"
+
+
+@pytest.mark.parametrize(
+    "istruzione",
+    [
+        "op.drop_table('prenotazione')",
+        'op.drop_table("prenotazione")',
+        "op.execute('DELETE FROM sync_run')",
+        "op.delete_from('feed_ical')",
+    ],
+)
+def test_la_guardia_riconosce_una_migrazione_distruttiva(
+    tmp_path: pathlib.Path, istruzione: str
+) -> None:
+    # Sentinella della guardia: le si fa esaminare una migrazione finta e si
+    # pretende che la segnali. La versione precedente rileggeva il PROPRIO
+    # sorgente e asseriva la presenza di un letterale che stava sulla riga
+    # dell'assert stesso — non poteva fallire, cioe' reintroduceva una riga
+    # sotto la classe di difetti che questo file esiste per chiudere.
+    (tmp_path / "20260101_9999_finta.py").write_text(
+        "def upgrade() -> None:\n    " + istruzione + "\n", encoding="utf-8"
+    )
+
+    assert _migrazioni_sospette(tmp_path), (
+        f"la guardia non riconosce '{istruzione}' come distruttiva"
+    )
+
+
+def test_la_guardia_non_segnala_una_migrazione_innocua(
+    tmp_path: pathlib.Path,
+) -> None:
+    # L'altra metà: una guardia che segnala tutto non discrimina.
+    (tmp_path / "20260101_9999_innocua.py").write_text(
+        "def upgrade() -> None:\n    op.add_column('prenotazione', colonna)\n",
+        encoding="utf-8",
+    )
+
+    assert _migrazioni_sospette(tmp_path) == []

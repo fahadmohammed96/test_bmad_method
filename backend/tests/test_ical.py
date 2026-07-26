@@ -135,10 +135,32 @@ class TestSintassi:
         evento = analizza_feed(corpo).eventi[0]
         assert evento.valore("SUMMARY") == "a" * 66 + "b" * 20
 
-    def test_le_proprieta_sconosciute_si_ignorano(self) -> None:
-        assert (
-            len(analizza_feed(_fixture("folding-e-confini-testuali.ics")).eventi) == 2
+    def test_le_proprieta_sconosciute_non_disturbano_la_normalizzazione(self) -> None:
+        # «Si ignorano» significa due cose precise, e la prima versione di
+        # questo test non ne asseriva nessuna: la proprieta' stava a livello
+        # VCALENDAR, quindi non poteva comparire fra quelle dei VEVENT
+        # qualunque cosa facesse il parser. Spostata dentro il VEVENT, si
+        # scopre che il parser la RACCOGLIE — e' il normalizzatore a non
+        # guardarla. Ecco le due proprieta' vere:
+        eventi = _eventi_per_uid("folding-e-confini-testuali.ics")
+        vevent = eventi["eeee5555-folding@example.com"]
+
+        # 1. il parser la porta senza inciampare, e non la confonde con altro
+        assert vevent.valore("X-PROPRIETA-SCONOSCIUTA") == (
+            "il parser la ignora senza lamentarsi"
         )
+        assert {"UID", "DTSTART", "DTEND", "SUMMARY"} <= {
+            proprieta.nome for proprieta in vevent.proprieta
+        }
+
+        # 2. l'evento normalizzato e' identico a quello senza la proprieta'
+        righe = [
+            riga
+            for riga in _fixture("folding-e-confini-testuali.ics").splitlines()
+            if not riga.startswith("X-PROPRIETA-SCONOSCIUTA")
+        ]
+        senza = analizza_feed("\n".join(righe)).eventi[0]
+        assert normalizza(vevent) == normalizza(senza)
 
     def test_un_sommario_vuoto_resta_vuoto_senza_errori(self) -> None:
         eventi = _eventi_per_uid("folding-e-confini-testuali.ics")
@@ -308,9 +330,16 @@ class TestSemantica:
         assert evento.soggiorno.check_in == date(2026, 9, 1)
         assert evento.soggiorno.check_out == date(2026, 9, 3)
 
-    def test_exdate_non_fa_esplodere_nulla(self) -> None:
+    def test_exdate_e_letto_ma_non_applicato(self) -> None:
+        # Comportamento DICHIARATO: senza espansione delle ricorrenze un
+        # EXDATE non ha niente da escludere. Il valore c'e' nel VEVENT e non
+        # tocca l'intervallo dell'occorrenza base.
         eventi = _eventi_per_uid("semantica-e-durata.ics")
-        assert normalizza(eventi["7777-ricorrente@example.com"]).ical_uid
+        vevent = eventi["7777-ricorrente@example.com"]
+        assert vevent.valore("EXDATE") == "20260915"
+        evento = normalizza(vevent)
+        assert evento.soggiorno.check_in == date(2026, 9, 1)
+        assert evento.soggiorno.check_out == date(2026, 9, 3)
 
 
 class TestSommario:

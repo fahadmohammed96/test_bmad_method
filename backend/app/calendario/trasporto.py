@@ -5,23 +5,46 @@ globale): è la condizione perché i test possano sostituire il confine senza
 mockare il service, e perché `ETag`, redirect, timeout e cap di dimensione
 restino comportamento osservabile invece di sparire dentro un mock.
 
-Tre proprietà che vivono qui e da nessun'altra parte (NFR-17):
+Le proprietà che vivono qui e da nessun'altra parte (NFR-17):
 
 1. **I redirect non li segue il client HTTP.** Li seguiamo noi, un hop alla
    volta, rivalidando la politica di uscita di rete su ogni destinazione: un
    `Location:` verso `169.254.169.254` è esattamente l'attacco che una
-   validazione fatta solo sull'URL iniziale non vede.
-2. **Il corpo si legge in streaming con un tetto.** Un feed da 2 GB non deve
-   esaurire la memoria del worker: al superamento del cap la connessione si
-   chiude e il run è fallito.
-3. **Solo GET.** La superficie pubblica non espone altro verbo: «il sistema
+   validazione fatta solo sull'URL iniziale non vede. E un redirect non può
+   **declassare** da `https` a `http`: l'URL di un Feed porta il segreto in
+   query, e sul filo in chiaro sarebbe regalato.
+2. **Si connette all'indirizzo GIÀ validato**, non al risultato di una
+   seconda risoluzione DNS. Senza il pinning ci sarebbero due lookup
+   indipendenti per hop e niente legherebbe il secondo al primo: un DNS che
+   cambia risposta fra validazione e connessione (rebinding) porterebbe il
+   fetch dove vuole.
+3. **Il corpo si legge in streaming con un tetto**, e solo se il portale non
+   l'ha compresso: `iter_bytes()` sceglie il decoder dal `Content-Encoding`
+   della RISPOSTA, non da quello che abbiamo chiesto, quindi il cap sui byte
+   decodificati da solo non limita la memoria.
+4. **Un bound sul TEMPO, non un insieme di checkpoint.** I timeout di httpx
+   sono per-operazione e si azzerano a ogni byte; la fase di testa della
+   risposta non passa da `iter_bytes`, quindi nessun controllo applicativo la
+   vede. Un insieme di controlli non limita il tempo che passa FRA due
+   controlli: qui ogni attesa (DNS compreso) si esegue con una scadenza, e
+   alla scadenza il worker torna disponibile qualunque cosa stia facendo la
+   socket. `core/worker.py` è un ciclo sequenziale in-process: una
+   connessione appesa ferma i job di tutti gli Host, non solo di quello del
+   Feed lento.
+5. **Solo GET.** La superficie pubblica non espone altro verbo: «il sistema
    non scrive mai verso le OTA» resta vero per costruzione.
+6. **Nessuna fiducia nell'ambiente.** Un `HTTPS_PROXY` farebbe risolvere il
+   nome al proxy, azzerando l'intera denylist.
 """
 
 import logging
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
-from urllib.parse import urljoin
+from functools import partial
+from typing import Protocol, TypeVar
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -32,12 +55,26 @@ from app.calendario.uscita_rete import (
     UrlFeedNonValidoError,
     risolutore_di_sistema,
     url_redatto,
-    valida_url_feed,
+    valida_destinazione,
+    valida_formato,
 )
 
 logger = logging.getLogger(__name__)
 
 STATI_DI_REDIRECT = frozenset({301, 302, 303, 307, 308})
+
+# Le sole codifiche del contenuto accettate: nessuna. Il cap conta i byte
+# DECODIFICATI, quindi una risposta compressa può gonfiare di ordini di
+# grandezza prima che il cap se ne accorga — e un chunk che decodifica a
+# stringa vuota non emette nemmeno un evento su cui controllare la scadenza.
+CODIFICHE_AMMESSE = frozenset({"", "identity"})
+
+T = TypeVar("T")
+
+# Prefisso dei thread del trasporto: e' cio' su cui il presidio contro le
+# perdite conta i superstiti
+# (`test_un_fetch_abbandonato_non_lascia_thread_ne_connessioni`).
+NOME_THREAD_FETCH = "fetch-feed"
 
 
 class ErroreDiTrasporto(Exception):
@@ -47,14 +84,14 @@ class ErroreDiTrasporto(Exception):
 class UrlNonRaggiungibileError(ErroreDiTrasporto):
     """Connessione fallita, host che non risolve, o destinazione vietata.
 
-    Le tre cause condividono un solo errore di proposito: distinguerle
+    Le cause condividono un solo errore di proposito: distinguerle
     trasformerebbe il messaggio in un canale per mappare la rete interna
     (NFR-17).
     """
 
 
 class TimeoutFeedError(ErroreDiTrasporto):
-    """Superato il timeout di connessione o di lettura."""
+    """Superato un timeout di operazione o la scadenza complessiva."""
 
 
 class RispostaTroppoGrandeError(ErroreDiTrasporto):
@@ -96,36 +133,117 @@ class ClientFeedHttp:
         self._politica = politica
         self._risolutore = risolutore
 
-    @property
-    def _timeout(self) -> httpx.Timeout:
-        return httpx.Timeout(
-            connect=self._politica.timeout_connessione_secondi,
-            read=self._politica.timeout_lettura_secondi,
-            write=self._politica.timeout_connessione_secondi,
-            pool=self._politica.timeout_connessione_secondi,
-        )
-
     def scarica(self, url: str) -> RispostaFeed:
         corrente = url
-        with httpx.Client(
-            follow_redirects=False,
-            timeout=self._timeout,
-            headers={"Accept": "text/calendar, text/plain;q=0.5"},
-        ) as client:
+        # Scadenza monotona calcolata UNA volta: il budget è dell'intero
+        # fetch, quindi una catena di redirect non lo moltiplica.
+        scadenza = time.monotonic() + self._politica.deadline_totale_secondi
+        # Il client si costruisce QUI, fuori dall'azione che verrà abbandonata:
+        # è l'unico modo di avere un handle per chiuderlo. Costruito dentro,
+        # una scadenza lascerebbe indietro thread, socket e pool senza che il
+        # lato che abbandona possa farci niente.
+        client = self._nuovo_client(scadenza)
+        try:
             for _ in range(self._politica.max_redirect + 1):
-                self._valida(corrente)
-                esito = self._un_hop(client, corrente)
+                vetted = self._valida(corrente, scadenza)
+                esito = self._entro_la_scadenza(
+                    # `partial` e non una lambda: la lambda catturerebbe le
+                    # variabili del ciclo per riferimento (B023).
+                    partial(self._un_hop, client, corrente, vetted, scadenza),
+                    scadenza,
+                    chiudi=client.close,
+                )
                 if isinstance(esito, RispostaFeed):
                     return esito
                 corrente = esito
-        raise UrlNonRaggiungibileError(
-            f"troppi redirect (>{self._politica.max_redirect})"
-        )
+            raise UrlNonRaggiungibileError(
+                f"troppi redirect (>{self._politica.max_redirect})"
+            )
+        finally:
+            client.close()
 
-    def _valida(self, url: str) -> None:
-        """Politica di uscita di rete su OGNI hop, non solo sul primo."""
+    # ------------------------------------------------------------------ tempo
+
+    def _residuo(self, scadenza: float) -> float:
+        residuo = scadenza - time.monotonic()
+        if residuo <= 0:
+            raise TimeoutFeedError("superata la scadenza complessiva del fetch")
+        return residuo
+
+    def _entro_la_scadenza(
+        self,
+        azione: Callable[[], T],
+        scadenza: float,
+        *,
+        chiudi: Callable[[], None] | None = None,
+    ) -> T:
+        """Esegue `azione` e la ABBANDONA alla scadenza.
+
+        È qui che il bound diventa reale. Nessun timeout di httpx limita il
+        tempo *aggregato*: si applicano a ogni singola operazione e si
+        azzerano a ogni byte ricevuto, quindi né la fase di testa né il
+        framing chunked (né le estensioni di chunk, che possono portare
+        kilobyte senza emettere un solo evento di dato) hanno un tetto.
+
+        L'attesa la si limita dove si può limitare davvero: su ciò che
+        attende. Alla scadenza questo metodo solleva e il worker riparte.
+
+        **E il lavoro abbandonato non muore da sé.** I timeout per-operazione
+        non lo fermano — è la stessa ragione di due paragrafi sopra, e
+        crederlo era l'errore di questo modulo: `read=min(config, residuo)` è
+        un tetto per singola read, e contro chi sgocciola non scatta mai. A
+        fermarlo resterebbe solo `MAX_INCOMPLETE_EVENT_SIZE` di httpcore,
+        100 KiB, cioè ~102 400 read da un timeout ciascuna: centinaia di ore,
+        e su una costante privata che non è un contratto.
+
+        Quindi lo si chiude: `chiudi` sgancia la connessione e la read
+        successiva solleva, così il thread esce entro un ciclo di lettura. E il
+        thread è **daemon**: un abbandono non può bloccare l'uscita del
+        processo, altrimenti un `SIGTERM` al worker resterebbe appeso fino al
+        `SIGKILL` — che ammazza il job in volo.
+        """
+        residuo = self._residuo(scadenza)
+        risultato: list[T] = []
+        errore: list[BaseException] = []
+
+        def esegui() -> None:
+            try:
+                risultato.append(azione())
+            except BaseException as exc:  # noqa: BLE001 — si ri-solleva sotto
+                # `BaseException` e non `Exception`: la guardia di isolamento
+                # di rete della suite (GS-1) ne deriva di proposito, e deve
+                # attraversare questo confine di thread intatta.
+                errore.append(exc)
+
+        thread = threading.Thread(
+            target=esegui, daemon=True, name=f"{NOME_THREAD_FETCH}-{id(azione):x}"
+        )
+        thread.start()
+        thread.join(residuo)
+        if thread.is_alive():
+            if chiudi is not None:
+                chiudi()
+            raise TimeoutFeedError("superata la scadenza complessiva del fetch")
+        if errore:
+            raise errore[0]
+        return risultato[0]
+
+    # ------------------------------------------------------------- validazione
+
+    def _valida(self, url: str, scadenza: float) -> tuple[str, ...]:
+        """Politica di uscita di rete su OGNI hop; ritorna gli indirizzi ok.
+
+        La risoluzione DNS è l'unica altra attesa del fetch e non ha un
+        timeout proprio (`getaddrinfo` non lo accetta): passa anche lei dalla
+        scadenza, altrimenti sarebbero fino a `max_redirect + 1` attese fuori
+        dal budget.
+        """
         try:
-            valida_url_feed(url, self._politica, self._risolutore)
+            parti = valida_formato(url)
+            return self._entro_la_scadenza(
+                partial(valida_destinazione, parti, self._politica, self._risolutore),
+                scadenza,
+            )
         except (UrlFeedNonValidoError, DestinazioneNonAmmessaError) as exc:
             logger.warning(
                 "fetch del feed rifiutato dalla politica di uscita di rete",
@@ -133,16 +251,61 @@ class ClientFeedHttp:
             )
             raise UrlNonRaggiungibileError("URL non raggiungibile") from exc
 
-    def _un_hop(self, client: httpx.Client, url: str) -> RispostaFeed | str:
+    # ------------------------------------------------------------------- fetch
+
+    def _nuovo_client(self, scadenza: float) -> httpx.Client:
+        """Client per l'intero fetch, con i timeout per-operazione.
+
+        I timeout NON sono il bound e non fanno morire il lavoro abbandonato
+        (vedi `_entro_la_scadenza`): si azzerano a ogni byte. Sono il limite
+        della singola attesa — utile su un portale che non risponde affatto,
+        inutile su uno che sgocciola. Il `min()` col residuo evita solo di
+        promettere alla socket più tempo di quanto ne resti al fetch.
+        """
+        residuo = self._residuo(scadenza)
+        timeout = httpx.Timeout(
+            connect=min(self._politica.timeout_connessione_secondi, residuo),
+            read=min(self._politica.timeout_lettura_secondi, residuo),
+            write=min(self._politica.timeout_connessione_secondi, residuo),
+            pool=min(self._politica.timeout_connessione_secondi, residuo),
+        )
+        return httpx.Client(
+            follow_redirects=False,
+            timeout=timeout,
+            # Un `HTTPS_PROXY` nell'ambiente del worker farebbe risolvere il
+            # nome AL PROXY, azzerando l'intera denylist — `169.254.169.254`
+            # incluso. Su self-hosted un proxy nell'ambiente è lo scenario
+            # normale, non l'eccezione.
+            trust_env=False,
+            headers={
+                "Accept": "text/calendar, text/plain;q=0.5",
+                "Accept-Encoding": "identity",
+            },
+        )
+
+    def _un_hop(
+        self,
+        client: httpx.Client,
+        url: str,
+        vetted: tuple[str, ...],
+        scadenza: float,
+    ) -> RispostaFeed | str:
+        pinnato, intestazioni, estensioni = self._richiesta_pinnata(url, vetted)
         try:
-            with client.stream("GET", url) as risposta:
+            with client.stream(
+                "GET", pinnato, headers=intestazioni, extensions=estensioni
+            ) as risposta:
                 if risposta.status_code in STATI_DI_REDIRECT:
-                    return self._destinazione_del_redirect(url, risposta)
+                    # `urljoin` sull'URL LOGICO, non su quello pinnato: un
+                    # `Location` relativo si risolverebbe sull'indirizzo IP e
+                    # perderebbe l'host originale.
+                    return self._prossimo_hop(url, risposta)
                 if risposta.status_code != 200:
                     raise EsitoHttpInattesoError(risposta.status_code)
+                self._rifiuta_codifica_inattesa(risposta)
                 return RispostaFeed(
                     stato=risposta.status_code,
-                    corpo=self._corpo_con_tetto(risposta),
+                    corpo=self._corpo_con_tetto(risposta, scadenza),
                     content_type=risposta.headers.get("content-type"),
                     etag=risposta.headers.get("etag"),
                     last_modified=risposta.headers.get("last-modified"),
@@ -155,13 +318,67 @@ class ClientFeedHttp:
             raise UrlNonRaggiungibileError("URL non raggiungibile") from exc
 
     @staticmethod
-    def _destinazione_del_redirect(url: str, risposta: httpx.Response) -> str:
+    def _rifiuta_codifica_inattesa(risposta: httpx.Response) -> None:
+        """`Accept-Encoding: identity` è una richiesta, non una garanzia.
+
+        `iter_bytes()` decodifica in base al `Content-Encoding` che il portale
+        ha **risposto**: una risposta gzip con `Content-Length` piccolo passa
+        il pre-check sul dichiarato e poi si espande di ordini di grandezza
+        prima che il cap sui byte decodificati se ne accorga.
+        """
+        codifica = risposta.headers.get("content-encoding", "").strip().lower()
+        if codifica not in CODIFICHE_AMMESSE:
+            raise RispostaTroppoGrandeError(
+                f"codifica del contenuto non ammessa: '{codifica}'"
+            )
+
+    @staticmethod
+    def _richiesta_pinnata(
+        url: str, vetted: tuple[str, ...]
+    ) -> tuple[str, dict[str, str], dict[str, object]]:
+        """URL con l'indirizzo GIÀ validato al posto del nome (NFR-17).
+
+        L'identità del server resta quella vera: `Host` esplicito e
+        `sni_hostname` per la stretta di mano TLS, così la verifica del
+        certificato continua a valere sul nome e non sull'indirizzo. Lo
+        userinfo si conserva: sostituire l'intero netloc lo cancellerebbe, e
+        un Feed con credenziali nell'URL — forma che questo codice supporta —
+        prenderebbe 401.
+        """
+        parti = urlsplit(url)
+        hostname = parti.hostname or ""
+        if not vetted:
+            return url, {}, {}
+        letterale = _fra_parentesi(vetted[0])
+        porta = f":{parti.port}" if parti.port is not None else ""
+        netloc = f"{_userinfo(parti)}{letterale}{porta}"
+        pinnato = parti._replace(netloc=netloc).geturl()
+        # `Host` senza userinfo e con le quadre se è un IPv6 (RFC 9110).
+        host = f"{_fra_parentesi(hostname)}{porta}"
+        return pinnato, {"Host": host}, {"sni_hostname": hostname}
+
+    @staticmethod
+    def _prossimo_hop(url: str, risposta: httpx.Response) -> str:
+        """Destinazione del redirect, se è lecito seguirla.
+
+        Risoluzione e divieto di declassamento stanno nella stessa funzione di
+        proposito: erano due righe adiacenti nel ciclo, e la seconda si poteva
+        cancellare senza che nulla si rompesse. Qui il calcolo del prossimo hop
+        non esiste senza il controllo.
+
+        Rivalidare lo schema non basterebbe: `http` è ammesso in assoluto, ma
+        non **dopo** `https` — l'URL di un Feed porta il segreto nella query, e
+        seguire un declassamento lo metterebbe in chiaro sul filo.
+        """
         posizione = risposta.headers.get("location")
         if not posizione:
             raise EsitoHttpInattesoError(risposta.status_code)
-        return urljoin(url, posizione)
+        destinazione = urljoin(url, posizione)
+        if urlsplit(url).scheme == "https" and urlsplit(destinazione).scheme != "https":
+            raise UrlNonRaggiungibileError("redirect che declassa da https a http")
+        return destinazione
 
-    def _corpo_con_tetto(self, risposta: httpx.Response) -> bytes:
+    def _corpo_con_tetto(self, risposta: httpx.Response, scadenza: float) -> bytes:
         tetto = self._politica.dimensione_massima_byte
         dichiarata = risposta.headers.get("content-length")
         if dichiarata is not None and dichiarata.isdigit() and int(dichiarata) > tetto:
@@ -171,8 +388,27 @@ class ClientFeedHttp:
         pezzi: list[bytes] = []
         letti = 0
         for pezzo in risposta.iter_bytes():
+            # NON è il bound — lo è `_entro_la_scadenza`. Chiamare «bound
+            # wall-clock» un insieme di checkpoint è precisamente l'errore che
+            # aveva lasciato aperta la fase di testa: un insieme di controlli
+            # non limita il tempo che passa fra due controlli. Questo serve
+            # solo a non accumulare lavoro inutile dopo la scadenza.
+            self._residuo(scadenza)
             letti += len(pezzo)
             if letti > tetto:
                 raise RispostaTroppoGrandeError(f"risposta oltre {tetto} byte")
             pezzi.append(pezzo)
         return b"".join(pezzi)
+
+
+def _fra_parentesi(indirizzo: str) -> str:
+    """IPv6 fra quadre, IPv4 e nomi così come sono."""
+    return f"[{indirizzo}]" if ":" in indirizzo else indirizzo
+
+
+def _userinfo(parti: object) -> str:
+    utente = getattr(parti, "username", None)
+    if not utente:
+        return ""
+    password = getattr(parti, "password", None)
+    return f"{utente}:{password}@" if password else f"{utente}@"

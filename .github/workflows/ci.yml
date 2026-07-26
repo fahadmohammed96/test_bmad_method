@@ -3,7 +3,9 @@
 # verificato contro il codice dal job api-contract (AD-14).
 #
 # Postura supply-chain della pipeline:
-# - action di terze parti pinnate al commit SHA (il tag è mutabile);
+# - OGNI action pinnata al commit SHA, comprese quelle di `actions/`
+#   (il tag è mutabile, e un commento che afferma un controllo assente
+#   è peggio di nessun commento);
 # - installazioni da lockfile (`uv sync --locked`, `npm ci`) senza
 #   esecuzione di script di terze parti (`--no-build`, `--ignore-scripts`);
 # - il progetto locale non si installa in CI (`--no-install-project`):
@@ -50,7 +52,7 @@ jobs:
       HOSTPILOT_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/hostpilot_test
       HOSTPILOT_TEST_DB_REQUIRED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Install
         run: uv sync --locked --no-build --no-install-project --group dev
@@ -69,8 +71,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -104,9 +106,9 @@ jobs:
     env:
       E2E_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/hostpilot_e2e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -125,7 +127,7 @@ jobs:
       - name: E2E + a11y (axe)
         run: npm run test:e2e
         working-directory: frontend
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: playwright-report
@@ -134,9 +136,9 @@ jobs:
   api-contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm

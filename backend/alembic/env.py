@@ -1,21 +1,19 @@
 """Ambiente Alembic: URL dal contratto env (HOSTPILOT_DATABASE_URL),
 metadata dal shared kernel. Migrazioni forward-only (AR-11).
+
+I modelli NON si elencano a mano: si scoprono (`app.registro_modelli`). Un
+elenco scritto a mano non fallisce quando è incompleto — `--autogenerate`
+semplicemente non vede le tabelle del modulo dimenticato e propone di
+CANCELLARLE, che è il modo più silenzioso per perdere dati.
 """
 
 from sqlalchemy import create_engine
 
 from alembic import context
-from app.config_normativa import models as _config_models  # noqa: F401
-
-# I modelli vanno importati perché popolino Base.metadata.
-from app.core import jobs as _jobs  # noqa: F401
-from app.core import outbox as _outbox  # noqa: F401
 from app.core.config import get_settings
-from app.core.db import Base
-from app.identity import models as _identity_models  # noqa: F401
-from app.strutture import models as _strutture_models  # noqa: F401
+from app.registro_modelli import importa_tutti_i_modelli
 
-target_metadata = Base.metadata
+target_metadata = importa_tutti_i_modelli().metadata
 
 
 def run_migrations_offline() -> None:

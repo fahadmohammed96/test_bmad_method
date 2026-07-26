@@ -17,10 +17,14 @@ Il precedente in repo è `config_normativa/importa_comuni.py`, che valida il
 percorso PRIMA di toccare il filesystem: qui vale lo stesso principio sulla
 rete. Timeout e cap di dimensione sono CONFIGURAZIONE (NFR-4), non costanti.
 
-Limite noto e dichiarato: la validazione avviene sulla risoluzione e non
-sulla socket effettiva, quindi un DNS che cambia risposta fra la validazione
-e la connessione (rebinding) non è coperto. Chiuderlo richiede il pinning
-dell'indirizzo nel trasporto: è tracciato, non risolto qui.
+Gli indirizzi validati si RESTITUISCONO al chiamante, e non è un dettaglio:
+`trasporto.py` si connette esattamente a quelli invece di risolvere una
+seconda volta. Senza quel passaggio ci sarebbero due `getaddrinfo`
+indipendenti per hop e nulla legherebbe il secondo al primo — cioè un DNS che
+cambia risposta fra validazione e connessione (rebinding) porterebbe il fetch
+dove vuole. Il pinning è arrivato con il fix-batch `epic2-batch1`: questo
+modulo dice QUALI indirizzi sono ammessi, il trasporto garantisce che siano
+quelli usati.
 """
 
 import ipaddress
@@ -43,6 +47,7 @@ RETI_VIETATE_AGGIUNTIVE: tuple[ReteIP, ...] = (
     ipaddress.ip_network("192.0.0.0/24"),  # IETF protocol assignments
     ipaddress.ip_network("100.100.100.200/32"),  # metadati Alibaba Cloud
     ipaddress.ip_network("64:ff9b::/96"),  # NAT64: incapsula IPv4 in IPv6
+    ipaddress.ip_network("fec0::/10"),  # site-local IPv6 deprecato (RFC 3879)
 )
 
 # Il risolutore è iniettato: a unit la matrice degli indirizzi si scrive
@@ -71,6 +76,10 @@ class PoliticaUscitaRete:
     timeout_lettura_secondi: float
     dimensione_massima_byte: int
     max_redirect: int
+    # Tetto sull'intero fetch: i timeout per-operazione non fermano un
+    # portale che sgocciola. Default alto per non cambiare il comportamento
+    # dei chiamanti che non lo impostano.
+    deadline_totale_secondi: float = 30.0
     # Reti normalmente vietate ammesse per configurazione: vuoto in ogni
     # ambiente reale (un test lo sorveglia), serve ai test di integrazione
     # che parlano con un server HTTP su 127.0.0.1.
@@ -83,6 +92,7 @@ class PoliticaUscitaRete:
             timeout_lettura_secondi=settings.feed_timeout_lettura_secondi,
             dimensione_massima_byte=settings.feed_dimensione_massima_byte,
             max_redirect=settings.feed_max_redirect,
+            deadline_totale_secondi=settings.feed_deadline_totale_secondi,
             reti_consentite=tuple(
                 ipaddress.ip_network(voce.strip())
                 for voce in settings.feed_reti_consentite.split(",")
@@ -92,15 +102,27 @@ class PoliticaUscitaRete:
 
 
 def url_redatto(url: str) -> str:
-    """URL senza credenziali, per log e messaggi d'errore (AD-16)."""
+    """URL senza segreti, per log e messaggi d'errore (AD-16).
+
+    Redige **due** posti, non uno. Lo userinfo RFC 3986 è quello ovvio; la
+    **query** è quello che conta davvero, perché negli export delle OTA il
+    link *è* la credenziale: `.../calendar/ical/<id>.ics?s=<segreto>`. Un URL
+    di quel tipo scritto per intero in un log è un token in chiaro che dà
+    accesso al calendario di un Host.
+
+    Il path non si tocca: contiene l'identificativo della risorsa e serve a
+    capire di quale feed si stia parlando.
+    """
     try:
         parti = urlsplit(url)
     except ValueError:
         return "<url non analizzabile>"
-    if "@" not in parti.netloc:
-        return url
-    _, _, host = parti.netloc.rpartition("@")
-    return parti._replace(netloc=f"***@{host}").geturl()
+    netloc = parti.netloc
+    if "@" in netloc:
+        _, _, host = netloc.rpartition("@")
+        netloc = f"***@{host}"
+    query = "***" if parti.query else parti.query
+    return parti._replace(netloc=netloc, query=query, fragment="").geturl()
 
 
 def valida_formato(url: str) -> SplitResult:
@@ -145,6 +167,20 @@ def _indirizzo_vietato(indirizzo: IndirizzoIP, politica: PoliticaUscitaRete) -> 
         or indirizzo.is_multicast
         or indirizzo.is_reserved
         or indirizzo.is_unspecified
+        # ASSICURAZIONE IN AVANTI, non copertura di oggi. Misurato: su
+        # 800 000 indirizzi casuali non esiste una classe in cui questa
+        # clausola sia il solo motivo di rifiuto — l'unica candidata, la CGNAT
+        # `100.64.0.0/10`, è già in `RETI_VIETATE_AGGIUNTIVE`. Quindi oggi non
+        # ha contributo dimostrabile, e dire il contrario sarebbe affermare una
+        # copertura che non c'è.
+        #
+        # Si tiene perché il suo valore è nel FUTURO: quando la IANA assegna
+        # una nuova destinazione speciale, `is_global` la prende con un
+        # aggiornamento della stdlib, mentre la lista esplicita qui sopra no.
+        # E si AGGIUNGE ai controlli espliciti, non li sostituisce: multicast,
+        # NAT64 e `fec0::/10` risultano `is_global=True`, quindi da sola questa
+        # riga li lascerebbe passare.
+        or not indirizzo.is_global
     )
 
 
