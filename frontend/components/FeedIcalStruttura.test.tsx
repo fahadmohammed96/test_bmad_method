@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 const feedMock = vi.fn();
@@ -33,7 +34,7 @@ const FEED_BASE = {
 };
 
 function montaCon(feed: readonly unknown[]) {
-  feedMock.mockReturnValue({ isPending: false, data: feed });
+  feedMock.mockReturnValue({ isPending: false, isError: false, data: feed });
   collegaMock.mockReturnValue(COLLEGA_INERTE);
   render(<FeedIcalStruttura strutturaId="struttura-1" />);
 }
@@ -161,8 +162,30 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     ).toBeInTheDocument();
   });
 
+  it("su errore di caricamento NON afferma che non ci sono calendari", () => {
+    // La menzogna peggiore possibile su questa superficie: una Struttura con
+    // tre feed collegati che, su un 500 o una sessione scaduta, si presenta
+    // come «Nessun calendario collegato». Stessa classe di danno di NFR-2 —
+    // il prodotto dichiara certo ciò che non sa.
+    feedMock.mockReturnValue({
+      isPending: false,
+      isError: true,
+      error: new Error("calendari non disponibili"),
+      data: undefined,
+    });
+    collegaMock.mockReturnValue(COLLEGA_INERTE);
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    expect(
+      screen.queryByText("Nessun calendario collegato a questa Struttura."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /Non riusciamo a caricare i calendari/,
+    );
+  });
+
   it("mostra l'errore inline del collegamento sul campo", () => {
-    feedMock.mockReturnValue({ isPending: false, data: [] });
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
     collegaMock.mockReturnValue({
       ...COLLEGA_INERTE,
       isError: true,
@@ -172,5 +195,42 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Incolla l'indirizzo del calendario esportato dal portale",
     );
+  });
+
+  it("invia URL ripulito e Canale scelto, e svuota il campo al successo", async () => {
+    const mutate = vi.fn();
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
+    collegaMock.mockReturnValue({ ...COLLEGA_INERTE, mutate });
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    const campo = screen.getByLabelText("Indirizzo del calendario (iCal)");
+    await userEvent.type(campo, "  https://feed.example.com/c.ics  ");
+    await userEvent.selectOptions(screen.getByLabelText("Canale"), "booking");
+    await userEvent.click(screen.getByRole("button", { name: "Collega il calendario" }));
+
+    expect(mutate).toHaveBeenCalledTimes(1);
+    const [dati, opzioni] = mutate.mock.calls[0];
+    expect(dati).toEqual({
+      struttura_id: "struttura-1",
+      // Gli spazi incollati insieme all'URL non arrivano al backend.
+      url: "https://feed.example.com/c.ics",
+      canale: "booking",
+    });
+
+    // Il reset avviene su `onSuccess`, non a fuoco perso: un campo svuotato
+    // prima della conferma farebbe perdere l'URL su un errore.
+    expect(campo).toHaveValue("https://feed.example.com/c.ics");
+    act(() => opzioni.onSuccess());
+    expect(campo).toHaveValue("");
+  });
+
+  it("disabilita il bottone mentre il collegamento è in volo", () => {
+    feedMock.mockReturnValue({ isPending: false, isError: false, data: [] });
+    collegaMock.mockReturnValue({ ...COLLEGA_INERTE, isPending: true });
+    render(<FeedIcalStruttura strutturaId="struttura-1" />);
+
+    expect(
+      screen.getByRole("button", { name: "Collega il calendario" }),
+    ).toBeDisabled();
   });
 });

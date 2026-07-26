@@ -89,7 +89,7 @@ function EsitoImport({ feed }: Readonly<{ feed: FeedIcal }>) {
 export function FeedIcalStruttura({
   strutturaId,
 }: Readonly<{ strutturaId: string }>) {
-  const { data: feed, isPending } = useFeedIcal(strutturaId);
+  const { data: feed, isPending, isError } = useFeedIcal(strutturaId);
   const collega = useCollegaFeed();
   const [url, setUrl] = useState("");
   const [canale, setCanale] = useState<CanaleFeed>("airbnb");
@@ -158,6 +158,12 @@ export function FeedIcalStruttura({
 
       {isPending ? (
         <output className="text-sm text-muted">Caricamento…</output>
+      ) : isError ? (
+        // MAI «Nessun calendario collegato» su un errore di caricamento: una
+        // Struttura con tre feed che si presenta come vuota afferma il falso
+        // sullo stato del calendario, ed è la stessa classe di danno che
+        // NFR-2 vieta — dichiarare certo ciò che non si sa.
+        <output className="text-sm text-danger">{calendarioCopy.feedNonCaricati}</output>
       ) : (feed ?? []).length === 0 ? (
         <p className="text-sm text-muted">{calendarioCopy.nessunFeed}</p>
       ) : (

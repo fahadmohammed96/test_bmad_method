@@ -4,6 +4,7 @@ epic: 'Epic 2: Calendario unificato e anti double-booking'
 status: in_review
 created: 2026-07-26
 updated: 2026-07-26
+review: 'BOCCIATA da Murat sulla PR #35; corretta col fix-batch epic2-batch1'
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - docs/epics.md (Story 2.1, AC completi)
@@ -235,8 +236,105 @@ doppia prenotazione ospitata, se cade il secondo è un'etichetta.
   modellato su RFC 5545 e sulla forma documentata degli export, **non**
   catturato da feed reali (punto A11, che resta aperto).
 
+### Fix-batch `epic2-batch1` — cross-review di Murat sulla PR #35 (BOCCIA)
+
+Un P0 che avevo mancato, quattro P1 e la lista P2. Scope rigido: solo i
+finding elencati nel batch.
+
+**P0 — la nona forma.** `marca_rimosse_dal_feed` filtrava con
+`ical_uid NOT IN (uid_presenti)`, e con la lista **vuota** SQLAlchemy rende
+l'IN espandibile come `(ical_uid NOT IN (NULL) OR (1 = 1))`: vero per ogni
+riga. Un VCALENDAR chiuso i cui VEVENT non portano `UID` passava tutti i
+cancelli a monte — non è troncato, e `analizzato.eventi` non è vuoto — e
+arrivava alla riconciliazione con l'insieme vuoto: **tutte** le Prenotazioni
+attive del Feed marcate `rimossa_dal_feed`, con esito **RIUSCITO**. Peggio
+della versione chiusa in prima battuta: là il run risulta fallito e l'Host
+vede l'errore, qui la UI non segnala niente e i Conflitti decadono in
+silenzio.
+
+La beffa era nel mio stesso docstring: avevo capito che un malformato **con**
+uid è nel feed e non va trattato come scomparso, e il caso in cui la
+malformazione **è** l'UID mancante invertiva quella guardia in una
+cancellazione di massa. Nessun test aveva `uid_presenti` vuoto —
+`eventi-malformati.ics` contiene anche un evento buono.
+
+Chiuso su due livelli: il service decide su «nessun evento **identificabile**»
+(non più «nessun evento») e scrive `FEED_SENZA_EVENTI`; il repository ha una
+guardia `if not uid_presenti: return 0`, perché quella riga SQL non deve poter
+mai più significare «tutte». Nona e decima forma aggiunte al parametrize di
+`TestScomparsoNonERicevuto`, più il confine opposto: con **un solo** uid
+valido fra tanti senza uid la riconciliazione avviene, ed è giusta.
+
+**P1-1 — nessun `sync_run` perso.** Il loop catturava due sole eccezioni;
+qualunque altra risaliva al SAVEPOINT per item e portava via la riga
+`sync_run`, riportando il Feed a «mai sincronizzato» senza categoria d'errore
+(AC 7 e AC 5 violati). Tre inneschi da contenuto di terze parti, tutti
+riprodotti: `DURATION:P99999999D` e `P99999999W` (`OverflowError` sulla somma
+di date) e un `ical_uid` oltre i 500 caratteri della colonna (`DataError`).
+Rimedio: `normalizza` è **pura**, quindi il loop cattura largo senza rischiare
+di proseguire su una transazione abortita; l'uid oltre colonna si rifiuta
+**prima** del database (`LUNGHEZZA_MASSIMA_ICAL_UID`, con un test che la lega
+allo schema) — l'uid non si tronca, è la chiave naturale. L'uid resta in
+`uid_presenti`: un evento illeggibile è comunque nel feed.
+
+**P1-2 — deadline wall-clock.** `httpx.Timeout` è per-operazione: un byte
+appena dentro il timeout di lettura non fa scattare nulla. Aggiunta
+`feed_deadline_totale_secondi` (configurazione, NFR-4), monotona, calcolata
+**una volta** in `scarica` e controllata per hop **e dentro** il loop di
+`iter_bytes`. Due test con un server che sgocciola, uno dei quali verifica che
+una catena di redirect non moltiplichi il budget.
+
+**P1-3 — pinning dell'indirizzo vetted.** `valida_destinazione` già ritornava
+gli indirizzi approvati e `_valida` li buttava: c'erano due `getaddrinfo`
+indipendenti per hop e nulla legava il secondo al primo. Ora si connette
+all'indirizzo approvato, con `Host` esplicito e `sni_hostname` perché la
+verifica del certificato resti sul nome. Il `Location` relativo si risolve
+sull'URL **logico**, non su quello pinnato. DNS rebinding chiuso.
+
+**P1-4 — `isError` sulla lista Feed.** Su 500 o sessione scaduta la UI
+mostrava «Nessun calendario collegato»: affermava il falso sullo stato del
+calendario di una Struttura che ha tre feed. Copy distinta
+(`feedNonCaricati`), e coperti anche submit, trim dell'URL, reset su
+`onSuccess` e bottone disabilitato — aggiunto `@testing-library/user-event`.
+
+**P2 chiusi:** `alembic/env.py` non importava `app.calendario.models` e
+`alembic check` proponeva `remove_table` su tutte e tre le tabelle nuove — la
+mia stessa classe di «assenze», corretta nelle guardie e non lì. I modelli ora
+si **scoprono** (`app/registro_modelli.py`, usato anche dalle guardie: una
+sola sorgente di verità) con una guardia che fallisce se `env.py` torna a
+elencarli a mano. Poi: `trust_env=False`, `Accept-Encoding: identity`,
+divieto di declassamento `https → http` fra hop, `fec0::/10` e
+`not is_global` **aggiunto** ai controlli espliciti, `url_redatto` che redige
+anche **query e fragment** (negli export OTA il link *è* la credenziale), e
+tutte le action di `ci.yml` pinnate al commit SHA — il commento in testa
+affermava un controllo che valeva solo per `setup-uv`.
+
+**P2 di qualità dei test:** `test_le_credenziali_nell_url_non_finiscono_nei_log`
+era tautologico (gli attributi `extra=` non finiscono in `caplog.text`) e ora
+asserisce sui `records`, in positivo sulla forma redatta — verificato contro
+entrambe le mutazioni che prima sopravvivevano; `any()` su una tupla già
+asserita vuota sostituito dall'asserzione sulla conseguenza; pavimento sul
+numero di metodi che la guardia di tenancy **ispeziona** davvero (un rename di
+classe la rendeva cieca); guardia anti-`drop_table` indipendente dallo stile
+di virgolette; `pytest.mark.timeout(60)` sul test di gara perché un deadlock
+sia un rosso e non un hang; server di test con `request_queue_size = 16` (gli
+8 client della barrier eccedevano la coda di default) e handler sbloccato alla
+chiusura invece che dopo 30 secondi fissi; due smoke test con nomi che
+promettevano semantica non asserita ora la asseriscono.
+
+**Non chiuso, e perché.** `alembic check` resta rosso su cinque voci di deriva
+**preesistenti** e non mie: gli indici parziali `ix_job_due` e
+`ix_outbox_pending` (creati nella migrazione 0001 con `postgresql_where`, non
+dichiarati sui modelli) e la rappresentazione di `regime_lettura.host_id`
+(unique + index, Story 1.6). Le tre `remove_table` che erano il finding sono
+scomparse. È informazione per MYL-44: il cancello non si può accendere senza
+prima ripulire quella deriva.
+
 ### Change log
 
 - 2026-07-26 — Story creata, implementata test-first e consegnata in PR
   (branch `story/2.1-feed-ical-import`). Prima Story dell'Epic 2, primo codice
   di rete in uscita del progetto.
+- 2026-07-26 — Cross-review di Murat: **BOCCIA**. Fix-batch `epic2-batch1`
+  con il P0 sugli uid vuoti, quattro P1 e la lista P2. Rosso visto prima su
+  P0, P1-1, P1-2 e P1-4.
