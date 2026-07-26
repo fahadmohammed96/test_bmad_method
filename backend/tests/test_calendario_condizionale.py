@@ -360,6 +360,109 @@ class TestTrecentoQuattro:
         assert run.prenotazioni_rimosse_dal_feed == 1
 
 
+class TestContatoriDiagnosticiAttraversoUn304:
+    """P1-6 — un 304 non deve azzerare ciò che la superficie mostra all'Host.
+
+    `eventi_malformati` e `eventi_ricorrenti_non_espansi` sono avvisi: dicono
+    all'Host che alcune righe del suo calendario non sono state importate. Se
+    li si deriva dall'ultimo run RIUSCITO, un 304 — che è riuscito e ha tutti
+    i contatori a zero — li spegne. Il portale non ha cambiato niente,
+    **quindi gli eventi illeggibili ci sono ancora**: l'avviso sparirebbe
+    esattamente perché il problema è rimasto identico.
+
+    La verità temporale continua a venire dall'ultimo run riuscito (un 304 è
+    una verifica riuscita); i CONTEGGI vengono dall'ultimo run che ha
+    davvero riconciliato.
+    """
+
+    UID_ROTTO = (
+        "BEGIN:VEVENT\r\nUID:rotto@example.com\r\n"
+        "DTSTART;VALUE=DATE:20260812\r\nDTEND;VALUE=DATE:20260810\r\n"
+        "SUMMARY:date invertite\r\nEND:VEVENT\r\n"
+    )
+
+    @pytest.fixture
+    def feed_con_avvisi(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> FeedIcal:
+        server_feed.prepara(
+            PERCORSO,
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent("uid-1@example.com", dal="20260810", al="20260812"),
+                    self.UID_ROTTO,
+                ),
+                etag=ETAG,
+            ),
+        )
+        feed = collega(db_session, contesto, server_feed.url(PERCORSO))
+        run = sincronizza(db_session, feed, client())
+        assert run.eventi_malformati == 1, "il fixture non produce l'avviso atteso"
+        return feed
+
+    def _stato(self, db: Session, feed: FeedIcal):
+        return service.stato_del_feed(db, feed.host_id, feed)
+
+    def test_un_304_non_spegne_l_avviso_sugli_eventi_malformati(
+        self, db_session: Session, server_feed: ServerFeed, feed_con_avvisi: FeedIcal
+    ) -> None:
+        assert self._stato(db_session, feed_con_avvisi).eventi_malformati == 1
+
+        run = sincronizza(db_session, feed_con_avvisi, client())
+
+        assert run.non_modificato is True
+        assert self._stato(db_session, feed_con_avvisi).eventi_malformati == 1
+
+    def test_molti_304_di_fila_non_erodono_l_avviso(
+        self, db_session: Session, server_feed: ServerFeed, feed_con_avvisi: FeedIcal
+    ) -> None:
+        for _ in range(4):
+            sincronizza(db_session, feed_con_avvisi, client())
+
+        assert self._stato(db_session, feed_con_avvisi).eventi_malformati == 1
+
+    def test_il_timestamp_invece_AVANZA_col_304(
+        self, db_session: Session, server_feed: ServerFeed, feed_con_avvisi: FeedIcal
+    ) -> None:
+        # Le due letture divergono di proposito, e vanno pinnate insieme:
+        # il 304 è una verifica riuscita (quindi l'orario avanza) ma non è una
+        # riconciliazione (quindi i conteggi restano quelli dell'ultima).
+        prima = self._stato(db_session, feed_con_avvisi).ultimo_sync_riuscito_il
+        assert prima is not None
+
+        sincronizza(db_session, feed_con_avvisi, client())
+
+        dopo = self._stato(db_session, feed_con_avvisi)
+        assert dopo.ultimo_sync_riuscito_il is not None
+        assert dopo.ultimo_sync_riuscito_il >= prima
+        assert dopo.eventi_malformati == 1
+
+    def test_un_200_che_risolve_il_problema_spegne_l_avviso(
+        self, db_session: Session, server_feed: ServerFeed, feed_con_avvisi: FeedIcal
+    ) -> None:
+        # L'altra metà: l'avviso non deve diventare permanente. Quando il
+        # portale manda davvero un calendario pulito, il conteggio torna a zero.
+        sincronizza(db_session, feed_con_avvisi, client())
+        server_feed.prepara(PERCORSO, _corpo(etag=ETAG_NUOVO))
+
+        sincronizza(db_session, feed_con_avvisi, client())
+
+        assert self._stato(db_session, feed_con_avvisi).eventi_malformati == 0
+
+    def test_un_feed_che_ha_SOLO_run_da_304_non_inventa_conteggi(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # Confine: se non c'è mai stata una riconciliazione, i conteggi sono
+        # zero perché non si sa, non perché sono stati misurati.
+        server_feed.prepara(PERCORSO, _corpo(etag=ETAG))
+        feed = collega(db_session, contesto, server_feed.url(PERCORSO))
+
+        stato = service.stato_del_feed(db_session, feed.host_id, feed)
+
+        assert stato.eventi_malformati == 0
+        assert stato.eventi_ricorrenti_non_espansi == 0
+
+
 class TestUn304NonSollecitato:
     """Un 304 vale solo come risposta a una domanda che abbiamo fatto."""
 

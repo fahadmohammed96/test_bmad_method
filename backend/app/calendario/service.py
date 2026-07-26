@@ -184,10 +184,22 @@ def intervallo_prossimo_sync(
     `intervallo.py` ed è pura. La separazione non è estetica: è ciò che
     permette di provare la regola su tutti i suoi confini senza un database e
     senza attendere quindici minuti.
+
+    **Si cerca dal primo giorno NON ancora iniziato**, cioè da domani. Un
+    check-in di oggi ha la propria mezzanotte alle spalle: l'ospite è già
+    arrivato, e la finestra che l'intervallo stretto protegge è quella che
+    *precede* l'arrivo. Cercando da oggi, il `LIMIT 1` restituiva proprio
+    quel check-in passato e **oscurava quello di domani**, riportando
+    l'intervallo al pieno — cioè l'AC 10 si invertiva nel giorno di massima
+    occupazione, che è quello in cui una cancellazione tardiva non vista costa
+    di più. La regola pura scarta comunque un arrivo passato, ma non può
+    vedere quello che la query non le ha passato.
     """
     impostazioni = get_settings()
     prossimo = PrenotazioneRepository(db).prossimo_check_in(
-        host_id, struttura_id=feed.struttura_id, da=today_rome()
+        host_id,
+        struttura_id=feed.struttura_id,
+        da=today_rome() + timedelta(days=1),
     )
     return intervallo_di_sync(
         adesso=utcnow(),
@@ -215,6 +227,14 @@ def stato_del_feed(db: Session, host_id: uuid.UUID, feed: FeedIcal) -> StatoFeed
     run = SyncRunRepository(db)
     ultimo = run.ultimo(host_id, feed.id)
     riuscito = run.ultimo_riuscito(host_id, feed.id)
+    # Due domande diverse, e sarebbe un difetto confonderle. Il TIMESTAMP
+    # viene dall'ultimo run riuscito, 304 compresi: un 304 è una verifica
+    # riuscita e i dati mostrati sono correnti. I CONTEGGI di eventi non
+    # importati vengono dall'ultima RICONCILIAZIONE: un run da 304 li ha a
+    # zero perché non ha letto nulla, e derivarli da lì spegnerebbe l'avviso
+    # proprio quando il portale conferma che gli eventi illeggibili ci sono
+    # ancora tutti.
+    riconciliato = run.ultimo_riconciliato(host_id, feed.id)
     conteggi = PrenotazioneRepository(db).conta_per_stato(host_id, feed.id)
 
     if ultimo is None:
@@ -242,9 +262,11 @@ def stato_del_feed(db: Session, host_id: uuid.UUID, feed: FeedIcal) -> StatoFeed
         prenotazioni_rimosse_dal_feed=conteggi.get(
             StatoPrenotazione.RIMOSSA_DAL_FEED, 0
         ),
-        eventi_malformati=0 if riuscito is None else riuscito.eventi_malformati,
+        eventi_malformati=(
+            0 if riconciliato is None else riconciliato.eventi_malformati
+        ),
         eventi_ricorrenti_non_espansi=(
-            0 if riuscito is None else riuscito.eventi_ricorrenti_non_espansi
+            0 if riconciliato is None else riconciliato.eventi_ricorrenti_non_espansi
         ),
     )
 

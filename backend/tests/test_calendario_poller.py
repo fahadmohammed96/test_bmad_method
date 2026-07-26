@@ -18,7 +18,7 @@ Nessun dato reale di Ospiti nei fixture (NFR-16); rete stub-ata al trasporto.
 
 import logging
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -36,11 +36,12 @@ from app.calendario.models import (
     CategoriaErroreSync,
     EsitoSyncRun,
     FeedIcal,
+    Prenotazione,
     StatoPrenotazione,
 )
 from app.calendario.schemas import StatoSincronizzazione
 from app.core.config import get_settings
-from app.core.date_range import utcnow
+from app.core.date_range import today_rome, utcnow
 from app.core.jobs import Job, JobStatus, handlers, run_due_jobs
 from tests.calendario import (
     Contesto,
@@ -360,6 +361,215 @@ class TestBootstrapIdempotente:
         }
         assert TIPO_JOB_PURGE_SESSIONI in tipi
         assert TIPO_JOB_SYNC_PERIODICO in tipi
+
+    def test_l_ENTRYPOINT_del_worker_accoda_entrambi_i_cicli(
+        self, db_session: Session, feed_pronto: FeedIcal
+    ) -> None:
+        """P1-4: `app.worker.bootstrap_job_periodici` eseguito davvero.
+
+        Il test sopra chiama a mano le due funzioni, quindi non dice nulla
+        sull'entrypoint che le compone: togliere
+        `calendario_jobs.bootstrap_sync_periodico(db)` da `app/worker.py`
+        lasciava la suite verde, e l'unica cosa che se ne accorgeva era `F401`
+        di ruff — un cancello di lint, non di comportamento.
+
+        Il modo di guasto che questo copre e' preciso: il worker riparte, i
+        cicli non vengono riaccodati, e i Feed smettono di aggiornarsi in
+        silenzio. E' la cosa che questa Story esiste per impedire.
+        """
+        from app import worker
+        from app.identity.jobs import TIPO_JOB_PURGE_SESSIONI
+
+        for job in db_session.scalars(select(Job)):
+            db_session.delete(job)
+        db_session.commit()
+
+        # Nessun argomento: apre la propria sessione e committa da se', come
+        # all'avvio del processo. Per questo dopo si rilegge da capo.
+        worker.bootstrap_job_periodici()
+
+        db_session.expire_all()
+        tipi = [
+            job.job_type
+            for job in db_session.scalars(
+                select(Job).where(Job.status == JobStatus.PENDING)
+            )
+        ]
+        assert sorted(tipi) == sorted(
+            [TIPO_JOB_PURGE_SESSIONI, TIPO_JOB_SYNC_PERIODICO]
+        )
+
+
+class TestIntervalloDelPollerSulDatabASE:
+    """P1-2 — la COMPOSIZIONE fra la lettura di stato e la regola pura.
+
+    `intervallo.py` e' coperto da 14 test unit e regge; `prossimo_check_in` e
+    `intervallo_prossimo_sync` non erano coperti affatto. Il difetto viveva
+    esattamente li': la funzione pura e' corretta, la query le passava
+    l'argomento sbagliato, e nessun test guardava il punto in cui le due si
+    incontrano.
+    """
+
+    def _prenota(
+        self,
+        db: Session,
+        feed: FeedIcal,
+        *,
+        check_in: date,
+        stato=StatoPrenotazione.ATTIVA,
+    ) -> None:
+        db.add(
+            Prenotazione(
+                host_id=feed.host_id,
+                struttura_id=feed.struttura_id,
+                feed_id=feed.id,
+                ical_uid=f"uid-{check_in.isoformat()}-{stato.value}@example.com",
+                canale=feed.canale,
+                check_in=check_in,
+                check_out=check_in + timedelta(days=2),
+                stato=stato,
+            )
+        )
+        db.flush()
+
+    def test_senza_prenotazioni_l_intervallo_e_quello_pieno(
+        self, db_session: Session, feed_pronto: FeedIcal
+    ) -> None:
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=15)
+
+    def test_un_check_in_domani_stringe_il_ritmo(
+        self, db_session: Session, feed_pronto: FeedIcal
+    ) -> None:
+        self._prenota(
+            db_session, feed_pronto, check_in=today_rome() + timedelta(days=1)
+        )
+
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=5)
+
+    def test_un_check_in_OGGI_non_oscura_quello_di_DOMANI(
+        self, db_session: Session, feed_pronto: FeedIcal
+    ) -> None:
+        # IL difetto (P1-1 di Murat sul merito, P1-2 nel suo elenco). Il
+        # check-in di oggi e' gia' iniziato — la mezzanotte e' passata — quindi
+        # non stringe niente; ma essendo il PRIMO in ordine di data prendeva il
+        # `LIMIT 1` e oscurava quello di domani, riportando l'intervallo al
+        # pieno. L'AC 10 si invertiva nel giorno di massima occupazione, cioe'
+        # quello in cui una cancellazione tardiva non vista costa di piu'.
+        self._prenota(db_session, feed_pronto, check_in=today_rome())
+        self._prenota(
+            db_session, feed_pronto, check_in=today_rome() + timedelta(days=1)
+        )
+
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=5)
+
+    def test_un_check_in_solo_OGGI_lascia_il_ritmo_pieno(
+        self, db_session: Session, feed_pronto: FeedIcal
+    ) -> None:
+        # L'altra meta': la correzione non deve trasformare «oggi» in un
+        # motivo per accelerare. La finestra e' quella che PRECEDE l'arrivo.
+        self._prenota(db_session, feed_pronto, check_in=today_rome())
+
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=15)
+
+    def test_un_check_in_lontano_lascia_il_ritmo_pieno(
+        self, db_session: Session, feed_pronto: FeedIcal
+    ) -> None:
+        self._prenota(
+            db_session, feed_pronto, check_in=today_rome() + timedelta(days=30)
+        )
+
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=15)
+
+    @pytest.mark.parametrize(
+        "stato", [StatoPrenotazione.CANCELLATA, StatoPrenotazione.RIMOSSA_DAL_FEED]
+    )
+    def test_una_prenotazione_non_attiva_non_stringe_il_ritmo(
+        self, db_session: Session, feed_pronto: FeedIcal, stato: StatoPrenotazione
+    ) -> None:
+        # Un arrivo cancellato non e' un arrivo: trattarlo come tale terrebbe
+        # un Feed morto sul ritmo stretto per sempre.
+        self._prenota(
+            db_session,
+            feed_pronto,
+            check_in=today_rome() + timedelta(days=1),
+            stato=stato,
+        )
+
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=15)
+
+    def test_il_check_in_di_un_ALTRA_struttura_non_stringe_il_ritmo(
+        self, db_session: Session, contesto: Contesto, feed_pronto: FeedIcal
+    ) -> None:
+        # La query e' scopata per Struttura oltre che per Host: l'arrivo di un
+        # altro appartamento non e' un motivo per interrogare questo portale.
+        altra = crea_struttura(db_session, contesto.host_id, "Altro appartamento")
+        db_session.add(
+            Prenotazione(
+                host_id=contesto.host_id,
+                struttura_id=altra.id,
+                ical_uid=None,
+                canale=feed_pronto.canale,
+                check_in=today_rome() + timedelta(days=1),
+                check_out=today_rome() + timedelta(days=3),
+            )
+        )
+        db_session.flush()
+
+        assert service.intervallo_prossimo_sync(
+            db_session, feed_pronto.host_id, feed_pronto
+        ) == timedelta(minutes=15)
+
+    def test_il_ritmo_stretto_arriva_fino_al_due_at_del_job(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # Fino in fondo: non basta che la funzione ritorni 5 minuti, deve
+        # finire nel `due_at` della riga in coda. E' il punto in cui l'AC 10
+        # smette di essere una funzione e diventa comportamento del poller.
+        #
+        # L'arrivo vicino lo porta il FEED, non una riga inserita a mano: una
+        # Prenotazione che non e' nel corpo scaricato viene giustamente marcata
+        # `rimossa_dal_feed` dalla riconciliazione, e smetterebbe di contare.
+        # E' il tipo di errore che rende un test verde per la ragione sbagliata
+        # — qui l'ha reso rosso, che e' il verso fortunato.
+        domani = today_rome() + timedelta(days=1)
+        server_feed.prepara(
+            PERCORSO,
+            RispostaPreparata(
+                corpo=calendario(
+                    vevent(
+                        "arrivo-domani@example.com",
+                        dal=domani.strftime("%Y%m%d"),
+                        al=(domani + timedelta(days=2)).strftime("%Y%m%d"),
+                    )
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, server_feed.url(PERCORSO))
+        for job in job_periodici(db_session, feed):
+            db_session.delete(job)
+        db_session.commit()
+
+        esegui_sync_periodico(
+            db_session,
+            {"feed_id": str(feed.id), "host_id": str(feed.host_id)},
+        )
+        db_session.commit()
+
+        job = job_periodici(db_session, feed)[0]
+        assert job.due_at > utcnow()
+        assert job.due_at <= utcnow() + timedelta(minutes=6)
 
 
 class TestUnFallimentoNonErodeIDati:

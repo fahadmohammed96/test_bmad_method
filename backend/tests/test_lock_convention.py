@@ -19,6 +19,8 @@ per costruzione, non ricordato.
 import ast
 import pathlib
 
+import pytest
+
 from app.core import lock
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -87,6 +89,37 @@ def test_solo_app_core_lock_scrive_un_pg_advisory() -> None:
     )
 
 
+def _namespace_dichiarati_nel_sorgente(albero: ast.AST) -> list[tuple[str, int]]:
+    """Assegnazioni a un nome che comincia per `NAMESPACE_`.
+
+    Prende l'ALBERO e non il percorso, come `_chiamate_advisory`: è ciò che
+    permette di puntarla su un sorgente finto e pretendere che segnali. La
+    versione precedente richiedeva anche `"LOCK" in nome`, e nessuna costante
+    del progetto contiene `LOCK` — `NAMESPACE_CAP_STRUTTURE` e
+    `NAMESPACE_SYNC_PERIODICO` non lo contengono, e non lo conteneva nemmeno
+    il `NAMESPACE_QUALCOSA` che il commento portava come esempio della
+    violazione da intercettare. Il predicato non poteva essere vero, e
+    l'assenza di una sentinella è precisamente il motivo per cui è passato:
+    una guardia che non morde è una ragione scritta perché il prossimo non
+    guardi.
+    """
+    trovati: list[tuple[str, int]] = []
+    for nodo in ast.walk(albero):
+        bersagli = (
+            nodo.targets
+            if isinstance(nodo, ast.Assign)
+            else [nodo.target]
+            if isinstance(nodo, ast.AnnAssign)
+            else []
+        )
+        for bersaglio in bersagli:
+            if isinstance(bersaglio, ast.Name) and bersaglio.id.startswith(
+                PREFISSO_NAMESPACE
+            ):
+                trovati.append((bersaglio.id, nodo.lineno))
+    return trovati
+
+
 def test_nessun_modulo_dichiara_un_namespace_per_conto_proprio() -> None:
     # Un `NAMESPACE_QUALCOSA = 1002` in un modulo di dominio ricreerebbe
     # esattamente la situazione che RT-3 chiedeva di chiudere: due costanti
@@ -96,29 +129,61 @@ def test_nessun_modulo_dichiara_un_namespace_per_conto_proprio() -> None:
         if percorso == MODULO_DEI_LOCK:
             continue
         albero = ast.parse(percorso.read_text(encoding="utf-8"))
-        for nodo in ast.walk(albero):
-            bersagli = (
-                nodo.targets
-                if isinstance(nodo, ast.Assign)
-                else [nodo.target]
-                if isinstance(nodo, ast.AnnAssign)
-                else []
-            )
-            for bersaglio in bersagli:
-                if (
-                    isinstance(bersaglio, ast.Name)
-                    and PREFISSO_NAMESPACE in bersaglio.id
-                    and "LOCK" in bersaglio.id
-                ):
-                    fuori_norma.append(
-                        f"{percorso.relative_to(BACKEND)}:{nodo.lineno} {bersaglio.id}"
-                    )
+        fuori_norma += [
+            f"{percorso.relative_to(BACKEND)}:{riga} {nome}"
+            for nome, riga in _namespace_dichiarati_nel_sorgente(albero)
+        ]
     assert fuori_norma == [], (
         f"namespace di lock dichiarati fuori da app/core/lock.py: {fuori_norma}"
     )
 
 
-def test_la_guardia_riconosce_un_advisory_fuori_posto(
+@pytest.mark.parametrize(
+    "sorgente",
+    [
+        "NAMESPACE_QUALCOSA = 1002\n",
+        "NAMESPACE_SYNC_PERIODICO = 1002\n",
+        "NAMESPACE_LOCK_CAP_STRUTTURE = 1001\n",
+        "NAMESPACE_ALTRO: int = 1004\n",
+    ],
+)
+def test_la_guardia_riconosce_un_namespace_dichiarato_fuori_posto(
+    sorgente: str,
+) -> None:
+    # La sentinella che mancava. Include i due nomi REALI del progetto: se il
+    # predicato tornasse a chiedere una sottostringa che le costanti vere non
+    # hanno, questo caso lo dice subito.
+    assert _namespace_dichiarati_nel_sorgente(ast.parse(sorgente))
+
+
+@pytest.mark.parametrize(
+    "sorgente",
+    [
+        "PREFISSO = 'NAMESPACE_'\n",
+        "def usa(namespace: int) -> None: ...\n",
+        "SOGLIA_ALERT = 3\n",
+    ],
+)
+def test_la_guardia_non_segnala_un_sorgente_innocuo(sorgente: str) -> None:
+    # L'altra metà: una guardia che segnala tutto non discrimina. In
+    # particolare una STRINGA che contiene il prefisso non è una
+    # dichiarazione, e un parametro di funzione nemmeno.
+    assert _namespace_dichiarati_nel_sorgente(ast.parse(sorgente)) == []
+
+
+def test_la_guardia_vede_i_namespace_VERI_del_progetto() -> None:
+    # Il legame fra la guardia e la realtà: il predicato deve riconoscere le
+    # costanti che esistono davvero, altrimenti sorveglia una convenzione che
+    # nessuno usa. Le si fa esaminare il modulo dei lock, dove sono legittime.
+    albero = ast.parse(MODULO_DEI_LOCK.read_text(encoding="utf-8"))
+    nomi = {nome for nome, _ in _namespace_dichiarati_nel_sorgente(albero)}
+    assert set(_namespace_dichiarati()) <= nomi, (
+        f"la guardia non riconosce {sorted(set(_namespace_dichiarati()) - nomi)}: "
+        "sorveglia una forma di nome che il progetto non usa"
+    )
+
+
+def test_la_sentinella_dell_advisory_riconosce_un_sorgente_fuori_posto(
     tmp_path: pathlib.Path,
 ) -> None:
     # Sentinella: le si fa esaminare un sorgente finto e si pretende che lo
@@ -131,7 +196,7 @@ def test_la_guardia_riconosce_un_advisory_fuori_posto(
     assert _chiamate_advisory(ast.parse(finto.read_text(encoding="utf-8"))) == [1]
 
 
-def test_la_guardia_non_segnala_un_sorgente_innocuo(
+def test_la_sentinella_dell_advisory_non_segnala_un_sorgente_innocuo(
     tmp_path: pathlib.Path,
 ) -> None:
     finto = tmp_path / "innocuo.py"

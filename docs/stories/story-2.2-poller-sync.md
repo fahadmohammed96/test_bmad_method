@@ -207,26 +207,36 @@ coda; resta aperto e resta P2), GS-3 (2.6), GS-4 (2.7), E2-G8.
 
 ## Dev Agent Record
 
-### Evidenza dei test (2026-07-26)
+### Evidenza dei test (2026-07-26, aggiornata dopo il fix-batch)
 
 Comandi eseguiti, output reale.
 
-- **Backend** — `uv run pytest -q` → **499 passed** in 114s su PostgreSQL 18
-  reale (**87 nuovi** rispetto ai 412 su `main`: 20 condizionale, 33 poller,
-  14 intervallo, 3 gara, 8 lock, 7 GS-7, più 2 API).
+- **Backend** — `uv run pytest -q` → **522 passed** in 120s su PostgreSQL 18
+  reale (**110 nuovi** rispetto ai 412 su `main`). Per file nuovo: 25
+  `test_calendario_condizionale`, 43 `test_calendario_poller`, 14
+  `test_intervallo_sync`, 3 `test_calendario_gara_poller`, 15
+  `test_lock_convention`, 8 `test_superfici_feed_convention`; il resto su
+  `test_calendario_api`.
 - `uv run ruff check .` → *All checks passed!* · `uv run ruff format --check .`
-  → *106 files already formatted* · `uv run mypy` → *Success: no issues found
+  → *107 files already formatted* · `uv run mypy` → *Success: no issues found
   in 53 source files*.
 - **`alembic check`** → *No new upgrade operations detected.* (su database
   ricostruito da zero con `alembic upgrade head`). Prima di questa PR lo stesso
   comando riportava 5 operazioni.
-- **Frontend** — `npm test` → **48 passed** (14 file; 9 erano 39 su `main`,
-  +9 su `FeedIcalStruttura`) · `npm run lint`, `npm run typecheck`,
-  `npm run build` puliti.
+- **Frontend** — `npm test` → **48 passed** su 14 file; su `main` erano **44**,
+  quindi **+4**, tutti su `FeedIcalStruttura.test.tsx` (15 → 19 `it`,
+  verificato con `git show origin/main:...`) · `npm run lint`,
+  `npm run typecheck`, `npm run build` puliti.
 - **E2E** — `npm run test:e2e` → **10 passed** (chromium + mobile), nessuno
   spec nuovo, come impone §2.5.
 - **Contratto** — `scripts/export_openapi.py` + `npm run generate:api`
   rieseguiti e committati.
+
+*Correzione rispetto alla prima consegna, segnalata da Murat:* avevo scritto
+«48 da 39, +9 sul frontend» e «8 lock, 7 GS-7». I numeri veri sono +4 (44 →
+48) e 7 lock / 8 GS-7 prima del batch — invertiti. Il 39 veniva dal documento
+della 2.1 invece che da una misura. «Evidenza prima delle affermazioni» vale
+anche sui numeri piccoli, e questi non li avevo misurati.
 
 ### Prova del rosso (criterio di gate 4)
 
@@ -308,9 +318,99 @@ nella docstring.
   livello, mentre `base-della-pr` dichiara `{}` esplicito. Il finding era
   corretto e la postura di A2 ne esce più stretta, non più larga.
 
+### Fix-batch `epic2-2.2-p1` — cross-review di Murat sulla PR #40 (BOCCIA)
+
+Sei P1, tutti dentro il perimetro della Story, tutti sullo stesso branch e
+sulla stessa PR: la base è `main` e mantenerla è più importante che aprire una
+PR separata — è esattamente l'incidente che MYL-49 esiste per impedire.
+
+**P1-1 — la guardia MYL-49 non scattava sul cambio di base.** `on:
+pull_request:` senza `types:` usa `[opened, synchronize, reopened]`, e cambiare
+la base emette `edited`. Quindi: apri con base `main` → verde → *Edit* → base a
+`story/x` → nessun run riparte e l'ultimo status resta la spunta verde di
+prima. Lo scenario PR #36 con una copertura verde in più. Secondo effetto della
+stessa causa: dopo un rosso, aggiungere la riga di eccezione non ri-esegue
+niente, e la via d'uscita legittima non funziona al primo uso.
+La guardia è passata in un workflow suo, `.github/workflows/base-della-pr.yml`,
+con `types: [opened, synchronize, reopened, edited]`. Non `types:` su `ci.yml`,
+che avrebbe fatto ripartire backend, frontend ed e2e a ogni correzione della
+descrizione — compresa quella che aggiunge l'eccezione. Due insiemi di trigger
+diversi sono due workflow.
+
+**P1-2 — l'intervallo adattivo si spegneva nel giorno di turnover.**
+`intervallo_prossimo_sync` chiedeva il prossimo check-in `da=today_rome()`, e
+con `LIMIT 1` un arrivo di **oggi** — già iniziato, quindi che non stringe
+niente — oscurava quello di **domani**. L'AC 10 si invertiva nel giorno di
+massima occupazione. Ora si cerca dal primo giorno non ancora iniziato
+(`today_rome() + 1`). La funzione pura era corretta: il difetto stava nella
+composizione, dove la copertura era **zero**. Aggiunta
+`TestIntervalloDelPollerSulDatabASE` (9 test): oggi+domani, solo oggi, solo
+domani, lontano, stati non attivi, altra Struttura, e il `due_at` del job.
+
+**P1-3 — la guardia di RT-3 non vedeva il naming del progetto.** Il predicato
+chiedeva `"LOCK" in nome`, e nessuna costante reale lo contiene —
+`NAMESPACE_CAP_STRUTTURE`, `NAMESPACE_SYNC_PERIODICO`, e nemmeno il
+`NAMESPACE_QUALCOSA` che il commento portava come esempio della violazione da
+intercettare. Era anche l'unico predicato del file senza sentinella, ed è
+esattamente per questo che è passato. Ora il rilevamento è una funzione che
+prende l'ALBERO (come `_chiamate_advisory`), il predicato è
+`startswith("NAMESPACE_")`, e ci sono tre sentinelle: quattro sorgenti che deve
+segnalare (**inclusi i due nomi veri**), tre che non deve, e una che le fa
+esaminare il modulo dei lock reale.
+
+**P1-4 — `bootstrap_job_periodici` non era eseguito da alcun test.** Il test
+esistente chiamava a mano le due funzioni, non l'entrypoint che le compone:
+togliere `calendario_jobs.bootstrap_sync_periodico(db)` da `app/worker.py`
+lasciava la suite verde, e l'unica cosa che se ne accorgeva era `F401` di ruff
+— un cancello di lint, non di comportamento. Il modo di guasto è preciso: il
+worker riparte, i cicli non vengono riaccodati, i Feed smettono di aggiornarsi
+in silenzio. Aggiunto `test_l_ENTRYPOINT_del_worker_accoda_entrambi_i_cicli`,
+che chiama la funzione vera senza argomenti.
+
+**P1-5 — `test_feed_DIVERSI_non_si_aspettano_a_vicenda` non poteva fallire.**
+Asseriva «8 esiti, 8 cicli», invarianti entrambi sotto serializzazione globale.
+La sua stessa docstring diceva «nessun test lo direbbe»: e infatti. Ora c'è una
+seconda barriera raggiunta **dopo** `assicura_sync_periodico` e **prima** del
+commit, cioè mentre ogni thread tiene ancora il proprio lock: con lock per Feed
+tutti e otto arrivano, con un lock su chiave costante solo il primo. Lo stesso
+meccanismo di A3-2.
+
+**P1-6 — un 304 azzerava i contatori diagnostici mostrati all'Host.**
+`eventi_malformati` e `eventi_ricorrenti_non_espansi` venivano da
+`ultimo_riuscito`, che ora include i run da 304 — riusciti e con tutti i
+contatori a zero. Scenario: 3 VEVENT illeggibili, la superficie dice 3; quindici
+minuti dopo un 304 e la superficie dice 0. L'avviso spariva **perché non era
+cambiato niente**, cioè proprio quando gli eventi illeggibili c'erano ancora
+tutti. Aggiunto `SyncRunRepository.ultimo_riconciliato` (`RIUSCITO AND
+non_modificato IS FALSE`): il timestamp continua a venire da `ultimo_riuscito`
+— un 304 è una verifica riuscita — i conteggi dall'ultima riconciliazione.
+
+**Prova del rosso del batch.** P1-2 e P1-6 visti rossi scrivendo prima il test
+(`assert 0:15:00 == 0:05:00` e `assert 0 == 1`). Gli altri tre sono assenze di
+copertura, quindi la prova è la mutazione, e tutte e tre l'hanno vista:
+
+| Finding | Mutazione | Esito |
+| --- | --- | --- |
+| P1-3 | `NAMESPACE_QUALCOSA = 1002` in `app/calendario/jobs.py` | guardia rossa (prima taceva) |
+| P1-4 | rimossa la riga da `app/worker.py` | test rosso |
+| P1-5 | `blocca_per_id(..., feed.id)` → chiave costante | `BrokenBarrierError` |
+
+**Fuori dal batch, deliberatamente.** I dodici P2 restano aperti: lo scope di
+un fix-batch è rigido e i P2 hanno il loro momento (azione A9). Fa eccezione
+la correzione dei conteggi del Dev Agent Record, che non è un P2 ma un errore
+di fatto in un'affermazione mia. Anche il punto ruleset di P1-1 resta fuori:
+è configurazione del repository e la decide Fahad.
+
 ### Change log
 
 - 2026-07-26 — Story creata, implementata test-first e consegnata in PR
   (branch `story/2.2-poller-sync`, base `main`). Secondo advisory lock del
   progetto: RT-3 scade e la convenzione dei namespace è scritta e sorvegliata.
   Prima PR con `alembic check` e con la guardia sulla base della PR attivi.
+- 2026-07-26 — Cross-review di Murat sulla PR #40: **BOCCIA**, sei P1.
+  Fix-batch `epic2-2.2-p1` sullo stesso branch: guardia MYL-49 in un workflow
+  con `types: [..., edited]`, `da` del prossimo check-in, predicato e
+  sentinelle della guardia dei namespace, test sull'entrypoint del worker,
+  `test_feed_DIVERSI` che ora osserva la concorrenza, contatori diagnostici
+  dall'ultima riconciliazione. Rosso visto su tutti e sei. Conteggi del Dev
+  Agent Record corretti e misurati.

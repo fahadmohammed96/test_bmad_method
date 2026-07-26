@@ -119,9 +119,39 @@ class SyncRunRepository:
         return self._db.scalars(self._per_feed(host_id, feed_id).limit(1)).first()
 
     def ultimo_riuscito(self, host_id: uuid.UUID, feed_id: uuid.UUID) -> SyncRun | None:
+        """Sorgente del «dati aggiornati alle HH:MM»: include i run da 304.
+
+        Un 304 è una verifica riuscita — abbiamo chiesto al portale e ci ha
+        confermato che i dati che mostriamo sono correnti — quindi il
+        timestamp deve avanzare. Per i CONTEGGI serve l'altra domanda:
+        `ultimo_riconciliato`.
+        """
         return self._db.scalars(
             self._per_feed(host_id, feed_id)
             .where(SyncRun.esito == EsitoSyncRun.RIUSCITO)
+            .limit(1)
+        ).first()
+
+    def ultimo_riconciliato(
+        self, host_id: uuid.UUID, feed_id: uuid.UUID
+    ) -> SyncRun | None:
+        """L'ultimo run che ha davvero letto e riconciliato un calendario.
+
+        Distinto da `ultimo_riuscito` per una ragione che si vede solo
+        mettendo insieme il 304 e la superficie: `eventi_malformati` e
+        `eventi_ricorrenti_non_espansi` sono AVVISI all'Host su righe che non
+        sono state importate. Un run da 304 è riuscito e ha tutti i contatori
+        a zero, quindi derivarli da `ultimo_riuscito` li spegnerebbe — e li
+        spegnerebbe **perché non è cambiato niente**, cioè proprio quando gli
+        eventi illeggibili ci sono ancora tutti. Un avviso che sparisce da sé
+        è peggio di nessun avviso.
+        """
+        return self._db.scalars(
+            self._per_feed(host_id, feed_id)
+            .where(
+                SyncRun.esito == EsitoSyncRun.RIUSCITO,
+                SyncRun.non_modificato.is_(False),
+            )
             .limit(1)
         ).first()
 
@@ -312,6 +342,12 @@ class PrenotazioneRepository:
         Serve all'intervallo adattivo: un Feed che ha un ospite in arrivo si
         risincronizza più spesso, perché è lì che una cancellazione tardiva
         non vista costa di più.
+
+        `da` è il primo giorno che al chiamante interessa, e non è «oggi»: il
+        chiamante passa il primo giorno NON ancora iniziato, perché un
+        check-in odierno è un arrivo già avvenuto e con `LIMIT 1`
+        oscurerebbe quello di domani. La decisione sta nel service, che è
+        l'unico posto in cui «arrivo futuro» ha un significato.
 
         Solo le Prenotazioni `attiva`: una `rimossa_dal_feed` o `cancellata`
         non è un arrivo, e trattarla come tale terrebbe un Feed morto sul

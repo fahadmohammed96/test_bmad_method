@@ -198,10 +198,11 @@ class TestBootstrapDelCicloSottoConcorrenza:
         self, pg_engine: Engine, db_session: Session
     ) -> None:
         # Il lock è per Feed, non globale: due bootstrap di Feed diversi non
-        # devono serializzarsi. Un lock su una chiave costante darebbe la
-        # stessa post-condizione del test sopra e passerebbe — poi con
-        # centinaia di Feed il bootstrap dell'avvio diventerebbe una fila
-        # indiana, e nessun test lo direbbe.
+        # devono serializzarsi. Con centinaia di Feed una serializzazione
+        # globale trasformerebbe il bootstrap dell'avvio in una fila indiana,
+        # e la post-condizione sui conteggi non lo direbbe — è invariante
+        # sotto serializzazione. Qui la granularità si OSSERVA, con la
+        # barriera raggiunta mentre i lock sono ancora tenuti (vedi sotto).
         host = Host(email="host.molti.feed@example.com", password_hash="$argon2id$x")
         db_session.add(host)
         db_session.flush()
@@ -232,14 +233,36 @@ class TestBootstrapDelCicloSottoConcorrenza:
                 db.delete(job)
             db.commit()
 
-        barriera = threading.Barrier(CONCORRENTI, timeout=10)
+        partenza = threading.Barrier(CONCORRENTI, timeout=10)
+        # LA barriera che rende questo test capace di fallire. Si raggiunge
+        # DOPO `assicura_sync_periodico` e PRIMA del `commit`, cioè mentre
+        # ogni thread TIENE ancora il proprio lock consultivo (è legato alla
+        # transazione e si rilascia al commit).
+        #
+        # Con un lock per Feed gli otto lock sono distinti, quindi tutti e
+        # otto arrivano qui e la barriera si apre. Con un lock su chiave
+        # costante — la serializzazione globale — solo il primo entra: gli
+        # altri sette restano appesi dentro il codice sotto test e non
+        # raggiungono mai la barriera, che scade. È lo stesso meccanismo di
+        # A3-2, e vive fra i client come impone §2.4.
+        #
+        # Senza questa barriera il test asseriva solo «8 esiti, 8 cicli»,
+        # invarianti entrambi anche sotto serializzazione globale: era verde
+        # per costruzione, e la sua stessa docstring diceva «nessun test lo
+        # direbbe».
+        tutti_hanno_il_lock = threading.Barrier(CONCORRENTI, timeout=10)
 
         def bootstrap_di(indice: int) -> str:
             with Session(pg_engine) as db:
                 feed = db.get(FeedIcal, feed_id[indice])
                 assert feed is not None
-                barriera.wait()
-                assicura_sync_periodico(db, feed)
+                partenza.wait()
+                try:
+                    assicura_sync_periodico(db, feed)
+                except Exception as exc:  # noqa: BLE001 — l'esito è il dato
+                    return f"errore:{type(exc).__name__}"
+                finally:
+                    tutti_hanno_il_lock.wait()
                 db.commit()
                 return "fatto"
 

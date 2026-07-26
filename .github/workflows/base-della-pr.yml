@@ -1,0 +1,82 @@
+# La base della PR è `main` (MYL-49).
+#
+# Difesa strutturale contro l'incidente del 26/07: la PR #36 conteneva un fix
+# P0 ed era basata su `story/2.1-feed-ical-import` invece che su `main`. È
+# stata revisionata, approvata e mergiata — nel ramo di story. Il P0 è rimasto
+# fuori dal trunk e nulla lo ha segnalato, perché ogni controllo aveva fatto il
+# proprio lavoro: i test erano verdi, la review era reale, il merge è avvenuto.
+# Il difetto stava fra i controlli, dove non guardava nessuno.
+#
+# **Perché è un workflow a sé e non un job di `ci.yml`.** I tipi di evento di
+# default di `pull_request` sono `[opened, synchronize, reopened]`, e cambiare
+# la base di una PR aperta emette `edited` — che non è nel set. Nella prima
+# stesura la guardia viveva in `ci.yml` con i tipi di default, quindi:
+# apri con base `main`, la guardia passa verde, poi *Edit* → base a `story/x`,
+# e nessun run riparte: l'ultimo status sul SHA di HEAD resta la spunta verde
+# di prima. Cioè lo scenario esatto della PR #36, con in più una spunta verde
+# a fargli da copertura. Stessa causa, secondo effetto: dopo un rosso,
+# aggiungere la riga di eccezione al corpo non fa ripartire nulla, e la via
+# d'uscita legittima non funziona al primo uso.
+#
+# Serve quindi `types: [..., edited]`. Metterlo su `ci.yml` lo applicherebbe a
+# TUTTI i job: backend, frontend, e2e e api-contract ripartirebbero a ogni
+# correzione di refuso nella descrizione — compresa proprio quella che aggiunge
+# la riga di eccezione. Due insiemi di trigger diversi sono due workflow.
+name: Base della PR
+
+on:
+  pull_request:
+    # `edited` è il motivo per cui questo file esiste: copre il cambio di base
+    # e l'aggiunta della riga di eccezione al corpo.
+    types: [opened, synchronize, reopened, edited]
+
+# Default DENY: a questo workflow non serve niente. Nessun checkout — gli
+# basta il payload dell'evento, e un job che non clona il repository non può
+# eseguirne il codice.
+permissions: {}
+
+jobs:
+  base-della-pr:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: La base della PR è `main`
+        # Il corpo della PR passa da una VARIABILE D'AMBIENTE, mai
+        # interpolato dentro `run:` con `${{ }}`: l'interpolazione avviene
+        # prima che la shell veda lo script, quindi un corpo che contiene
+        # backtick o `$(...)` diventerebbe codice eseguito dal runner con i
+        # permessi del workflow. È la checklist di hardening §3.4, e questo è
+        # l'unico campo di questa pipeline che un estraneo può scrivere.
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+          CORPO: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          if [ "$BASE" = "main" ]; then
+            echo "Base: $BASE — ok."
+            exit 0
+          fi
+          # L'eccezione esiste (una catena di story dipendenti è legittima) ma
+          # va DICHIARATA e motivata, così la scelta resta scritta accanto al
+          # merge invece di essere una svista indistinguibile da una decisione.
+          #
+          # `sed` POSIX e non `grep -P`: il PCRE di grep si rifiuta di girare
+          # in un locale non UTF-8, e la guardia diverrebbe rossa per la
+          # ragione sbagliata su un runner configurato diversamente.
+          # `tr -d '\r'`: i corpi delle PR di GitHub arrivano con CRLF, e il
+          # ritorno a capo finirebbe nella motivazione allungandola di uno.
+          MOTIVAZIONE=$(printf '%s' "$CORPO" | tr -d '\r' \
+            | sed -n 's/^Base non-main dichiarata:[[:space:]]*//p' \
+            | sed -n '1p' | sed 's/[[:space:]]*$//')
+          # Almeno 20 caratteri: una soglia rende la motivazione un atto
+          # deliberato invece di una parola qualsiasi per zittire il cancello.
+          if [ "${#MOTIVAZIONE}" -ge 20 ]; then
+            echo "Base: $BASE — eccezione dichiarata: $MOTIVAZIONE"
+            exit 0
+          fi
+          echo "::error::La base di questa PR è '$BASE', non 'main'."
+          echo "Un lavoro mergiato in un ramo di story non arriva nel trunk, e"
+          echo "nessun controllo lo segnala (MYL-49). Cambia la base a 'main',"
+          echo "oppure aggiungi al corpo della PR una riga:"
+          echo "  Base non-main dichiarata: <motivo, almeno 20 caratteri>"
+          exit 1

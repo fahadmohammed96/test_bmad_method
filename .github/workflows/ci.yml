@@ -21,6 +21,11 @@
 #   viene interpolato con `${{ }}` dentro uno `run:`: passa da `env:`, perché
 #   l'interpolazione avviene PRIMA che la shell veda lo script e un corpo con
 #   `$(...)` diventerebbe codice eseguito dal runner.
+#
+# La guardia sulla base della PR (MYL-49) vive in `base-della-pr.yml`, non
+# qui: le servono i tipi di evento `edited` per vedere un cambio di base, e
+# applicarli a questo workflow farebbe ripartire backend, frontend ed e2e a
+# ogni correzione della descrizione.
 name: CI
 
 on:
@@ -40,65 +45,6 @@ on:
 permissions: {}
 
 jobs:
-  # La base della PR è `main` (MYL-49). Difesa strutturale contro l'incidente
-  # del 26/07: la PR #36 conteneva un fix P0 ed era basata su
-  # `story/2.1-feed-ical-import` invece che su `main`. È stata revisionata,
-  # approvata e mergiata — nel ramo di story. Il P0 è rimasto fuori dal trunk
-  # e nulla lo ha segnalato, perché ogni controllo aveva fatto il proprio
-  # lavoro: i test erano verdi, la review era reale, il merge è avvenuto. Il
-  # difetto stava fra i controlli, dove non guardava nessuno.
-  #
-  # Nessun checkout: al job serve solo il payload dell'evento, e un job che
-  # non clona il repository non può eseguirne il codice.
-  base-della-pr:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    # Esplicito e vuoto, non omesso: «questo job non ha bisogno di
-    # niente» è un'affermazione, e va scritta.
-    permissions: {}
-    steps:
-      - name: La base della PR è `main`
-        # Il corpo della PR passa da una VARIABILE D'AMBIENTE, mai
-        # interpolato dentro `run:` con `${{ }}`: l'interpolazione avviene
-        # prima che la shell veda lo script, quindi un corpo che contiene
-        # backtick o `$(...)` diventerebbe codice eseguito dal runner con i
-        # permessi del workflow. È la checklist di hardening §3.4 applicata al
-        # job nuovo, e questo è l'unico campo di questa pipeline che un
-        # estraneo può scrivere.
-        env:
-          BASE: ${{ github.event.pull_request.base.ref }}
-          CORPO: ${{ github.event.pull_request.body }}
-        run: |
-          set -euo pipefail
-          if [ "$BASE" = "main" ]; then
-            echo "Base: $BASE — ok."
-            exit 0
-          fi
-          # L'eccezione esiste (una catena di story dipendenti è legittima) ma
-          # va DICHIARATA e motivata, così la scelta resta scritta accanto al
-          # merge invece di essere una svista indistinguibile da una decisione.
-          #
-          # `sed` POSIX e non `grep -P`: il PCRE di grep si rifiuta di girare
-          # in un locale non UTF-8, e la guardia diverrebbe rossa per la
-          # ragione sbagliata su un runner configurato diversamente.
-          # `tr -d '\r'`: i corpi delle PR di GitHub arrivano con CRLF, e il
-          # ritorno a capo finirebbe nella motivazione allungandola di uno.
-          MOTIVAZIONE=$(printf '%s' "$CORPO" | tr -d '\r' \
-            | sed -n 's/^Base non-main dichiarata:[[:space:]]*//p' \
-            | sed -n '1p' | sed 's/[[:space:]]*$//')
-          # Almeno 20 caratteri: una soglia rende la motivazione un atto
-          # deliberato invece di una parola qualsiasi per zittire il cancello.
-          if [ "${#MOTIVAZIONE}" -ge 20 ]; then
-            echo "Base: $BASE — eccezione dichiarata: $MOTIVAZIONE"
-            exit 0
-          fi
-          echo "::error::La base di questa PR è '$BASE', non 'main'."
-          echo "Un lavoro mergiato in un ramo di story non arriva nel trunk, e"
-          echo "nessun controllo lo segnala (MYL-49). Cambia la base a 'main',"
-          echo "oppure aggiungi al corpo della PR una riga:"
-          echo "  Base non-main dichiarata: <motivo, almeno 20 caratteri>"
-          exit 1
-
   backend:
     runs-on: ubuntu-latest
     # Fa `actions/checkout`: gli serve leggere il repository, e nient'altro.
