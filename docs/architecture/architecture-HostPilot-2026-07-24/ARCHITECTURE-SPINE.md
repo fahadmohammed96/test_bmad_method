@@ -7,8 +7,8 @@ paradigm: 'monolite modulare a strati, event-augmented (transactional outbox)'
 scope: 'Intero prodotto HostPilot — MVP pilota (1-3 Strutture per Host)'
 status: approved
 created: '2026-07-24'
-updated: '2026-07-24'
-binds: ['FR-1…FR-19', 'NFR-1…NFR-16', 'UJ-1…UJ-5']
+updated: '2026-07-25'
+binds: ['FR-1…FR-19', 'NFR-1…NFR-17', 'UJ-1…UJ-5']
 sources: ['docs/prd.md', 'docs/ux-spec.md', 'docs/project-brief.md', 'docs/project-context.md']
 companions: ['docs/architecture.md']
 ---
@@ -73,9 +73,10 @@ Le frecce piene sono dipendenze sincrone ammesse (chi può chiamare chi), sempre
 
 ### AD-4 — Import iCal idempotente, append-preserving
 
-- **Binds:** calendario (FR-3, FR-5, NFR-1, NFR-2)
-- **Prevents:** Prenotazioni duplicate o perse tra sync successivi; stato "certo" mostrato su dati stantii.
+- **Binds:** calendario (FR-3, FR-5, NFR-1, NFR-2, NFR-17)
+- **Prevents:** Prenotazioni duplicate o perse tra sync successivi; stato "certo" mostrato su dati stantii; il worker usato come proxy verso la rete interna (SSRF) tramite l'URL di un Feed ostile.
 - **Rule:** upsert con chiave naturale `(feed_id, ical_uid)`; l'import non cancella mai una Prenotazione — la scomparsa dal feed marca `stato = rimossa_dal_feed`. Ogni run di sync scrive un record `sync_run` (esito, timestamp) e ogni superficie UI che mostra dati derivati da Feed espone il timestamp dell'ultimo sync riuscito. Il collegamento di un nuovo Feed accoda immediatamente un job di sync prioritario (import on-demand con progresso visibile — UJ-1); il poller periodico copre il regime.
+- **Rule (uscita di rete, NFR-17):** l'URL del Feed è input non fidato che il server dereferenzia. Il fetch ammette i soli schemi `http`/`https` — mai `file`, `gopher`, `ftp`; la destinazione è validata sull'**indirizzo effettivamente risolto** dal DNS, non sulla stringa dell'URL, e rifiutata se ricade su loopback, reti private, link-local o endpoint di metadati d'istanza; la validazione si ripete **dopo ogni redirect** (un primo hop legittimo non garantisce il secondo). Timeout di connessione e lettura e cap sulla dimensione della risposta sono parametri di configurazione, mai costanti nel codice (stessa disciplina di AD-9); il superamento chiude la connessione e produce un `sync_run` fallito. Il rifiuto è un errore d'uso per l'Host — lo stesso errore inline dell'URL irraggiungibile (FR-3) — e il messaggio non rivela l'esito della risoluzione: mai un canale di scoperta della rete interna. Politica corrente: **denylist**; l'allowlist dei domini OTA e un proxy di egress dedicato sono alternative note (Deferred), non debito.
 
 ### AD-5 — Conflitti: rilevazione pura, risoluzione solo umana
 
@@ -291,6 +292,7 @@ Envelope operativo (vincolante quanto gli AD):
 | FR-18 (Turni di pulizia) | operativita | AD-1, AD-10, AD-19 |
 | FR-19 (Messaggi automatici) | operativita + notifiche | AD-13, AD-10, AD-19 |
 | NFR-1…NFR-3 (sync, verità temporale, notifiche) | calendario + notifiche | AD-4, AD-5, AD-10 |
+| NFR-17 (uscita di rete sul fetch dei Feed) | calendario (worker) | AD-4 |
 | NFR-4 (configurabilità normativa) | config_normativa | AD-9 |
 | NFR-6, NFR-10…16 (GDPR) | privacy | AD-11, AD-15, AD-16 |
 | NFR-7 (osservabilità compliance) | adempimenti | AD-16 |
@@ -306,6 +308,7 @@ Envelope operativo (vincolante quanto gli AD):
 - **Set iniziale Comuni/Regioni configurati (G2-B)** — decisione di prodotto; l'architettura degrada in sicurezza (AD-9) qualunque sia il set.
 - **Retention esatta documenti (G2-D)** — parametro di configurazione (AD-11); default cautelativo proposto 30 giorni, da confermare col legale.
 - **RLS Postgres** — difesa in profondità complementare ad AD-2, attivabile post-MVP senza cambiare il modello.
+- **Allowlist domini OTA / proxy di egress dedicato (NFR-17)** — alternative alla denylist corrente per l'uscita di rete del fetch Feed (AD-4): l'allowlist è più stretta ma rompe i portali minori e i channel manager; il proxy di egress costa infrastruttura. Opzioni aperte di Fahad, registrate come alternative note — non debito tecnico.
 - **Billing dell'abbonamento SaaS** — nessuna FR nel PRD; pilota gestito manualmente; da progettare post-pilota.
 - **MFA, SSO** — post-MVP; AD-15 non li preclude.
 - **Push prezzi/disponibilità verso OTA** — Non-Goal PRD §8; riconsiderabile solo con API OTA di scrittura ufficiali.

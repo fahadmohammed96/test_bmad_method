@@ -4,7 +4,7 @@ status: approved
 gate: G3
 gate_status: 'approvata da Fahad al gate G3 (2026-07-24). Decisioni §10 [G3-1…5] ratificate; stack registrato in docs/project-context.md §6.'
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-25
 author: Winston — System Architect
 phase: '3 · Solutioning'
 depends_on:
@@ -23,7 +23,7 @@ related:
 
 ## 0. Scopo e come leggere questo documento
 
-Questo documento è l'artefatto architetturale della **Fase 3 (Solutioning)**, scritto per Fahad (gate **G3**), per John (Epics/Stories e readiness) e per Amelia (Fase 4 — Implementation). Progetta **contro i requisiti reali** del PRD (FR-1…FR-19, NFR-1…NFR-16) e i flussi della UX Spec (UJ-1…UJ-5), che referenzia per ID senza duplicarli.
+Questo documento è l'artefatto architetturale della **Fase 3 (Solutioning)**, scritto per Fahad (gate **G3**), per John (Epics/Stories e readiness) e per Amelia (Fase 4 — Implementation). Progetta **contro i requisiti reali** del PRD (FR-1…FR-19, NFR-1…NFR-17) e i flussi della UX Spec (UJ-1…UJ-5), che referenzia per ID senza duplicarli.
 
 Il contratto vincolante per l'implementazione è lo **spine** (`docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`): 20 invarianti **AD-1…AD-20** con regole verificabili, passati da un reviewer gate a 5 lenti indipendenti (riconciliazione PRD e UX, rubrica, verifica web, attacco avversariale) i cui esiti sono applicati qui. Questo documento li spiega, motiva i trade-off e presenta le **decisioni aperte per il G3** (§10). Le scelte di prodotto restano di Fahad: dove c'è un bivio, do opzioni con trade-off e un consiglio, non un verdetto.
 
@@ -137,6 +137,7 @@ fetch (ETag/If-Modified-Since) → parse VEVENT → normalizza → upsert idempo
 - **Import on-demand al collegamento** (UJ-1): collegare un Feed accoda subito un job di sync prioritario con progresso visibile ("Importazione in corso…" → "Importate N prenotazioni"); URL invalido/irraggiungibile produce errore inline immediato (FR-3). Il poller periodico copre il regime.
 - **Append-preserving**: l'import **non cancella mai** una Prenotazione; se un evento scompare dal feed, la Prenotazione passa a `rimossa_dal_feed` (le OTA a volte omettono eventi temporaneamente: cancellare = perdere lo storico e rischiare falsi negativi sui Conflitti).
 - **Verità temporale** (NFR-2): ogni run scrive `SYNC_RUN` (esito, timestamp); ogni superficie UI che mostra dati da Feed espone "dati aggiornati alle HH:MM". Un fallimento di sync lascia intatti i dati già importati e produce un errore visibile sulla Struttura (FR-3), con alert interno dopo N fallimenti consecutivi (§8).
+- **Uscita di rete** (NFR-17): l'URL del Feed è **input non fidato che il server dereferenzia** — la prima superficie SSRF del prodotto. Il fetch obbedisce alla politica di egress registrata in AD-4: soli schemi `http`/`https`, mai `file`, `gopher`, `ftp`; la destinazione è validata sull'**indirizzo effettivamente risolto** dal DNS — non sulla stringa dell'URL — e rifiutata se ricade su loopback, reti private, link-local o endpoint di metadati d'istanza; la validazione si **ripete dopo ogni redirect**, perché un primo hop legittimo non garantisce il secondo. Timeout di connessione e lettura e cap sulla dimensione della risposta sono **parametri di configurazione**, mai costanti nel codice (stessa disciplina di AD-9). Il rifiuto è un **errore d'uso per l'Host** — lo stesso errore inline dell'URL irraggiungibile (FR-3) — e il messaggio non rivela l'esito della risoluzione: mai un canale di scoperta della rete interna. La politica corrente è una **denylist**; l'allowlist dei domini OTA (più stretta, ma rompe portali minori e channel manager) e un proxy di egress dedicato (costo infrastrutturale) sono alternative note, opzioni aperte di Fahad — registrate nel Deferred dello spine, non debito. *(Hardening accolto dal supervisore su proposta del Test Architect, MYL-39; ratifica formale di Fahad al rientro.)*
 
 ### 3.2 Rilevazione e riconciliazione dei Conflitti (AD-5)
 
@@ -228,6 +229,7 @@ Realizza la policy del PRD §7 (NFR-10…NFR-16) come architettura, non come pro
 | Scalabilità | Dimensionata sul target reale (decine di host nel pilota): single-node con crescita per gradi — indici sui percorsi caldi, poi repliche di lettura, RLS, coda esterna se serve (interfacce già pronte, Deferred dello spine). Nessuna capacità pagata prima che serva |
 | Usabilità/A11y/i18n (NFR-5, 8, 9) | Vincoli UX (WCAG 2.1 AA, badge testo+icona, countdown, responsive) imposti al frontend; UI it-IT, formati italiani, fuso Europe/Rome (AD-3). Target misurabili proposti da Sally → decisione con G2-E |
 | Configurabilità normativa (NFR-4) | Tabelle versionate con validità temporale, degrado sicuro (AD-9, §2.2) |
+| Uscita di rete (NFR-17) | Politica di egress sul fetch dei Feed iCal (AD-4, §3.1): soli `http`/`https`, blocco di loopback/reti private/link-local/metadati d'istanza sull'indirizzo risolto e dopo ogni redirect, timeout e cap di dimensione come configurazione, rifiuto senza divulgazione. Denylist corrente; allowlist OTA e proxy di egress come alternative note (Deferred dello spine) |
 
 ---
 
