@@ -17,10 +17,14 @@ Il precedente in repo è `config_normativa/importa_comuni.py`, che valida il
 percorso PRIMA di toccare il filesystem: qui vale lo stesso principio sulla
 rete. Timeout e cap di dimensione sono CONFIGURAZIONE (NFR-4), non costanti.
 
-Limite noto e dichiarato: la validazione avviene sulla risoluzione e non
-sulla socket effettiva, quindi un DNS che cambia risposta fra la validazione
-e la connessione (rebinding) non è coperto. Chiuderlo richiede il pinning
-dell'indirizzo nel trasporto: è tracciato, non risolto qui.
+Gli indirizzi validati si RESTITUISCONO al chiamante, e non è un dettaglio:
+`trasporto.py` si connette esattamente a quelli invece di risolvere una
+seconda volta. Senza quel passaggio ci sarebbero due `getaddrinfo`
+indipendenti per hop e nulla legherebbe il secondo al primo — cioè un DNS che
+cambia risposta fra validazione e connessione (rebinding) porterebbe il fetch
+dove vuole. Il pinning è arrivato con il fix-batch `epic2-batch1`: questo
+modulo dice QUALI indirizzi sono ammessi, il trasporto garantisce che siano
+quelli usati.
 """
 
 import ipaddress

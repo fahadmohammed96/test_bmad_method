@@ -330,6 +330,97 @@ dichiarati sui modelli) e la rappresentazione di `regime_lettura.host_id`
 scomparse. È informazione per MYL-44: il cancello non si può accendere senza
 prima ripulire quella deriva.
 
+### Fix-batch `epic2-batch2` — secondo giro di cross-review (BOCCIA su PR #36)
+
+Tre bloccanti e una lista di P2. Scope rigido: solo i finding del batch.
+
+**Bloccante 1 — la scadenza non copriva la fase di testa.** I checkpoint erano
+due (prima dell'hop, dentro `iter_bytes`) e in mezzo c'era
+`client.stream(...)`, che blocca finché la testa della risposta non è
+completa. Un byte di **intestazione** ogni 9s sta dentro `read=10s` e non
+incontra nessun controllo: ~100 KiB di h11 × 9s ≈ 256 ore di worker
+inchiodato. Rosso visto prima con un server che sgocciola le intestazioni: il
+test si appende, e `pytest-timeout` lo localizza su `client.stream`.
+
+La diagnosi che conta è di Murat e la riporto perché è la lezione: *un insieme
+di controlli non limita il tempo che passa fra due controlli.* Chiamare «bound
+wall-clock» dei checkpoint era l'errore. Ora ogni attesa passa da
+`_entro_la_scadenza`, che la esegue e la **abbandona** al residuo del budget —
+DNS compreso, che era l'altra attesa non budgetata (`getaddrinfo` non accetta
+timeout). I timeout per-operazione restano, limitati al residuo, ma non sono
+il bound: servono a far morire in fretta il lavoro abbandonato.
+
+**Bloccante 2 — il controllo sul declassamento era testato sul seam sbagliato.**
+Il test chiamava `_vieta_declassamento` direttamente e prendeva tre fixture
+senza usarne nessuna: cancellare la riga che invocava il controllo nel ciclo
+lasciava tutto verde. Il controllo è stato **fuso** in `_prossimo_hop`, che
+calcola la destinazione del redirect: il prossimo hop non si calcola più senza
+passare dal controllo. Le due mutazioni ora mordono entrambe — togliere il
+controllo fa cadere il caso `https → http` del parametrize, togliere il
+calcolo fa cadere tre test dei redirect.
+
+Il `trust_env=False` invece si può verificare sul comportamento, e ora lo è:
+con quattro variabili di proxy nell'ambiente il fetch al server locale
+**riesce**; se l'ambiente fosse onorato, httpx instraderebbe al proxy
+inesistente e fallirebbe.
+
+**Bloccante 3 — due test che non potevano fallire.** La sentinella della
+guardia anti-`drop_table` rileggeva il **proprio** sorgente e cercava un
+letterale che stava sulla riga dell'assert: sempre presente. Ora la guardia
+prende la cartella come parametro e la sentinella le fa esaminare una
+migrazione finta in `tmp_path`, per quattro forme distruttive, più il caso
+innocuo che non deve segnalare. E `test_le_proprieta_sconosciute_si_ignorano`
+guardava una proprietà che stava a livello VCALENDAR, fuori dai VEVENT che
+l'assert ispezionava. Spostata dentro il VEVENT il test è andato **rosso** — e
+ha mostrato che la mia asserzione era falsa sul disegno: il parser le
+proprietà sconosciute le **raccoglie**, è il normalizzatore a non guardarle.
+Il test ora asserisce le due proprietà vere.
+
+**P2 chiusi.** Guardia di tenancy senza filtro sul nome e senza pavimenti
+numerici da aggiornare (ispeziona ogni classe pubblica di
+`app/*/repository.py`: una rinomina è catturata per costruzione, e con il
+pavimento a 12 contro 20 metodi ne servivano due per farlo mordere). Guardia
+del repository pinnata da due test che la chiamano **direttamente**, saltando
+il cortocircuito del service. `test_la_deadline_non_si_moltiplica_per_i_redirect`
+riscritto con tre hop che consumano una frazione del budget — e l'assertion
+sul numero di hop era sbagliata: il terzo hop può legittimamente partire, la
+proprietà è l'esito. `registro_modelli` con i bersagli derivati dal
+**filesystem** invece che dalla funzione sotto test, e `app/core/` scoperto
+invece che elencato (era l'ultimo elenco a mano, e la guardia lo escludeva dal
+proprio scopo). Guardia su `env.py` con `ast` invece del match di stringa, più
+la sentinella sulle tre forme di import che il match non vedeva.
+`pytest-timeout` configurato globalmente (`timeout = 120`) con
+`--strict-markers`, così se uscisse dal gruppo dev la suite non parte invece
+di degradare a warning.
+
+Sul trasporto: `Content-Encoding` diverso da `identity` **rifiutato** (una
+bomba zlib passava il pre-check sul dichiarato e si espandeva 13× il tetto, e
+un chunk che decodifica a vuoto salta anche i checkpoint); pinning che
+conserva lo **userinfo** (era una regressione del batch 1: un Feed credenziato
+prendeva 401) e mette le **quadre** all'IPv6 anche nell'header `Host`;
+`fec0::/10` e `not is_global` coperti da test che verificano entrambe le metà
+— quali indirizzi sono vietati *solo* grazie a `is_global` e quali risultano
+globali e hanno bisogno dei check espliciti.
+
+Minori: il test del log pretende ora **entrambe** le sedi (`trasporto` e
+`service`), non una qualsiasi; il margine del test di drip separato dal timeout
+di lettura (coincidevano, quindi l'unico modo di dare il colore sbagliato
+cadeva sul confine dell'assert); `isPending` della lista Feed coperto; il
+`trim()` dell'URL pinnato con `fireEvent` invece di `userEvent`, perché
+`input type="url"` in jsdom normalizza già gli spazi e il test non pinnava
+nulla; handler del server di test che non stampa più tracebacks quando il
+client abbandona la connessione.
+
+**Correzione accettata sul `DURATION`.** Avevo ragione sulla riga che salta ma
+i commenti dicevano «timedelta esplode», e non è vero: `timedelta.max.days` è
+999 999 999, quindi né `P99999999D` né `P99999999W` lo sfiorano — falliscono
+entrambi sulla somma con la data. Erano **un solo** percorso, non due.
+Aggiunto `P9999999999D`, che a dieci cifre fa saltare `timedelta` per davvero.
+
+**Non chiuso.** `alembic check` resta rosso sulle cinque voci preesistenti
+(`ix_job_due`/`ix_outbox_pending` e `regime_lettura.host_id`): le tre
+`remove_table` sono confermate assenti. Murat le ha portate su MYL-44.
+
 ### Change log
 
 - 2026-07-26 — Story creata, implementata test-first e consegnata in PR
@@ -338,3 +429,8 @@ prima ripulire quella deriva.
 - 2026-07-26 — Cross-review di Murat: **BOCCIA**. Fix-batch `epic2-batch1`
   con il P0 sugli uid vuoti, quattro P1 e la lista P2. Rosso visto prima su
   P0, P1-1, P1-2 e P1-4.
+- 2026-07-26 — Secondo giro di cross-review: **BOCCIA**. Fix-batch
+  `epic2-batch2`: scadenza sulla socket (non checkpoint), controllo del
+  declassamento fuso nel calcolo del prossimo hop, due test vacui resi
+  mordenti, piu' la lista P2. Rosso visto prima su tutti e tre i
+  bloccanti.
