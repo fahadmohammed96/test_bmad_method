@@ -1,0 +1,28 @@
+BEGIN:VCALENDAR
+PRODID:-//HostPilot Test//Forma export con DATETIME e TZID//IT
+VERSION:2.0
+BEGIN:VEVENT
+UID:bbbb2222-marzo@example.com
+DTSTART;TZID=Europe/Rome:20260328T150000
+DTEND;TZID=Europe/Rome:20260330T100000
+SUMMARY:Soggiorno a cavallo dell'ora legale di marzo
+END:VEVENT
+BEGIN:VEVENT
+UID:bbbb2222-ottobre@example.com
+DTSTART;TZID=Europe/Rome:20261024T160000
+DTEND;TZID=Europe/Rome:20261026T103000
+SUMMARY:Soggiorno a cavallo del ritorno all'ora solare
+END:VEVENT
+BEGIN:VEVENT
+UID:bbbb2222-mezzanotte@example.com
+DTSTART;TZID=Europe/Rome:20260905T003000
+DTEND;TZID=Europe/Rome:20260907T090000
+SUMMARY:Check-in dopo la mezzanotte
+END:VEVENT
+BEGIN:VEVENT
+UID:bbbb2222-utc@example.com
+DTSTART:20260301T230000Z
+DTEND:20260303T090000Z
+SUMMARY:Istante UTC che in Europe/Rome cade il giorno dopo
+END:VEVENT
+END:VCALENDAR

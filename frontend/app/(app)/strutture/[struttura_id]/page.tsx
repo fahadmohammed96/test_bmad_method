@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { CampiLuogo, type ValoriLuogo } from "@/components/CampiLuogo";
+import { FeedIcalStruttura } from "@/components/FeedIcalStruttura";
 import { PannelloConfigurazione } from "@/components/PannelloConfigurazione";
 import {
   useAggiornaStruttura,
@@ -96,6 +97,7 @@ function FormModifica({
       </form>
 
       <PannelloConfigurazione strutturaId={struttura.id} />
+      <FeedIcalStruttura strutturaId={struttura.id} />
     </div>
   );
 }

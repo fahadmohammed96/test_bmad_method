@@ -8,11 +8,11 @@ al ciclo.
 
 import logging
 
-from app.core.db import get_sessionmaker
-from app.core.worker import main as ciclo_worker
-
 # Import con effetto di registrazione: ogni modulo dichiara qui i propri
 # handler di job e i propri subscriber di eventi.
+from app.calendario import jobs as calendario_jobs  # noqa: F401
+from app.core.db import get_sessionmaker
+from app.core.worker import main as ciclo_worker
 from app.identity import jobs as identity_jobs  # noqa: F401
 
 logger = logging.getLogger(__name__)

@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     # (AD-12) e arriva con la Story 1.6.
     max_strutture_attive: int = 3
 
+    # Politica di uscita di rete verso i Feed iCal (NFR-17, NFR-4): sono
+    # CONFIGURAZIONE, non costanti di codice — un feed lento o enorme si
+    # tara sull'ambiente senza toccare il codice.
+    feed_timeout_connessione_secondi: float = 5.0
+    feed_timeout_lettura_secondi: float = 10.0
+    feed_dimensione_massima_byte: int = 5 * 1024 * 1024
+    feed_max_redirect: int = 3
+    # Reti normalmente VIETATE (loopback, private, link-local) da ammettere
+    # comunque, in CIDR separati da virgola. Vuoto in ogni ambiente reale:
+    # esiste per i test, che parlano con un server HTTP su 127.0.0.1, e per
+    # un'installazione self-hosted con il portale in rete locale. Il default
+    # vuoto è sorvegliato da un test: la denylist non si allenta per svista.
+    feed_reti_consentite: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

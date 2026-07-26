@@ -110,6 +110,16 @@
         "title": "CambioPasswordInput",
         "type": "object"
       },
+      "CanaleFeed": {
+        "description": "Origine delle Prenotazioni importate (FR-4).",
+        "enum": [
+          "airbnb",
+          "booking",
+          "altro"
+        ],
+        "title": "CanaleFeed",
+        "type": "string"
+      },
       "CanaleNotifica": {
         "description": "Canali di notifica Host dell'MVP (envelope operativo: in-app + email).",
         "enum": [
@@ -117,6 +127,19 @@
           "email"
         ],
         "title": "CanaleNotifica",
+        "type": "string"
+      },
+      "CategoriaErroreSync": {
+        "description": "Categoria dell'errore, mai il dettaglio tecnico (AD-16, NFR-17).\n\n`URL_NON_RAGGIUNGIBILE` copre insieme il fallimento di connessione E il\nrifiuto della politica di uscita di rete: l'Host vede lo stesso esito,\ncosì il messaggio d'errore non diventa un canale per scoprire la rete\ninterna (NFR-17).",
+        "enum": [
+          "url_non_raggiungibile",
+          "timeout",
+          "risposta_troppo_grande",
+          "esito_http_inatteso",
+          "feed_non_valido",
+          "feed_senza_eventi"
+        ],
+        "title": "CategoriaErroreSync",
         "type": "string"
       },
       "ComuneConfigInput": {
@@ -282,6 +305,127 @@
           "password"
         ],
         "title": "CredenzialiInput",
+        "type": "object"
+      },
+      "FeedIcalInput": {
+        "properties": {
+          "canale": {
+            "$ref": "#/components/schemas/CanaleFeed",
+            "default": "altro"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "struttura_id",
+          "url"
+        ],
+        "title": "FeedIcalInput",
+        "type": "object"
+      },
+      "FeedIcalOutput": {
+        "properties": {
+          "canale": {
+            "$ref": "#/components/schemas/CanaleFeed"
+          },
+          "categoria_errore": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoriaErroreSync"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "collegato_il": {
+            "format": "date-time",
+            "title": "Collegato Il",
+            "type": "string"
+          },
+          "eventi_malformati": {
+            "title": "Eventi Malformati",
+            "type": "integer"
+          },
+          "eventi_ricorrenti_non_espansi": {
+            "title": "Eventi Ricorrenti Non Espansi",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "prenotazioni_attive": {
+            "title": "Prenotazioni Attive",
+            "type": "integer"
+          },
+          "prenotazioni_rimosse_dal_feed": {
+            "title": "Prenotazioni Rimosse Dal Feed",
+            "type": "integer"
+          },
+          "stato_sync": {
+            "$ref": "#/components/schemas/StatoSincronizzazione"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          },
+          "ultimo_sync_riuscito_il": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Sync Riuscito Il"
+          },
+          "ultimo_tentativo_il": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Tentativo Il"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "struttura_id",
+          "url",
+          "canale",
+          "collegato_il",
+          "stato_sync",
+          "ultimo_sync_riuscito_il",
+          "ultimo_tentativo_il",
+          "categoria_errore",
+          "prenotazioni_attive",
+          "prenotazioni_rimosse_dal_feed",
+          "eventi_malformati",
+          "eventi_ricorrenti_non_espansi"
+        ],
+        "title": "FeedIcalOutput",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -482,6 +626,75 @@
         "title": "PreferenzeInput",
         "type": "object"
       },
+      "PrenotazioneOutput": {
+        "properties": {
+          "canale": {
+            "$ref": "#/components/schemas/CanaleFeed"
+          },
+          "check_in": {
+            "format": "date",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "ical_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ical Uid"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notti": {
+            "title": "Notti",
+            "type": "integer"
+          },
+          "sommario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sommario"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoPrenotazione"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "struttura_id",
+          "canale",
+          "ical_uid",
+          "check_in",
+          "check_out",
+          "notti",
+          "sommario",
+          "stato"
+        ],
+        "title": "PrenotazioneOutput",
+        "type": "object"
+      },
       "RegimeFiscaleOutput": {
         "description": "Contenuto informativo con disclaimer: mai un calcolo d'imposta.",
         "properties": {
@@ -626,12 +839,33 @@
         "title": "StatoConfigurazione",
         "type": "string"
       },
+      "StatoPrenotazione": {
+        "description": "Stati di AD-19: solo `attiva` concorre ai Conflitti.\n\n`rimossa_dal_feed` è la transizione che sostituisce la cancellazione\nquando un evento scompare dall'export dell'OTA (AD-4).",
+        "enum": [
+          "attiva",
+          "cancellata",
+          "rimossa_dal_feed"
+        ],
+        "title": "StatoPrenotazione",
+        "type": "string"
+      },
       "StatoRegime": {
         "enum": [
           "disponibile",
           "configurazione_non_disponibile"
         ],
         "title": "StatoRegime",
+        "type": "string"
+      },
+      "StatoSincronizzazione": {
+        "description": "Cosa dire all'Host, compreso il caso «non lo so ancora».\n\n`MAI_SINCRONIZZATO` esiste perché il silenzio ambiguo è il modo in cui la\nfalsa sincronia fa il danno maggiore: il sistema dice «non so» invece di\nlasciar credere che i dati siano aggiornati.",
+        "enum": [
+          "mai_sincronizzato",
+          "in_corso",
+          "riuscito",
+          "fallito"
+        ],
+        "title": "StatoSincronizzazione",
         "type": "string"
       },
       "StatoStruttura": {
@@ -1030,6 +1264,184 @@
         "summary": "Comuni",
         "tags": [
           "config_normativa"
+        ]
+      }
+    },
+    "/api/v1/feed-ical": {
+      "get": {
+        "operationId": "lista_api_v1_feed_ical_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "struttura_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Struttura Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FeedIcalOutput"
+                  },
+                  "title": "Response Lista Api V1 Feed Ical Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lista",
+        "tags": [
+          "calendario"
+        ]
+      },
+      "post": {
+        "description": "Collega un Feed e accoda subito l'import (AD-4, AD-10).",
+        "operationId": "collega_api_v1_feed_ical_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedIcalInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedIcalOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Collega",
+        "tags": [
+          "calendario"
+        ]
+      }
+    },
+    "/api/v1/feed-ical/{feed_id}": {
+      "get": {
+        "operationId": "dettaglio_api_v1_feed_ical__feed_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Feed Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedIcalOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dettaglio",
+        "tags": [
+          "calendario"
+        ]
+      }
+    },
+    "/api/v1/feed-ical/{feed_id}/prenotazioni": {
+      "get": {
+        "description": "Prenotazioni importate dal Feed, comprese quelle non più attive.\n\nUna Prenotazione uscita da `attiva` resta visibile: farla sparire senza\ntraccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host\n(AD-20).",
+        "operationId": "prenotazioni_api_v1_feed_ical__feed_id__prenotazioni_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Feed Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PrenotazioneOutput"
+                  },
+                  "title": "Response Prenotazioni Api V1 Feed Ical  Feed Id  Prenotazioni Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prenotazioni",
+        "tags": [
+          "calendario"
         ]
       }
     },
