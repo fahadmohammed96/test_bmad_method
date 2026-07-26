@@ -12,7 +12,11 @@ import inspect
 import pkgutil
 
 import app
-from app.core.db import Base
+from tests.modello import carica_modelli
+
+# I metadati vanno letti DOPO aver importato ogni modulo di dominio: una
+# guardia che li legge prima non fallisce, tace (vedi tests/modello.py).
+Base = carica_modelli()
 
 # Tabelle senza host_id ammesse: infrastruttura core, la radice tenancy e
 # i DATI DI RIFERIMENTO condivisi (anagrafica ISTAT e configurazione

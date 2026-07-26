@@ -15,9 +15,20 @@ const formatoEuro = new Intl.NumberFormat("it-IT", {
   currency: "EUR",
 });
 
+const formatoOra = new Intl.DateTimeFormat("it-IT", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Rome",
+});
+
 /** Data in formato italiano: 25/07/2026. */
 export function formatDataIt(data: Date): string {
   return formatoData.format(data);
+}
+
+/** Orario locale Europe/Rome: "14:35" — è l'HH:MM di «ultimo aggiornamento». */
+export function formatOraIt(istante: Date): string {
+  return formatoOra.format(istante);
 }
 
 /** Importo in centesimi interi (convenzione `_cent`) → "1.234,56 €". */

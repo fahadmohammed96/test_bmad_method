@@ -8,13 +8,24 @@
 #   esecuzione di script di terze parti (`--no-build`, `--ignore-scripts`);
 # - il progetto locale non si installa in CI (`--no-install-project`):
 #   i comandi girano dalla directory del backend, quindi
-#   `uv run --no-sync --no-build` (nessun re-sync, nessuna build implicita).
+#   `uv run --no-sync --no-build` (nessun re-sync, nessuna build implicita);
+# - `permissions:` esplicito e minimo (azione A2 della retrospettiva Epic 1):
+#   un workflow di CI ha accesso al repository, ai segreti e alla rete, ed è
+#   la superficie di attacco più privilegiata del progetto. Senza questo
+#   blocco il GITHUB_TOKEN gira con i permessi di default del repository,
+#   che possono includere la scrittura.
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+
+# Nessun job di questa pipeline scrive sul repository: leggono il codice,
+# installano da lockfile e girano test. Un job che dovesse davvero scrivere
+# dichiarerà il permesso che gli serve al proprio livello, non qui.
+permissions:
+  contents: read
 
 jobs:
   backend:

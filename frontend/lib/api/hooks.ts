@@ -17,6 +17,9 @@ export type RegioneOutput = components["schemas"]["RegioneOutput"];
 export type ConfigurazioneNormativa =
   components["schemas"]["ConfigurazioneNormativaOutput"];
 export type RegimeFiscale = components["schemas"]["RegimeFiscaleOutput"];
+export type FeedIcal = components["schemas"]["FeedIcalOutput"];
+export type FeedIcalInput = components["schemas"]["FeedIcalInput"];
+export type CanaleFeed = components["schemas"]["CanaleFeed"];
 
 type Problem = { title?: string; detail?: string };
 
@@ -219,6 +222,44 @@ export function useConfermaLetturaRegime() {
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["regime-fiscale"] }),
+  });
+}
+
+/** Feed iCal collegati a una Struttura (FR-3).
+ *
+ * Finché un import è in corso la query si ripete: il progresso arriva
+ * dall'API, il client non lo simula (AD-14). Appena lo stato non è più
+ * `in_corso` il polling si ferma da sé — nessun timer che resta acceso.
+ */
+export function useFeedIcal(struttura_id: string) {
+  return useQuery<FeedIcal[]>({
+    queryKey: ["feed-ical", struttura_id],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/feed-ical", {
+        params: { query: { struttura_id } },
+      });
+      if (!data) throw new Error(titoloErrore(error) ?? "calendari non disponibili");
+      return data;
+    },
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((feed) => feed.stato_sync === "in_corso")
+        ? 3000
+        : false,
+  });
+}
+
+export function useCollegaFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (dati: FeedIcalInput) => {
+      const { data, error } = await api.POST("/api/v1/feed-ical", { body: dati });
+      if (!data) throw new Error(titoloErrore(error) ?? "collegamento fallito");
+      return data;
+    },
+    onSuccess: (feed) =>
+      queryClient.invalidateQueries({
+        queryKey: ["feed-ical", feed.struttura_id],
+      }),
   });
 }
 

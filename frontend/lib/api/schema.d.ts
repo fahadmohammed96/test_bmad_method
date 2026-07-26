@@ -72,6 +72,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/feed-ical": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista */
+        get: operations["lista_api_v1_feed_ical_get"];
+        put?: never;
+        /**
+         * Collega
+         * @description Collega un Feed e accoda subito l'import (AD-4, AD-10).
+         */
+        post: operations["collega_api_v1_feed_ical_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feed-ical/{feed_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dettaglio */
+        get: operations["dettaglio_api_v1_feed_ical__feed_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feed-ical/{feed_id}/prenotazioni": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prenotazioni
+         * @description Prenotazioni importate dal Feed, comprese quelle non più attive.
+         *
+         *     Una Prenotazione uscita da `attiva` resta visibile: farla sparire senza
+         *     traccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host
+         *     (AD-20).
+         */
+        get: operations["prenotazioni_api_v1_feed_ical__feed_id__prenotazioni_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -361,11 +423,28 @@ export interface components {
             password_nuova: string;
         };
         /**
+         * CanaleFeed
+         * @description Origine delle Prenotazioni importate (FR-4).
+         * @enum {string}
+         */
+        CanaleFeed: "airbnb" | "booking" | "altro";
+        /**
          * CanaleNotifica
          * @description Canali di notifica Host dell'MVP (envelope operativo: in-app + email).
          * @enum {string}
          */
         CanaleNotifica: "in_app" | "email";
+        /**
+         * CategoriaErroreSync
+         * @description Categoria dell'errore, mai il dettaglio tecnico (AD-16, NFR-17).
+         *
+         *     `URL_NON_RAGGIUNGIBILE` copre insieme il fallimento di connessione E il
+         *     rifiuto della politica di uscita di rete: l'Host vede lo stesso esito,
+         *     così il messaggio d'errore non diventa un canale per scoprire la rete
+         *     interna (NFR-17).
+         * @enum {string}
+         */
+        CategoriaErroreSync: "url_non_raggiungibile" | "timeout" | "risposta_troppo_grande" | "esito_http_inatteso" | "feed_non_valido" | "feed_senza_eventi";
         /** ComuneConfigInput */
         ComuneConfigInput: {
             /** Attore */
@@ -425,6 +504,53 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** FeedIcalInput */
+        FeedIcalInput: {
+            /** @default altro */
+            canale: components["schemas"]["CanaleFeed"];
+            /**
+             * Struttura Id
+             * Format: uuid
+             */
+            struttura_id: string;
+            /** Url */
+            url: string;
+        };
+        /** FeedIcalOutput */
+        FeedIcalOutput: {
+            canale: components["schemas"]["CanaleFeed"];
+            categoria_errore: components["schemas"]["CategoriaErroreSync"] | null;
+            /**
+             * Collegato Il
+             * Format: date-time
+             */
+            collegato_il: string;
+            /** Eventi Malformati */
+            eventi_malformati: number;
+            /** Eventi Ricorrenti Non Espansi */
+            eventi_ricorrenti_non_espansi: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Prenotazioni Attive */
+            prenotazioni_attive: number;
+            /** Prenotazioni Rimosse Dal Feed */
+            prenotazioni_rimosse_dal_feed: number;
+            stato_sync: components["schemas"]["StatoSincronizzazione"];
+            /**
+             * Struttura Id
+             * Format: uuid
+             */
+            struttura_id: string;
+            /** Ultimo Sync Riuscito Il */
+            ultimo_sync_riuscito_il: string | null;
+            /** Ultimo Tentativo Il */
+            ultimo_tentativo_il: string | null;
+            /** Url */
+            url: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -496,6 +622,37 @@ export interface components {
         PreferenzeInput: {
             canale_notifica_preferito: components["schemas"]["CanaleNotifica"];
         };
+        /** PrenotazioneOutput */
+        PrenotazioneOutput: {
+            canale: components["schemas"]["CanaleFeed"];
+            /**
+             * Check In
+             * Format: date
+             */
+            check_in: string;
+            /**
+             * Check Out
+             * Format: date
+             */
+            check_out: string;
+            /** Ical Uid */
+            ical_uid: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Notti */
+            notti: number;
+            /** Sommario */
+            sommario: string | null;
+            stato: components["schemas"]["StatoPrenotazione"];
+            /**
+             * Struttura Id
+             * Format: uuid
+             */
+            struttura_id: string;
+        };
         /**
          * RegimeFiscaleOutput
          * @description Contenuto informativo con disclaimer: mai un calcolo d'imposta.
@@ -547,10 +704,29 @@ export interface components {
          */
         StatoConfigurazione: "configurata" | "configurazione_non_disponibile";
         /**
+         * StatoPrenotazione
+         * @description Stati di AD-19: solo `attiva` concorre ai Conflitti.
+         *
+         *     `rimossa_dal_feed` è la transizione che sostituisce la cancellazione
+         *     quando un evento scompare dall'export dell'OTA (AD-4).
+         * @enum {string}
+         */
+        StatoPrenotazione: "attiva" | "cancellata" | "rimossa_dal_feed";
+        /**
          * StatoRegime
          * @enum {string}
          */
         StatoRegime: "disponibile" | "configurazione_non_disponibile";
+        /**
+         * StatoSincronizzazione
+         * @description Cosa dire all'Host, compreso il caso «non lo so ancora».
+         *
+         *     `MAI_SINCRONIZZATO` esiste perché il silenzio ambiguo è il modo in cui la
+         *     falsa sincronia fa il danno maggiore: il sistema dice «non so» invece di
+         *     lasciar credere che i dati siano aggiornati.
+         * @enum {string}
+         */
+        StatoSincronizzazione: "mai_sincronizzato" | "in_corso" | "riuscito" | "fallito";
         /**
          * StatoStruttura
          * @description Una Struttura si archivia, mai si distrugge (AD-20).
@@ -730,6 +906,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComuneOutput"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lista_api_v1_feed_ical_get: {
+        parameters: {
+            query: {
+                struttura_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedIcalOutput"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collega_api_v1_feed_ical_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedIcalInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedIcalOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dettaglio_api_v1_feed_ical__feed_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedIcalOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prenotazioni_api_v1_feed_ical__feed_id__prenotazioni_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrenotazioneOutput"][];
                 };
             };
             /** @description Validation Error */

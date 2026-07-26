@@ -13,12 +13,16 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "argon2-cffi>=23.1",
     "email-validator>=2.2",
+    # Client HTTP in uscita verso i Feed iCal (Story 2.1): serve un client
+    # che sappia NON seguire i redirect da sé — la politica di uscita di
+    # rete va rivalutata a ogni hop (NFR-17) — e leggere il corpo in
+    # streaming per fermarsi al cap di dimensione.
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
-    "httpx>=0.27",
     "ruff>=0.8",
     "mypy>=1.14",
 ]

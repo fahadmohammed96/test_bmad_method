@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+PRODID:-//HostPilot Test//Line folding e confini testuali//IT
+VERSION:2.0
+X-PROPRIETA-SCONOSCIUTA:il parser la ignora senza lamentarsi
+BEGIN:VEVENT
+UID:eeee5555-folding@example.com
+DTSTART;VALUE=DATE:20260810
+DTEND;VALUE=DATE:20260812
+SUMMARY:Sommario ripiegato su più righe che continua qui
+  e finisce qui
+DESCRIPTION:Accenti à è ì ò ù\; emoji 🏠\; cirillico Привет\, e una virgola
+END:VEVENT
+BEGIN:VEVENT
+UID:eeee5555-vuoto@example.com
+DTSTART;VALUE=DATE:20260901
+DTEND;VALUE=DATE:20260902
+SUMMARY:
+END:VEVENT
+END:VCALENDAR

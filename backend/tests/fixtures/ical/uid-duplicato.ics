@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+PRODID:-//HostPilot Test//Stesso UID due volte nello stesso feed//IT
+VERSION:2.0
+BEGIN:VEVENT
+UID:dddd4444-ripetuto@example.com
+DTSTART;VALUE=DATE:20260810
+DTEND;VALUE=DATE:20260812
+SUMMARY:Prima occorrenza dell'uid ripetuto
+END:VEVENT
+BEGIN:VEVENT
+UID:dddd4444-ripetuto@example.com
+DTSTART;VALUE=DATE:20260901
+DTEND;VALUE=DATE:20260905
+SUMMARY:Ultima occorrenza dell'uid ripetuto
+END:VEVENT
+END:VCALENDAR
