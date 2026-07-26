@@ -2,9 +2,9 @@
 title: 'Implementation Readiness Report — HostPilot'
 status: approved
 gate: G3
-gate_status: 'gate G3 approvato da Fahad (2026-07-24). R-5 (owner verifica legale) e il set G2-B chiusi il 2026-07-25 (issue MYL-33, registrati in PRD §14.1): nessun punto di gate resta aperto.'
+gate_status: 'gate G3 approvato da Fahad (2026-07-24). R-5 (owner verifica legale) e il set G2-B chiusi il 2026-07-25 (issue MYL-33, registrati in PRD §14.1): nessun punto di gate resta aperto. Mandato R-5 ESTESO il 2026-07-26 (MYL-40, PRD §14.2): base giuridica dei contatti Ospite e retention dell''anagrafica.'
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 assessor: John — Product Manager (leader squad), con l'architettura di Winston
 phase: '3 · Solutioning (co-artefatto del gate G3)'
 stepsCompleted: ['step-01-document-discovery', 'step-02-prd-analysis', 'step-03-epic-coverage-validation', 'step-04-ux-alignment', 'step-05-epic-quality-review', 'step-06-final-assessment']
@@ -106,7 +106,7 @@ PRD completo, ben strutturato, requisiti numerati e stabili con "Consequences (t
 | NFR-7 (osservabilità compliance) | 3.1, 3.8 |
 | NFR-8 (accessibilità WCAG 2.1 AA) | ACs distribuiti su 2.7, 3.2, 3.5 (UX-DR4/9/10); **nessuna story a11y dedicata → R-7** |
 | NFR-9 (localizzazione) | 1.3 |
-| NFR-10…16 (GDPR) | 3.4 (+3.5, 3.8) |
+| NFR-10…16 (GDPR) | 3.4 (+3.5, 3.8) — **documenti d'identità**. Dal 2026-07-26 anche **2.3** (+2.4) per l'**anagrafica Ospite**: NFR-11 minimizzazione, NFR-12 retention per azzeramento, NFR-14 accesso del solo Host, NFR-15 diritti dell'interessato, NFR-16 nessun dato reale nei test — invariante **AD-21**, decisione MYL-40 (PRD §14.2). I due regimi restano distinti: `ospite_documento` (AD-11) ≠ anagrafica (AD-21) |
 
 ### Statistiche di copertura
 
@@ -187,6 +187,8 @@ Questi non sono difetti di planning: sono i **bivi che il gate umano G3 deve chi
 - **R-3 — Pannello Account/preferenze di notifica senza FR.** UX §2.3 `[GAP PRD]`, Architecture §9.3 raccomanda una FR minima. Rappresentato come Story 1.3 ma senza FR nel PRD. **Raccomando a Fahad di ratificare una FR minima (es. FR-20) al G3** per tracciabilità. *Owner: Fahad (scope) + John.*
 - **R-4 — Decisioni architetturali [G3-1…5] da ratificare.** Stack (G3-1), precedenza Regole di prezzo (G3-2), retention default 30/90 (G3-3), monorepo (G3-4), parametri operativi sync 15'/ri-verifica 24h (G3-5). Le Story sono **parametriche**; la ratifica non cambia gli invarianti dello spine. *Owner: Fahad, con raccomandazioni di Winston in Architecture §10.*
 - **R-5 — Verifica legale + retention (G2-D) come gate di rilascio compliance.** Le fonti normative sono editoriali, non primarie (PRD §12.1). Catturato come **Story 3.9** (gate di rilascio, non di sviluppo). **CHIUSO il 2026-07-25** (MYL-33, PRD §14.1): owner = **il commercialista di Fahad**, con mandato esplicito (termini Alloggiati 24h/6h, tassa di soggiorno dei Comuni G2-B, ISTAT, CIN, regime fiscale/soglia 3 immobili) e obbligo di segnalare se la **retention documenti Ospiti (G2-D)** richiede un **parere privacy separato** — è GDPR, non materia fiscale. Ingaggio a cura di Fahad, risposta attesa **entro la fine dell'Epic 2**. Resta un gate di **rilascio**, non di sviluppo. *Owner: Fahad (ingaggio) → commercialista (risposta).*
+  - **MANDATO ESTESO il 2026-07-26** (MYL-40, PRD §14.2 — decisione "anagrafica Ospite, opzione B"). Due punti si aggiungono ai cinque di §14.1, **senza sostituirli**, e sono **materia privacy, non fiscale**: (a) la **base giuridica del trattamento dei contatti dell'Ospite** (nome, email, telefono) per i Messaggi automatici (FR-19) e la precompilazione degli Adempimenti — trattamento **distinto** dall'obbligo legale che copre i documenti d'identità (NFR-10), e riguardante dati personali **di terzi**, non del cliente; (b) la **retention dell'anagrafica Ospite**, separata da quella dei documenti (G2-D) e parametrica sul ciclo della Prenotazione. **Se il commercialista non copre questi due punti, va segnalato a Fahad come parere privacy separato** — vale qui la stessa regola di G2-D: una risposta rassicurante data fuori competenza vale meno del silenzio. **L'anagrafica si sviluppa** (Story 2.3/2.4, parametri configurabili): il gate resta di **rilascio**.
+  - **Il punto (b) ha una cifra da confermare, non una domanda aperta** (aggiornato il 2026-07-26, MYL-46): lo spine registra la retention dell'anagrafica come invariante **AD-21** e propone **90 giorni** come valore iniziale provvisorio, con decorrenza al `check_out` o all'uscita da `attiva` se precedente. Al parere si chiede se quel valore è difendibile per la base giuridica del punto (a) e, se no, quale sia. Conseguenza di prodotto da mettere davanti a Fahad insieme alla risposta: **alla scadenza lo storico del calendario perde i nomi** (si presenta "Ospite non indicato"), quindi un valore breve è la scelta prudente sui dati e costosa sull'esperienza dell'Host. È un parametro: la revisione non richiede un rilascio.
 - **R-6 — Billing dell'abbonamento SaaS.** Il prodotto è "in abbonamento" ma nessuna FR copre pagamento/gestione abbonamenti. Assunzione: pilota gestito manualmente (nessun impatto architetturale ora). **Da decidere post-pilota.** *Owner: Fahad, post-pilota.*
 - **R-7 — Strategia di test per usabilità (NFR-5, G2-E) e accessibilità (NFR-8).** Target usabilità non fissati (G2-E); criteri a11y distribuiti senza verifica dedicata. **Raccomando di coinvolgere Murat (modulo TEA)** per una strategia di test risk-based su compliance, a11y e usabilità prima/durante la Fase 4. *Owner: John (routing) → Murat.*
 - **R-8 — Aspettativa "channel manager".** Il push prezzi/disponibilità verso OTA è Non-Goal esplicito (PRD §8/§9.2) ma emotivamente rilevante per l'host. Nessun blocco: assicurarsi che la UX comunichi bene l'aspettativa (export manuale). *Owner: Sally/John in Fase 4.*

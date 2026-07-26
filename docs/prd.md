@@ -2,9 +2,9 @@
 title: 'PRD — HostPilot'
 status: approved
 gate: G2
-gate_status: 'approvato da Fahad al gate G3 (2026-07-24), insieme a UX Spec, Architettura, Epics/Stories e Readiness. Esiti [DECISIONE G2] registrati in §14. Ultimi punti aperti (set G2-B, owner R-5) chiusi da Fahad il 2026-07-25 — §14.1.'
+gate_status: 'approvato da Fahad al gate G3 (2026-07-24), insieme a UX Spec, Architettura, Epics/Stories e Readiness. Esiti [DECISIONE G2] registrati in §14. Ultimi punti aperti (set G2-B, owner R-5) chiusi da Fahad il 2026-07-25 — §14.1. Anagrafica Ospite (opzione B) decisa il 2026-07-26 — §14.2, con estensione del mandato R-5.'
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 author: John — Product Manager
 phase: '2 · Planning'
 depends_on:
@@ -115,7 +115,7 @@ _Termini da usare **verbatim** in FR, UJ e SM. Nessun sinonimo altrove nel docum
 
 - **Host** — l'utente del prodotto: privato che affitta 1-3 unità in proprio. Un account HostPilot appartiene a un Host.
 - **Struttura** — un'unità immobiliare affittata (appartamento). Un Host ha da 1 a 3 Strutture nel pilota. Ogni Struttura ha un Comune, una Regione e (quando disponibile) un CIN. Una Struttura con dati collegati non si cancella: si **archivia** (`archiviata`) — esce dal conteggio del Regime fiscale e dal cap delle attive, i Feed smettono di sincronizzare, ma audit/registro/storico restano (estensione registrata al gate G3; architettura AD-20).
-- **Ospite** — la persona che soggiorna. Genera i dati per Alloggiati Web, tassa di soggiorno e ISTAT/ROSS1000.
+- **Ospite** — la persona che soggiorna. Genera i dati per Alloggiati Web, tassa di soggiorno e ISTAT/ROSS1000. È un'**entità anagrafica** del modulo `calendario` (nome + email/telefono, tutti facoltativi), distinta dai **dati del documento d'identità** che vivono solo in `ospite_documento` (modulo `privacy`, Epic 3). Una Prenotazione è valida anche senza Ospite noto; una Prenotazione può registrare più Ospiti. _Estensione registrata il 2026-07-26 con la decisione §14.2 (MYL-40)._
 - **Prenotazione** — un soggiorno con date, canale d'origine (Airbnb/Booking/manuale), Struttura e Ospite/i. Ha uno stato: `attiva`, `cancellata`, `rimossa_dal_feed` (solo `attiva` partecipa alla rilevazione dei Conflitti e genera derivati; le Prenotazioni non si cancellano fisicamente — estensione registrata al gate G3; architettura AD-19).
 - **Canale** — la fonte OTA di una Prenotazione: Airbnb, Booking.com, o inserimento manuale.
 - **Feed iCal** — l'URL di sola lettura fornito dall'OTA per esportare le Prenotazioni. **Non in tempo reale** (latenza di aggiornamento).
@@ -171,7 +171,7 @@ L'Host può collegare a ogni Struttura uno o più Feed iCal (Airbnb, Booking) tr
 #### FR-4: Calendario unificato multi-Struttura
 L'Host visualizza in un'unica griglia le Prenotazioni di tutte le Strutture e di tutti i Canali. Realizza UJ-1, UJ-2.
 - **Consequences (testable):**
-  - Ogni Prenotazione mostra Canale d'origine, Struttura, date e Ospite.
+  - Ogni Prenotazione mostra Canale d'origine, Struttura, date e Ospite **se noto** — l'anagrafica Ospite è facoltativa e una Prenotazione senza Ospite resta valida ("Ospite non indicato", §14.2).
   - Il calendario distingue visivamente le Prenotazioni per Canale.
 
 #### FR-5: Rilevazione dei Conflitti
@@ -294,7 +294,7 @@ Il sistema invia Messaggi automatici all'Ospite attivati da eventi: pre-arrivo, 
 - **Consequences (testable):**
   - L'Host può configurare il testo dei Messaggi per evento e Struttura.
   - Un Messaggio è inviato al verificarsi dell'evento configurato.
-  - `[ASSUNZIONE: il canale di invio (email vs. altri) e l'eventuale necessità di dati di contatto dell'Ospite dai portali sono da confermare in UX/architettura — i Feed iCal non sempre forniscono contatti.]`
+  - `[ASSUNZIONE: il canale di invio (email vs. altri) e l'eventuale necessità di dati di contatto dell'Ospite dai portali sono da confermare in UX/architettura — i Feed iCal non sempre forniscono contatti.]` **Aggiornato il 2026-07-26 (§14.2):** i contatti vivono nell'anagrafica Ospite (facoltativi, dall'Epic 2) e il caso "contatto assente" è governato da AD-13 — task manuale visibile, mai un invio finto.
 
 ### 5.7 Account e preferenze
 
@@ -330,9 +330,9 @@ _Sistemici, non legati a una singola feature. Il dettaglio implementativo (stack
 
 _Requisito reso concreto in Fase 2 come richiesto dal brief (§ Rischi p.4) e da `project-context.md` §5. Il dettaglio implementativo (meccanismi di cifratura, key management) è coordinato con Winston in Fase 3; qui si fissa la policy di prodotto._
 
-- **NFR-10 — Base giuridica:** il trattamento dei documenti d'identità degli Ospiti ha come base giuridica l'**obbligo legale** (comunicazione Alloggiati Web). Nessun uso secondario dei dati identità oltre l'Adempimento.
-- **NFR-11 — Minimizzazione:** si raccolgono solo i campi richiesti dalla comunicazione Alloggiati Web; nessun dato dell'Ospite eccedente lo scopo.
-- **NFR-12 — Retention:** i dati del documento d'identità sono conservati solo per il tempo necessario all'Adempimento e all'eventuale prova dell'avvenuta comunicazione, poi cancellati/anonimizzati. **Il periodo esatto di retention è la [DECISIONE G2-D]** (§14): il brief segnala che nessuna retention è stata reperita nella ricerca → va fissata una policy concreta, da confermare con il legale in Fase 3 prima dell'implementazione.
+- **NFR-10 — Base giuridica:** il trattamento dei documenti d'identità degli Ospiti ha come base giuridica l'**obbligo legale** (comunicazione Alloggiati Web). Nessun uso secondario dei dati identità oltre l'Adempimento. **I contatti dell'Ospite (nome, email, telefono) dell'anagrafica sono un trattamento distinto** — servono ai Messaggi automatici (FR-19) e alla precompilazione degli Adempimenti, non a un obbligo legale: la loro base giuridica **va qualificata** ed è un punto esplicito del mandato R-5 (§14.2). Sono dati personali **di terzi**, non del cliente.
+- **NFR-11 — Minimizzazione:** si raccolgono solo i campi richiesti dalla comunicazione Alloggiati Web; nessun dato dell'Ospite eccedente lo scopo. Per l'**anagrafica** Ospite (§14.2): si salva **solo** ciò che il Feed fornisce esplicitamente o che l'Host inserisce volontariamente — campi contatto **facoltativi**, mai obbligatori, **mai inventati né dedotti** da testo opaco del portale; i dati Ospite non compaiono in log, eventi, `outbox`/`job` o notifiche.
+- **NFR-12 — Retention:** i dati del documento d'identità sono conservati solo per il tempo necessario all'Adempimento e all'eventuale prova dell'avvenuta comunicazione, poi cancellati/anonimizzati. **Il periodo esatto di retention è la [DECISIONE G2-D]** (§14): il brief segnala che nessuna retention è stata reperita nella ricerca → va fissata una policy concreta, da confermare con il legale in Fase 3 prima dell'implementazione. **L'anagrafica Ospite ha una retention propria** (§14.2): periodo legato al ciclo della Prenotazione, espresso come **parametro di configurazione** (coerente con G2-D, valore iniziale provvisorio in attesa di R-5); alla scadenza un job durevole azzera nome e contatti lasciando intatta la Prenotazione.
 - **NFR-13 — Cifratura at-rest:** i documenti d'identità e i dati personali sensibili degli Ospiti sono cifrati at-rest. `[ASSUNZIONE: cifratura anche in transito come standard; meccanismo esatto → Winston.]`
 - **NFR-14 — Controllo accessi:** solo l'Host proprietario accede ai dati Ospiti delle proprie Strutture.
 - **NFR-15 — Diritti dell'interessato:** predisposizione per cancellazione dei dati Ospite su richiesta, coerente con la retention.
@@ -416,7 +416,7 @@ _Da portare al gate umano; ereditati e affinati dal brief (§Rischi)._
 ## 13. Domande aperte
 
 1. Precedenza esatta tra Regole di prezzo concorrenti (FR-8) — da definire con Sally/Winston.
-2. Canale di invio dei Messaggi automatici e disponibilità dei contatti Ospite dai Feed (FR-19).
+2. Canale di invio dei Messaggi automatici e disponibilità dei contatti Ospite dai Feed (FR-19). **Parzialmente chiusa il 2026-07-26** (§14.2): l'**anagrafica** Ospite con contatti facoltativi esiste dall'Epic 2 e i contatti si popolano solo dal Feed o per inserimento volontario dell'Host; resta aperto solo **quanto spesso** i Feed li forniscano davvero (misura empirica, non decisione) — il caso "contatto assente" è già governato da AD-13 (task manuale, mai drop silenzioso).
 3. Assegnazione dei Turni di pulizia a collaboratori esterni: MVP o v2? (FR-18, §9.2).
 4. Formato esatto di esportazione prezzi (FR-10).
 5. ~~Perimetro iniziale di Comuni/Regioni supportati — collegata a [DECISIONE G2-B].~~ **Chiusa il 2026-07-25** (§14.1): criterio e cap decisi da Fahad, lista in costruzione da Mary.
@@ -477,6 +477,39 @@ La lista non la sceglie Fahad né John: la costruisce **Mary (Business Analyst)*
 Sul punto **retention dei documenti d'identità Ospiti** (G2-D, 30/90 giorni) deve **segnalare esplicitamente se serve un parere privacy separato**: è materia **GDPR, non fiscale**, e una risposta rassicurante data fuori competenza vale meno del silenzio.
 
 **Ingaggio:** a cura di Fahad. **Risposta attesa entro la fine dell'Epic 2.** Il gate resta di **RILASCIO** per le feature di compliance (Epic 3 — Story 3.9), **non di sviluppo**: l'Epic 3 si può sviluppare, non si può rilasciare a un Host reale senza la validazione.
+
+### 14.2 Decisione del supervisore — 2026-07-26 (issue MYL-40)
+
+_Chiude la proposta di Murat (Test Architect): l'entità `ospite` era nell'ERD e assegnata al modulo `calendario` da AD-18, mostrata da due acceptance criteria dell'Epic 2 (Story 2.3 e 2.7), ma **nessuna Story ne dichiarava la creazione** né la regola di prodotto sui suoi campi._
+
+**[DECISIONE] — Anagrafica Ospite: OPZIONE B, anagrafica vera con contatti.**
+
+L'entità `ospite` (**nome + email/telefono quando disponibili**) è **materializzata nell'Epic 2**, non tenuta come campo denormalizzato sulla Prenotazione: la scelta guarda all'**Epic 3** (Alloggiati, che precompila dai dati noti della Prenotazione) e all'**Epic 5** (Messaggi automatici agli Ospiti, FR-19).
+
+Cinque **vincoli non negoziabili** accompagnano la scelta e valgono come acceptance criteria (`docs/epics.md`, Epic 2 e Story 2.3/2.4):
+
+1. **Proprietà e creazione.** `ospite` appartiene al modulo `calendario`, unico scrittore (AD-18), e la sua creazione è assegnata esplicitamente negli AC di **una** Story. **Nessuna Story può mostrare l'Ospite senza che un'altra ne dichiari la creazione.**
+2. **Minimizzazione — GDPR by design** (`project-context.md` §5, NFR-11). Si salva **solo** ciò che arriva dal Feed o che l'Host inserisce volontariamente. Campi contatto **nullable**, mai obbligatori, **mai inventati né dedotti**. **Nessun documento d'identità in questa fase**: quello è Epic 3 (`ospite_documento`, AD-11), con requisiti propri.
+3. **Retention** (NFR-12). Periodo esplicito legato al **ciclo della Prenotazione**, come **parametro configurabile** (coerente con G2-D 30/90), **non hardcodato**. Il valore iniziale è **provvisorio** in attesa dell'esito di R-5.
+4. **Tenancy** (AD-2, AR-4). `ospite` è **tenant-owned**: passa dalla guardia strutturale `host_id` come le altre entità, **non** va nell'allowlist dei dati di riferimento.
+5. **Escalation a R-5.** I contatti degli Ospiti sono dati personali **di terzi**, non del cliente: **base giuridica del trattamento contatti** e **retention** entrano esplicitamente nel mandato di verifica legale (§14.1, readiness R-5). È materia **privacy, non fiscale**: se il commercialista non la copre, va segnalato a Fahad come **parere separato**.
+
+**Estensione del mandato R-5** (si aggiunge ai cinque punti di §14.1, senza sostituirli):
+
+- **base giuridica** del trattamento dei **contatti** dell'Ospite (nome, email, telefono) per Messaggi automatici e precompilazione degli Adempimenti — trattamento **distinto** dall'obbligo legale che copre i documenti d'identità (NFR-10);
+- **retention** dell'anagrafica Ospite (parametro di §14.2 punto 3), separata dalla retention dei documenti di G2-D. **Domanda con una cifra**, dal 2026-07-26: l'architettura propone **90 giorni dalla decorrenza definita in AD-21** come valore iniziale provvisorio — il parere deve dire se è difendibile, non partire da zero.
+
+**Collocazione della creazione: Story 2.3** — deviazione dichiarata rispetto al candidato indicato nella decisione. Il candidato naturale era la Story 2.1 (import dai Feed), ma la 2.1 è **già consegnata** e ha deliberatamente **non** introdotto l'entità: i VEVENT di Airbnb/Booking non portano un'identità Ospite affidabile (il `SUMMARY` è testo opaco del portale, conservato come `sommario` della Prenotazione). Creare l'anagrafica nella 2.1 produrrebbe una tabella **senza percorso di scrittura**, e derivarne un nome dal `SUMMARY` violerebbe il vincolo 2 ("mai dedotti"). La creazione va quindi alla **prima Story non ancora avviata che la richiede — la 2.3, che la crea e la mostra** — e la prima scrittura volontaria dell'Host alla **2.4**.
+
+**Conseguenza per lo spine — CHIUSA il 2026-07-26** (issue MYL-46, architettura di Winston). Il punto era: **AD-20** elencava come **uniche** cancellazioni distruttive ammesse la purge di `ospite_documento` (AD-11) e la cancellazione su richiesta GDPR, mentre l'azzeramento periodico dei dati personali dell'anagrafica (punto 3) è una **terza** forma di distruzione di dato personale — l'AC della Story 2.3 e lo spine si contraddicevano. Registrata nello spine come invariante dedicato **AD-21** ("Anagrafica Ospite: minimizzazione, retention per azzeramento dei campi"), **non** come estensione di AD-11: dato, proprietario, meccanismo e base giuridica sono diversi da quelli dei documenti d'identità. AD-20 elenca ora **tre** cancellazioni ammesse e distingue l'**azzeramento dei campi personali** (alla scadenza) dalla **cancellazione della riga** (mai).
+
+Tre precisazioni dell'architettura che valgono come lettura di prodotto del punto 3 — **la fonte è AD-21, questo documento non la duplica**:
+
+- **decorrenza** della retention: il `check_out`, o l'uscita dallo stato `attiva` se precedente — così una Prenotazione cancellata mesi prima del soggiorno non trattiene i contatti fino a un check-out che non avverrà;
+- **valore iniziale proposto: 90 giorni** (Deferred dello spine, stesso ordine del bound M di G2-D). Trade-off da conoscere: **dopo la scadenza lo storico del calendario perde i nomi degli Ospiti** e mostra "Ospite non indicato"; un periodo più lungo è difendibile solo se R-5 qualifica la base giuridica dei contatti. Resta un parametro: cambiarlo non richiede un rilascio;
+- **cancellazione su richiesta dell'interessato** (NFR-15): riusa la stessa procedura di azzeramento, con evidenza.
+
+Il **numero** resta quindi da confermare a **R-5** (estensione del mandato, sopra): la conferma legale ha ora una cifra concreta da accettare o spostare, non una domanda aperta.
 
 ---
 
