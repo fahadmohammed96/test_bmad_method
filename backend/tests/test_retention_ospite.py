@@ -18,7 +18,7 @@ sono `example.com`.
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.calendario.jobs import (
@@ -35,7 +35,7 @@ from app.calendario.retention import (
     scaduta,
 )
 from app.core.events import PayloadValidationError, catalog
-from app.core.jobs import Job, JobStatus
+from app.core.jobs import Job, JobStatus, run_due_jobs
 from tests.calendario import Contesto, crea_prenotazione, registra_ospite
 
 NOVANTA = timedelta(days=90)
@@ -454,6 +454,198 @@ class TestIlJob:
             catalog.validate_job_payload(
                 TIPO_JOB_RETENTION_OSPITE, {"nome": "Chiunque"}
             )
+
+
+class TestIlCicloNonSiSpegneDaSolo:
+    """E2-F1: un errore nell'azzeramento non deve fermare la retention.
+
+    Il modo di guasto è preciso e silenzioso: l'eccezione porta il job a
+    `failed` al quinto tentativo, e da lì in coda non resta **nessun** job di
+    retention — i dati personali restano oltre il termine a tempo
+    indefinito, fino al prossimo riavvio del worker. Un `logger.error` e
+    basta.
+
+    **Perché il `try/finally` non sarebbe bastato.** L'handler gira dentro il
+    SAVEPOINT per item di `run_due_jobs` (G-1): una riprogrammazione scritta
+    in un `finally` verrebbe annullata insieme all'eccezione che la ha
+    provocata, e la coda resterebbe vuota lo stesso. La prova è il secondo
+    test di questa classe, che fa fallire l'`UPDATE` **nel database**: senza
+    savepoint interno la transazione resta abortita e anche l'`INSERT` della
+    riprogrammazione fallisce.
+    """
+
+    def _con_anagrafica_scaduta(self, db_session: Session, contesto: Contesto) -> None:
+        prenotazione = crea_prenotazione(
+            db_session,
+            contesto,
+            check_in=date(2020, 1, 1),
+            check_out=date(2020, 1, 5),
+        )
+        registra_ospite(
+            db_session, contesto, prenotazione, nome="Ospite Inventato", principale=True
+        )
+        db_session.commit()
+
+    def test_un_errore_PRIMA_dell_azzeramento_non_spegne_il_ciclo(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._con_anagrafica_scaduta(db_session, contesto)
+
+        def esplode(_limite: object) -> object:
+            raise RuntimeError("guasto simulato prima della UPDATE")
+
+        monkeypatch.setattr("app.calendario.jobs.filtro_scadute", esplode)
+        azzera_anagrafiche_scadute(db_session, {})
+        db_session.commit()
+
+        in_coda = db_session.scalars(
+            select(Job).where(
+                Job.job_type == TIPO_JOB_RETENTION_OSPITE,
+                Job.status == JobStatus.PENDING,
+            )
+        ).all()
+        assert len(in_coda) == 1, (
+            "dopo un errore la coda è rimasta senza ciclo di retention: "
+            "i dati personali resterebbero oltre il termine"
+        )
+
+    def test_un_errore_DEL_DATABASE_non_spegne_il_ciclo(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Il caso che il `finally` non copre: la UPDATE fallisce nel
+        # database, la transazione resta abortita, e senza savepoint interno
+        # anche l'INSERT della riprogrammazione fallirebbe — il rimedio
+        # morirebbe dello stesso errore da cui deve proteggere.
+        self._con_anagrafica_scaduta(db_session, contesto)
+        monkeypatch.setattr(
+            "app.calendario.jobs.filtro_scadute",
+            lambda _limite: text("colonna_che_non_esiste > 1"),
+        )
+
+        azzera_anagrafiche_scadute(db_session, {})
+        db_session.commit()
+
+        in_coda = db_session.scalars(
+            select(Job).where(
+                Job.job_type == TIPO_JOB_RETENTION_OSPITE,
+                Job.status == JobStatus.PENDING,
+            )
+        ).all()
+        assert len(in_coda) == 1
+
+    def test_il_fallimento_e_VISIBILE_non_silenzioso(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Un adempimento non eseguito che non lascia traccia è
+        # indistinguibile da uno eseguito su zero righe.
+        self._con_anagrafica_scaduta(db_session, contesto)
+        monkeypatch.setattr(
+            "app.calendario.jobs.filtro_scadute",
+            lambda _limite: text("colonna_che_non_esiste > 1"),
+        )
+
+        with caplog.at_level("ERROR", logger="app.calendario.jobs"):
+            azzera_anagrafiche_scadute(db_session, {})
+        db_session.commit()
+
+        messaggi = [record.message for record in caplog.records]
+        assert any("non eseguita" in messaggio for messaggio in messaggi)
+
+    def test_dopo_un_giro_fallito_il_giro_dopo_azzera_davvero(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # La prova che il ciclo non è solo «in coda» ma anche utile: il
+        # guasto era transitorio, e l'adempimento si recupera da sé.
+        self._con_anagrafica_scaduta(db_session, contesto)
+        monkeypatch.setattr(
+            "app.calendario.jobs.filtro_scadute",
+            lambda _limite: text("colonna_che_non_esiste > 1"),
+        )
+        azzera_anagrafiche_scadute(db_session, {})
+        db_session.commit()
+        monkeypatch.undo()
+
+        azzera_anagrafiche_scadute(db_session, {})
+        db_session.commit()
+        db_session.expire_all()
+
+        superstiti = db_session.scalars(select(Ospite)).all()
+        assert [ospite.nome for ospite in superstiti] == [None]
+
+    def test_il_worker_non_manda_il_job_a_failed_per_un_guasto_dell_azzeramento(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Il percorso reale, non l'handler chiamato a mano: `run_due_jobs`
+        # esegue dentro il SAVEPOINT per item, ed è lì che il difetto
+        # nasceva. Cinque giri di seguito e la coda deve restare viva.
+        self._con_anagrafica_scaduta(db_session, contesto)
+        assicura_retention_periodica(db_session)
+        db_session.commit()
+        monkeypatch.setattr(
+            "app.calendario.jobs.filtro_scadute",
+            lambda _limite: text("colonna_che_non_esiste > 1"),
+        )
+
+        for _ in range(5):
+            prossimo = db_session.scalars(
+                select(Job).where(
+                    Job.job_type == TIPO_JOB_RETENTION_OSPITE,
+                    Job.status == JobStatus.PENDING,
+                )
+            ).first()
+            assert prossimo is not None, "il ciclo di retention si è spento"
+            run_due_jobs(db_session, now=prossimo.due_at)
+            db_session.commit()
+
+        assert (
+            db_session.scalars(
+                select(Job).where(
+                    Job.job_type == TIPO_JOB_RETENTION_OSPITE,
+                    Job.status == JobStatus.FAILED,
+                )
+            ).all()
+            == []
+        )
+
+
+class TestIParametriDiConfigurazione:
+    """E2-F1, seconda metà: un parametro sbagliato ferma l'avvio.
+
+    `retention.py` lo dichiarava e nessuno lo imponeva dove l'avvio lo
+    incontra: `Settings` accettava `0` e il difetto si manifestava a regime,
+    quando i contatti della Prenotazione in corso venivano azzerati.
+    """
+
+    @pytest.mark.parametrize(
+        "parametro",
+        ["ospite_retention_giorni", "ospite_retention_intervallo_minuti"],
+    )
+    @pytest.mark.parametrize("valore", [0, -1])
+    def test_un_valore_non_positivo_non_costruisce_la_configurazione(
+        self, parametro: str, valore: int
+    ) -> None:
+        from pydantic import ValidationError
+
+        from app.core.config import Settings
+
+        with pytest.raises(ValidationError):
+            Settings(**{parametro: valore})
 
 
 class TestBootstrapDellaRetention:

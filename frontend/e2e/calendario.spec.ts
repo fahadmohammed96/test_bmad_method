@@ -15,6 +15,14 @@ import { violazioniGravi } from "./axe-utils";
  * Più la baseline **axe serious/critical = 0** sulla nuova superficie (AC 8),
  * che misura l'albero accessibile RENDERIZZATO e quindi esiste solo qui.
  *
+ * **Attenzione a cosa misura la baseline.** I tre test che seguono girano su
+ * una griglia **vuota**: l'ambiente non può creare Prenotazioni, quindi lì
+ * axe vede il telaio e non il contenuto. Il chip — badge di Canale,
+ * etichetta di stato, date, notti — è auditato dal test dedicato in fondo,
+ * che intercetta la risposta dell'API per farlo renderizzare davvero
+ * (E2-F4). Senza quello, «axe verde sulla superficie» sarebbe
+ * un'affermazione più larga di ciò che è stato guardato.
+ *
  * **Cosa questo spec NON copre, dichiarato invece che taciuto.** La metà
  * «sync concluso» dell'AC 6 non è esercitabile in questo ambiente: il
  * `webServer` di Playwright avvia l'API ma non il worker, e la politica di
@@ -134,6 +142,136 @@ test("il selettore Struttura filtra griglia ed etichetta senza cambiare schermat
     page.getByRole("heading", { level: 1, name: "Calendario" }),
   ).toBeVisible();
   expect(page.url()).toContain("/calendario");
+  expect(await violazioniGravi(page)).toEqual([]);
+});
+
+/**
+ * La griglia **con dentro le Prenotazioni** (E2-F4).
+ *
+ * Le altre baseline axe di questo file girano su una griglia vuota — è
+ * dichiarato al primo test — quindi il contenuto principale della superficie
+ * non veniva mai auditato: `ChipPrenotazione` è dove vivono il badge di
+ * Canale, l'etichetta di stato, le date e le notti, cioè tutto ciò che AC 1,
+ * 2 e 12 chiedono di leggere. Una baseline che non lo vede misura il telaio.
+ *
+ * Le Prenotazioni non si possono creare qui — l'ambiente e2e non avvia il
+ * worker e la politica di uscita di rete rifiuta il loopback, quindi nessun
+ * import può concludersi, e la prima scrittura dell'Host è la Story 2.4.
+ * Quindi si **intercetta la risposta dell'API**: il browser è vero, il CSS è
+ * vero, il DOM renderizzato è vero, e axe misura il contrasto reale. Ciò che
+ * è finto è il solo payload, ed è la parte che questo test non sta
+ * verificando (la copre `test_calendario_griglia.py`).
+ */
+const BOLOGNA = "11111111-1111-1111-1111-111111111111";
+const RIMINI = "22222222-2222-2222-2222-222222222222";
+
+/** `AAAA-MM-GG` spostato di `giorni`, senza fusi (come `griglia.ts`). */
+function giornoPiu(giorno: string, giorni: number): string {
+  const [anno, mese, data] = giorno.split("-").map(Number);
+  return new Date(Date.UTC(anno, mese - 1, data + giorni))
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * Le voci si costruiscono a partire dal `da` REALMENTE richiesto.
+ *
+ * Fissarle su un mese scelto a mano le farebbe cadere fuori dal periodo che
+ * la pagina apre — cioè il mese corrente — e i chip non verrebbero
+ * renderizzati: il test resterebbe verde misurando di nuovo una griglia
+ * vuota, che è esattamente il difetto che esiste per chiudere.
+ */
+function calendarioConPrenotazioni(da: string) {
+  return {
+    da,
+    a: giornoPiu(da, 27),
+    stato_sync: "riuscito",
+    ultimo_sync_riuscito_il: "2026-08-17T12:35:00Z",
+    feed_collegati: 2,
+    feed_mai_sincronizzati: 0,
+    feed_in_errore: 0,
+    strutture: [
+      { id: BOLOGNA, nome: "Bologna Centro" },
+      { id: RIMINI, nome: "Mare Rimini" },
+    ],
+    voci: [
+      {
+        id: "aaaaaaaa-0000-0000-0000-000000000001",
+        struttura_id: BOLOGNA,
+        canale: "airbnb",
+        check_in: giornoPiu(da, 2),
+        check_out: giornoPiu(da, 6),
+        notti: 4,
+        sommario: "Testo opaco del portale",
+        stato: "attiva",
+        ospite_principale: "Ospite Inventato",
+        altri_ospiti: 2,
+      },
+      {
+        id: "aaaaaaaa-0000-0000-0000-000000000002",
+        struttura_id: BOLOGNA,
+        canale: "booking",
+        // Sovrapposta alla precedente: apre una seconda corsia, che è la
+        // forma che axe non ha mai visto.
+        check_in: giornoPiu(da, 4),
+        check_out: giornoPiu(da, 9),
+        notti: 5,
+        sommario: null,
+        stato: "attiva",
+        ospite_principale: null,
+        altri_ospiti: 0,
+      },
+      {
+        id: "aaaaaaaa-0000-0000-0000-000000000003",
+        struttura_id: RIMINI,
+        canale: "altro",
+        check_in: giornoPiu(da, 12),
+        check_out: giornoPiu(da, 15),
+        notti: 3,
+        sommario: null,
+        // Il caso di E2-F4: è il testo di QUESTO chip che l'opacità rendeva
+        // illeggibile, ed è quello che porta lo stato.
+        stato: "rimossa_dal_feed",
+        ospite_principale: "Ospite Passato",
+        altri_ospiti: 0,
+      },
+    ],
+  };
+}
+
+test("la griglia CON Prenotazioni non ha violazioni a11y gravi", async ({
+  page,
+}, testInfo) => {
+  await registra(page, `chip-${testInfo.project.name}`);
+  await registraStruttura(page, "Bologna Centro");
+
+  await page.route("**/api/v1/calendario**", async (rotta) => {
+    const da =
+      new URL(rotta.request().url()).searchParams.get("da") ?? "2026-08-01";
+    await rotta.fulfill({
+      status: 200,
+      contentType: "application/json",
+      // L'API sta su un'altra origin e il client manda il cookie di
+      // sessione: senza le intestazioni CORS il browser scarterebbe la
+      // risposta intercettata, la pagina mostrerebbe l'errore di
+      // caricamento, e axe finirebbe di nuovo per misurare una griglia
+      // senza chip — cioè il difetto che questo test chiude.
+      headers: {
+        "access-control-allow-origin": "http://localhost:3000",
+        "access-control-allow-credentials": "true",
+      },
+      body: JSON.stringify(calendarioConPrenotazioni(da)),
+    });
+  });
+  await page.goto("/calendario");
+
+  // I chip ci sono davvero: senza questa attesa axe misurerebbe di nuovo una
+  // griglia vuota, cioè il difetto che questo test esiste per chiudere.
+  await expect(page.getByText("Ospite Inventato")).toBeVisible();
+  await expect(page.getByText("Ospite non indicato")).toBeVisible();
+  await expect(page.getByText("Non più nel portale")).toBeVisible();
+  await expect(page.getByText("e altri 2 Ospiti")).toBeVisible();
+
   expect(await violazioniGravi(page)).toEqual([]);
 });
 

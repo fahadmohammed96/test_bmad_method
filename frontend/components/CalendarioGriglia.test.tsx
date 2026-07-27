@@ -144,6 +144,34 @@ describe("Prenotazioni non più attive (AC 12)", () => {
     expect(screen.queryByText("Cancellata")).toBeNull();
     expect(screen.queryByText("Attiva")).toBeNull();
   });
+
+  it("l'attenuazione NON passa dall'opacità sul testo (E2-F4)", () => {
+    // `opacity-*` sul contenitore composita l'opacità su tutto ciò che
+    // contiene: a 0.7 il testo `text-xs` scendeva da 4.58:1 a 2.66:1, sotto
+    // la soglia AA di 4.5:1 (NFR-8, WCAG 1.4.3). E a diventare illeggibile
+    // era proprio il testo che PORTA lo stato — cioè l'informazione che AC
+    // 12 e UX-DR4 vogliono affidata al testo e non al colore.
+    //
+    // jsdom non calcola il contrasto, quindi axe qui non lo vedrebbe: la
+    // proprietà verificabile a questo livello è che l'attenuazione stia sul
+    // bordo e sullo sfondo. Il contrasto reale lo misura l'e2e, su un chip
+    // davvero renderizzato.
+    griglia([
+      voce({ stato: "rimossa_dal_feed", ospite_principale: "Ospite Inventato" }),
+    ]);
+
+    const chip = screen.getByText("Ospite Inventato").closest("div");
+    const antenati: string[] = [];
+    for (
+      let nodo: HTMLElement | null = chip as HTMLElement;
+      nodo !== null;
+      nodo = nodo.parentElement
+    ) {
+      antenati.push(nodo.className ?? "");
+    }
+    const conOpacita = antenati.filter((classi) => /\bopacity-\d/.test(classi));
+    expect(conOpacita).toEqual([]);
+  });
 });
 
 describe("formati italiani (AC 10)", () => {

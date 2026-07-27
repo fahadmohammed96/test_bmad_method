@@ -55,6 +55,35 @@ const SUPERFICIE_CALENDARIO = [
   "app/(app)/calendario/page.tsx",
 ];
 
+// Dove il divieto di accessor locali si applica (E2-F5). Puntarlo sul solo
+// `griglia.ts` lo metteva **dove il difetto non può nascere**: quel modulo
+// non riceve mai una voce dell'API, mentre `CalendarioGriglia.tsx` le riceve
+// tutte ed è il file che ha più motivi di ricalcolare. Un
+// `new Date(voce.check_in).getDate()` lì dentro — testualmente la
+// ricomputazione che AD-14 vieta — lasciava la guardia verde, e nemmeno i
+// test di componente lo avrebbero visto: sotto `TZ=UTC` le due computazioni
+// coincidono.
+const SENZA_ACCESSOR_LOCALI = [
+  ...SUPERFICIE_CALENDARIO,
+  "lib/calendario/griglia.ts",
+  "lib/calendario/oggi.ts",
+  "lib/formati.ts",
+];
+
+/** Gli accessor locali presenti in un SORGENTE (non in un percorso).
+ *
+ * Prende il testo e non il file, così la sentinella può farle esaminare un
+ * caso costruito: una guardia si verifica facendole trovare qualcosa, non
+ * rileggendo la propria lista.
+ */
+export function accessoriLocaliIn(codice: string): string[] {
+  return ACCESSOR_LOCALI.filter((accessor) => codice.includes(accessor));
+}
+
+export function orologiIn(codice: string): string[] {
+  return OROLOGI.filter((orologio) => codice.includes(orologio));
+}
+
 // Valori derivati di DOMINIO che la griglia mostra. Devono venire dal
 // contratto: `notti` è la lunghezza dell'intervallo semiaperto (AD-3),
 // `ospite_principale` e `altri_ospiti` sono la scelta fra più Ospiti
@@ -74,41 +103,58 @@ const DERIVATI_DELLA_VISTA = [
   "feed_in_errore",
 ];
 
-describe("la griglia non conosce il fuso del browser", () => {
-  it("non usa nessun accessor di data locale", () => {
-    const codice = sorgente("lib/calendario/griglia.ts");
-    const trovati = ACCESSOR_LOCALI.filter((accessor) =>
-      codice.includes(accessor),
-    );
-    expect(trovati).toEqual([]);
+describe("nessuna data di calendario passa dal fuso del browser", () => {
+  it.each(SENZA_ACCESSOR_LOCALI)(
+    "%s non usa nessun accessor di data locale",
+    (file) => {
+      expect(accessoriLocaliIn(sorgente(file))).toEqual([]);
+    },
+  );
+
+  it("la guardia copre la superficie, non solo il modulo delle date", () => {
+    // Il difetto di E2-F5 era proprio qui: l'elenco esisteva ma era puntato
+    // dove la ricomputazione non può nascere. Se qualcuno restringesse di
+    // nuovo il perimetro, questo test lo dice.
+    for (const file of SUPERFICIE_CALENDARIO) {
+      expect(SENZA_ACCESSOR_LOCALI).toContain(file);
+    }
   });
 
-  it("non legge l'orologio", () => {
-    const codice = sorgente("lib/calendario/griglia.ts");
-    expect(OROLOGI.filter((orologio) => codice.includes(orologio))).toEqual([]);
+  it.each([
+    ["new Date(voce.check_in).getDate()", ".getDate("],
+    ["const m = new Date(iso).getMonth();", ".getMonth("],
+    ["d.setDate(d.getDate() + 1)", ".getDate("],
+    ["data.toLocaleDateString('it-IT')", ".toLocaleDateString("],
+  ])("la guardia segnala %s", (finto, atteso) => {
+    // Sentinella sulla FUNZIONE, non sulla lista: le si fa esaminare un
+    // sorgente costruito e si pretende che lo segnali. La versione
+    // precedente confrontava l'elenco con sé stesso e sarebbe rimasta verde
+    // anche se la funzione non fosse mai stata applicata a un file.
+    expect(accessoriLocaliIn(finto)).toContain(atteso);
   });
 
-  it("la guardia riconoscerebbe un accessor locale", () => {
-    // Sentinella: le si fa esaminare un sorgente costruito e si pretende che
-    // lo segnali. Una guardia mai vista mordere è un'affermazione sulla
-    // propria correttezza, non un test.
-    const finto = "const giorno = new Date(iso).getDate();";
-    expect(ACCESSOR_LOCALI.filter((a) => finto.includes(a))).toEqual([
-      ".getDate(",
-    ]);
+  it("la guardia non segnala un sorgente innocuo", () => {
+    // L'altra metà: una guardia che segnala tutto non discrimina.
+    expect(
+      accessoriLocaliIn("const giorno = iso.slice(8, 10); formatGiornoIt(iso);"),
+    ).toEqual([]);
   });
 });
 
 describe("la superficie Calendario non ha un orologio proprio", () => {
   it.each(SUPERFICIE_CALENDARIO)("%s non legge l'istante corrente", (file) => {
-    const codice = sorgente(file);
-    expect(OROLOGI.filter((orologio) => codice.includes(orologio))).toEqual([]);
+    expect(orologiIn(sorgente(file))).toEqual([]);
+  });
+
+  it("la guardia segnala un orologio", () => {
+    expect(orologiIn("const adesso = new Date();")).toEqual(["new Date()"]);
+    expect(orologiIn("const t = Date.now();")).toEqual(["Date.now("]);
   });
 
   it("i file sorvegliati esistono davvero", () => {
     // Una guardia puntata su un percorso rinominato passerebbe ispezionando
     // zero file. `readFileSync` solleva, ed è ciò che si pretende qui.
-    for (const file of SUPERFICIE_CALENDARIO) {
+    for (const file of SENZA_ACCESSOR_LOCALI) {
       expect(sorgente(file).length).toBeGreaterThan(0);
     }
   });

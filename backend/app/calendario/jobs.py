@@ -26,7 +26,7 @@ morte per `max_attempts` il ciclo di tutti gli altri.
 
 import logging
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import cast
 
 from sqlalchemy import or_, select, update
@@ -34,7 +34,11 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.calendario.models import FeedIcal, Ospite, Prenotazione
-from app.calendario.retention import filtro_scadute, limite_retention
+from app.calendario.retention import (
+    LimiteRetention,
+    filtro_scadute,
+    limite_retention,
+)
 from app.core.config import get_settings
 from app.core.date_range import utcnow
 from app.core.events import catalog
@@ -278,41 +282,94 @@ def azzera_anagrafiche_scadute(db: Session, payload: dict) -> None:
     nel repository, dove la guardia G-3 impone `host_id` su ogni metodo —
     stessa forma dichiarata di `bootstrap_sync_periodico` e di
     `identity/jobs.py::purge_sessioni_scadute`.
+
+    **Il ciclo si riprogramma anche quando l'azzeramento fallisce** (E2-F1).
+    Un errore che sfuggisse da qui porterebbe il job a `failed` al quinto
+    tentativo, e a quel punto in coda non resterebbe **nessun** job di
+    retention: la conservazione dei dati personali si fermerebbe oltre il
+    termine, a tempo indefinito, fino al prossimo riavvio del worker. È lo
+    stesso modo di guasto che il poller dichiara venti righe sopra, e la
+    forma del rimedio è la sua: l'errore si REGISTRA, non si solleva.
+
+    Il `try/except` non basta da solo, e la ragione è nel kernel: l'handler
+    gira dentro il SAVEPOINT per item di `run_due_jobs` (G-1), quindi una
+    riprogrammazione scritta in un `finally` verrebbe annullata insieme
+    all'eccezione. Serve un savepoint **interno** attorno alla sola `UPDATE`:
+    così il fallimento si richiude su sé stesso, la transazione esterna resta
+    utilizzabile, e l'`INSERT` del prossimo giro va a buon fine.
     """
     adesso = utcnow()
     limite = limite_retention(
         adesso=adesso,
         periodo=timedelta(days=get_settings().ospite_retention_giorni),
     )
-    scadute = select(Prenotazione.id).where(filtro_scadute(limite))
-    esito = cast(
-        CursorResult,
-        db.execute(
-            update(Ospite)
-            .where(
-                or_(
-                    Ospite.nome.is_not(None),
-                    Ospite.email.is_not(None),
-                    Ospite.telefono.is_not(None),
-                ),
-                Ospite.prenotazione_id.in_(scadute),
-            )
-            .values(
-                nome=None,
-                email=None,
-                telefono=None,
-                anonimizzato_il=adesso,
-                aggiornato_il=adesso,
-            )
-        ),
-    )
+    azzerate = _azzera(db, limite, adesso)
+    # SEMPRE, anche dopo un fallimento: un ciclo di adempimento che si spegne
+    # da solo è peggio di un ciclo che sbaglia un giro.
     _riprogramma_retention(db)
+    if azzerate is None:
+        # Il silenzio è il difetto: un adempimento che non è avvenuto deve
+        # lasciare traccia, e il giro dopo riproverà.
+        logger.error(
+            "retention dell'anagrafica Ospite non eseguita: ciclo riprogrammato",
+            extra={"decorrenza_entro_il": limite.giorno.isoformat()},
+        )
+        return
     # Soli conteggi e confini: i dati appena azzerati non possono
     # sopravvivere nei log all'azzeramento stesso (AD-16, NFR-11).
     logger.info(
         "retention dell'anagrafica Ospite eseguita",
         extra={
-            "anagrafiche_azzerate": esito.rowcount,
+            "anagrafiche_azzerate": azzerate,
             "decorrenza_entro_il": limite.giorno.isoformat(),
         },
     )
+
+
+def _azzera(db: Session, limite: LimiteRetention, adesso: datetime) -> int | None:
+    """Azzera i campi personali scaduti; `None` se l'`UPDATE` è fallita.
+
+    Il savepoint interno è ciò che rende recuperabile il fallimento: senza,
+    una `UPDATE` andata male lascerebbe la transazione abortita e l'`INSERT`
+    della riprogrammazione fallirebbe a sua volta — cioè il rimedio
+    morirebbe dello stesso errore da cui deve proteggere.
+    """
+    try:
+        # La costruzione dell'istruzione sta DENTRO il try, non fuori: la
+        # protezione è su «qualunque cosa prima della riprogrammazione», e un
+        # pezzo lasciato fuori è esattamente la riga da cui il ciclo si
+        # spegnerebbe di nuovo.
+        scadute = select(Prenotazione.id).where(filtro_scadute(limite))
+        with db.begin_nested():
+            esito = cast(
+                CursorResult,
+                db.execute(
+                    update(Ospite)
+                    .where(
+                        or_(
+                            Ospite.nome.is_not(None),
+                            Ospite.email.is_not(None),
+                            Ospite.telefono.is_not(None),
+                        ),
+                        Ospite.prenotazione_id.in_(scadute),
+                    )
+                    .values(
+                        nome=None,
+                        email=None,
+                        telefono=None,
+                        anonimizzato_il=adesso,
+                        aggiornato_il=adesso,
+                    )
+                ),
+            )
+            return int(esito.rowcount or 0)
+    except Exception:
+        # Cattura larga e deliberata: l'insieme dei modi in cui una UPDATE
+        # può fallire non è enumerabile a priori (deadlock, timeout, un
+        # vincolo aggiunto domani), e qualunque di essi non deve poter
+        # spegnere il ciclo. `exception` porta il traceback nei log.
+        logger.exception(
+            "azzeramento dell'anagrafica Ospite fallito",
+            extra={"decorrenza_entro_il": limite.giorno.isoformat()},
+        )
+        return None

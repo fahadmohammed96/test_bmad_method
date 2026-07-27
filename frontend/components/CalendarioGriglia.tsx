@@ -36,7 +36,14 @@ import { formatGiornoIt } from "@/lib/formati";
 // screen reader, perché «M» da solo è ambiguo fra martedì e mercoledì.
 const INIZIALI = ["L", "M", "M", "G", "V", "S", "D"] as const;
 
-const TONO_NON_ATTIVA = "border-dashed opacity-70";
+// Attenuazione di una Prenotazione non più attiva: **bordo e sfondo, mai il
+// testo** (E2-F4). `opacity-*` sul contenitore composita l'opacità su tutto
+// ciò che contiene: a 0.7 il testo `text-xs` scendeva da 4.58:1 a 2.66:1
+// sullo sfondo della superficie, sotto la soglia AA di 4.5:1 (NFR-8, WCAG
+// 1.4.3). E il testo che diventava illeggibile era proprio quello che PORTA
+// lo stato — «Non più nel portale», le date, le notti — cioè l'informazione
+// che AC 12 e UX-DR4 vogliono affidata al testo e non al colore.
+const TONO_NON_ATTIVA = "border-dashed border-muted";
 
 function ChipPrenotazione({ voce }: Readonly<{ voce: VoceCalendario }>) {
   const attiva = voce.stato === "attiva";

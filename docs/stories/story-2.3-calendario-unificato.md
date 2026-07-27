@@ -4,7 +4,7 @@ epic: 'Epic 2: Calendario unificato e anti double-booking'
 status: in_review
 created: 2026-07-27
 updated: 2026-07-27
-review: 'in attesa del verdetto di Murat (cross-review pre-merge)'
+review: 'fix-batch epic2-2.3-p1 applicato — in attesa del secondo verdetto di Murat'
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - docs/epics.md (Story 2.3, AC completi + decisione MYL-40 in testa all'Epic 2)
@@ -291,6 +291,74 @@ prova è la **mutazione**:
 | Guardia sugli accessor di data locale | sorgente finto con `.getDate()` | sentinella rossa |
 | Guardia sui campi documento in `ospite` | nomi finti (`numero_documento`, …) | sentinella rossa |
 
+## Fix-batch `epic2-2.3-p1` — i cinque P1 della cross-review
+
+Cross-review di Murat sulla PR #42: **BOCCIA**, cinque P1 dispacciati come
+un solo batch a scope rigido. I P2 (E2-F6…E2-F18) restano fuori: vanno a
+Fahad. Ogni fix porta il nome del test che lo pinna.
+
+| ID | Fix | Test di regressione |
+| :--- | --- | --- |
+| **E2-F1** | La retention non si spegne più da sola: l'errore si registra invece di sollevarsi, e la riprogrammazione avviene **sempre**. Più `Field(gt=0)` sui due parametri | `TestIlCicloNonSiSpegneDaSolo` (5 test) e `TestIParametriDiConfigurazione` (4) |
+| **E2-F2** | `queryClient.clear()` al logout: la cache non sopravvive all'uscita | `uscita-e-cache.test.tsx::E2-F2` (2 test) |
+| **E2-F3** | `ProviderSelezioneStruttura` spostato dal root layout a `(app)/layout.tsx`: uscire smonta il provider | `uscita-e-cache.test.tsx::E2-F3` (2 test) |
+| **E2-F4** | L'attenuazione di una Prenotazione non attiva sta su bordo e sfondo, **mai sul testo**; e la baseline axe adesso vede i chip | `CalendarioGriglia.test.tsx::l'attenuazione NON passa dall'opacità sul testo` + `e2e/calendario.spec.ts::la griglia CON Prenotazioni non ha violazioni a11y gravi` |
+| **E2-F5** | Il divieto di accessor locali si applica a tutta la superficie, non al solo modulo delle date | `griglia.guardia.test.ts` (26 test, sentinelle sulla funzione) |
+
+### Deviazione dichiarata sul rimedio di E2-F1
+
+Il finding è esatto e il modo di guasto è quello descritto. **Il rimedio
+proposto — `try/finally` attorno al corpo — non lo chiude**, e la ragione sta
+nel kernel: l'handler gira dentro `session.begin_nested()` (SAVEPOINT per
+item, G-1), quindi una riprogrammazione scritta in un `finally` viene
+annullata dal rollback del savepoint insieme all'eccezione che l'ha
+provocata. In più, se a fallire è la `UPDATE` stessa, la transazione resta
+abortita e l'`INSERT` della riprogrammazione fallisce a sua volta — il
+rimedio morirebbe dello stesso errore da cui deve proteggere.
+
+Implementato invece un savepoint **interno** attorno alla sola `UPDATE`, con
+l'errore registrato e non sollevato: è la stessa forma per cui il poller
+regge (`esegui_sync` registra gli errori di rete invece di sollevarli).
+
+**Verificato, non argomentato.** Applicando la variante `try/finally`
+letterale, tutti e cinque i test della classe diventano rossi — compreso
+`test_il_worker_non_manda_il_job_a_failed_per_un_guasto_dell_azzeramento`,
+che passa dal percorso reale (`run_due_jobs`) e non dall'handler chiamato a
+mano.
+
+### La coppia E2-F4, e perché era la più importante
+
+L'osservazione dietro il finding vale più del finding: *l'a11y ha morso su
+una superficie senza dati, quindi ha dimostrato di funzionare proprio dove
+non poteva trovare granché*. La limitazione dell'ambiente e2e era dichiarata
+per l'AC 6 e non per l'AC 8, e quella conseguenza mancava.
+
+Chiuso su due livelli, perché nessuno dei due basta da solo:
+
+- **componente** — jsdom non calcola il contrasto, quindi axe lì non lo
+  vedrebbe: la proprietà verificabile è che l'attenuazione non passi
+  dall'opacità sul contenitore del testo, e c'è un test che la nomina;
+- **e2e** — un test dedicato **intercetta la risposta dell'API** e fa
+  renderizzare i chip in un browser vero con il CSS vero. Le Prenotazioni non
+  si possono creare (nessun worker), ma il DOM e i colori sì. Le voci si
+  costruiscono dal `da` realmente richiesto: fissarle su un mese scelto a
+  mano le farebbe cadere fuori dal periodo aperto e il test resterebbe verde
+  misurando di nuovo una griglia vuota.
+
+**Rosso visto, con il numero esatto:** con `opacity-70` rimesso, axe riporta
+`color-contrast` `serious`, *«insufficient color contrast of 2.67 …
+Expected contrast ratio of 4.5:1»* — il valore che la review aveva calcolato
+a mano (2.66).
+
+### AC 8: la voce aperta che mancava
+
+Accolta l'aggiunta chiesta in review. La baseline axe dell'AC 8 ora audita
+anche il contenuto della griglia, ma su un payload **intercettato**: ciò che
+resta non esercitato end-to-end è la catena API → griglia con dati veri, per
+la stessa ragione dell'AC 6 (nessun worker, loopback rifiutato da NFR-17).
+Si chiude con la Story 2.4, quando esiste una scrittura che produce
+Prenotazioni.
+
 ### Change log
 
 - 2026-07-27 — Story creata, implementata test-first e consegnata in PR
@@ -299,3 +367,10 @@ prova è la **mutazione**:
   `ospite` entra in `TABELLE_PROTETTE` di GS-6 e la sua retention è un
   parametro, non una costante. A8 non forzata: nessuna libreria di componenti
   introdotta.
+- 2026-07-27 — Cross-review di Murat sulla PR #42: **BOCCIA**, cinque P1.
+  Fix-batch `epic2-2.3-p1` sullo stesso branch: ciclo di retention che non si
+  spegne (con savepoint interno, non `try/finally`), cache e selezione
+  Struttura che non sopravvivono al logout, attenuazione che non passa
+  dall'opacità sul testo, baseline axe estesa ai chip, guardia AD-14 puntata
+  su tutta la superficie. Rosso visto su tutti e cinque. Backend
+  586 → **595** test, frontend 121 → **136**, e2e 16 → **18**.

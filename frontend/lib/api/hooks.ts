@@ -79,7 +79,23 @@ export function useLogout() {
     mutationFn: async () => {
       await api.POST("/api/v1/auth/logout");
     },
-    onSuccess: () => queryClient.setQueryData(["me"], null),
+    onSuccess: () => {
+      // **Si svuota TUTTA la cache, non solo `["me"]`** (E2-F2). Il
+      // `QueryClient` nasce nel root layout e sopravvive a
+      // `router.replace("/accesso")`, che è navigazione lato client; nessuna
+      // chiave contiene l'identità dell'Host, quindi
+      // `["calendario","2026-08-01","2026-08-31","tutte"]` di chi è appena
+      // uscito è **byte-identica** a quella di chi entra dopo nella stessa
+      // scheda. Entro i cinque minuti di `gcTime` TanStack la servirebbe
+      // come `success`, e il primo paint del secondo Host sarebbero le
+      // Prenotazioni del primo — nomi di Ospiti compresi.
+      //
+      // NFR-14 regge sul server e cadeva qui. Il buco preesisteva su
+      // `["strutture"]` e `["me"]`; da questa Story dentro ci sono dati
+      // personali di terzi, quindi si chiude adesso e per intero.
+      queryClient.clear();
+      queryClient.setQueryData(["me"], null);
+    },
   });
 }
 
