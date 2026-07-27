@@ -17,17 +17,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * server e cadeva qui.
  */
 
-const postLogout = vi.fn();
+// Unica spia su `POST`: riceve anche il PERCORSO, e questo serve — la prova
+// che la strada della scadenza non passa dal logout è che
+// `/api/v1/auth/logout` non compare mai fra le chiamate.
+const postApi = vi.fn();
 
 vi.mock("@/lib/api/client", () => ({
   api: {
-    POST: (...argomenti: unknown[]) => postLogout(...argomenti),
+    POST: (...argomenti: unknown[]) => postApi(...argomenti),
     GET: vi.fn(),
     PATCH: vi.fn(),
   },
 }));
 
-import { useLogout } from "@/lib/api/hooks";
+import { useLogin, useLogout, useRegistrazione } from "@/lib/api/hooks";
 
 const CHIAVE_CALENDARIO = ["calendario", "2026-08-01", "2026-08-31", "tutte"];
 
@@ -56,8 +59,8 @@ function Uscita() {
 
 describe("E2-F2 — la cache non sopravvive al logout", () => {
   beforeEach(() => {
-    postLogout.mockReset();
-    postLogout.mockResolvedValue({ data: undefined, error: undefined });
+    postApi.mockReset();
+    postApi.mockResolvedValue({ data: undefined, error: undefined });
   });
 
   it("le Prenotazioni dell'Host uscito non restano servibili al successivo", async () => {
@@ -98,6 +101,126 @@ describe("E2-F2 — la cache non sopravvive al logout", () => {
     await waitFor(() => {
       expect(queryClient.getQueryData(["me"])).toBeNull();
     });
+  });
+});
+
+// ------------------------------------------- E2-F2, la strada della SCADENZA
+
+/**
+ * Il logout non è l'unico modo in cui una sessione finisce, ed era l'unico
+ * chiuso.
+ *
+ * Una sessione muore anche da sé: cookie scaduto, `purge_sessioni_scadute`,
+ * un riavvio del backend — o un «Esci» la cui risposta si perde dopo che il
+ * server l'ha processata, e allora `onSuccess` non parte affatto. Su tutte
+ * queste strade `useMe` prende un 401, la shell fa `router.replace`, e la
+ * cache resta intatta perché nessuno l'ha svuotata.
+ *
+ * Chi entra dopo trova quindi le Prenotazioni del precedente — nomi di
+ * Ospiti compresi — servite `success` entro i cinque minuti di `gcTime`,
+ * perché le chiavi non portano l'identità dell'Host.
+ *
+ * Il rimedio non insegue le uscite una per una: è **l'ingresso** a garantire
+ * che nella scheda non resti niente di chi c'era prima. Una sessione può
+ * finire in molti modi, ma per vedere i dati bisogna entrare, e di porte
+ * d'ingresso ce ne sono due sole.
+ */
+
+const SECONDO_HOST = { id: "h2", email: "secondo@example.com" };
+
+function Ingresso({ hook }: Readonly<{ hook: typeof useLogin }>) {
+  const ingresso = hook();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        ingresso.mutate({ email: SECONDO_HOST.email, password: "non-reale" })
+      }
+    >
+      Entra
+    </button>
+  );
+}
+
+describe("E2-F2 — la cache non sopravvive alla scadenza della sessione", () => {
+  beforeEach(() => {
+    postApi.mockReset();
+    postApi.mockResolvedValue({ data: SECONDO_HOST, error: undefined });
+  });
+
+  function cacheDelPrimoHost() {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(CHIAVE_CALENDARIO, CON_OSPITE);
+    queryClient.setQueryData(["strutture"], [
+      { id: "s1", nome: "Bologna Centro" },
+    ]);
+    // Stato in cui il 401 ha già lasciato la scheda: `useMe` ha risolto a
+    // `null` e la shell ha già rediretto. Nessun logout è mai avvenuto.
+    queryClient.setQueryData(["me"], null);
+    return queryClient;
+  }
+
+  it.each([
+    ["useLogin", useLogin],
+    ["useRegistrazione", useRegistrazione],
+  ])(
+    "%s non lascia entrare l'Host nuovo sui dati del precedente",
+    async (_nome, hook) => {
+      const queryClient = cacheDelPrimoHost();
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <Ingresso hook={hook} />
+        </QueryClientProvider>,
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Entra" }));
+
+      await waitFor(() => {
+        expect(queryClient.getQueryData(["me"])).toEqual(SECONDO_HOST);
+      });
+      // Le due che portano dati personali di terzi e il filtro altrui.
+      expect(queryClient.getQueryData(CHIAVE_CALENDARIO)).toBeUndefined();
+      expect(queryClient.getQueryData(["strutture"])).toBeUndefined();
+    },
+  );
+
+  it("la garanzia non passa dal logout: quella strada non viene percorsa", async () => {
+    // Il punto dell'intero residuo. Se qualcuno «chiudesse» di nuovo il buco
+    // svuotando altrove sull'uscita, questo test resterebbe verde e quello
+    // sopra no — ed è per questo che ci sono entrambi.
+    const queryClient = cacheDelPrimoHost();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Ingresso hook={useLogin} />
+      </QueryClientProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Entra" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData(["me"])).toEqual(SECONDO_HOST);
+    });
+    const percorsi = postApi.mock.calls.map(([percorso]) => percorso);
+    expect(percorsi).not.toContain("/api/v1/auth/logout");
+  });
+
+  it("lo svuotamento precede la scrittura di `me`, non la annulla", async () => {
+    // L'ordine è l'unico modo in cui questo fix si può sbagliare: uno
+    // `clear()` dopo `setQueryData` cancellerebbe l'Host appena entrato e la
+    // shell resterebbe su «Caricamento…» invece di aprirsi.
+    const queryClient = cacheDelPrimoHost();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Ingresso hook={useLogin} />
+      </QueryClientProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Entra" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData(CHIAVE_CALENDARIO)).toBeUndefined();
+    });
+    expect(queryClient.getQueryData(["me"])).toEqual(SECONDO_HOST);
   });
 });
 

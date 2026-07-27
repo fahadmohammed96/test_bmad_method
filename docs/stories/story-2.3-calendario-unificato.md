@@ -4,7 +4,7 @@ epic: 'Epic 2: Calendario unificato e anti double-booking'
 status: in_review
 created: 2026-07-27
 updated: 2026-07-27
-review: 'fix-batch epic2-2.3-p1 applicato — in attesa del secondo verdetto di Murat'
+review: 'fix epic2-2.3-p2 (E2-F2) applicato — in attesa del terzo verdetto di Murat'
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - docs/epics.md (Story 2.3, AC completi + decisione MYL-40 in testa all'Epic 2)
@@ -359,6 +359,48 @@ la stessa ragione dell'AC 6 (nessun worker, loopback rifiutato da NFR-17).
 Si chiude con la Story 2.4, quando esiste una scrittura che produce
 Prenotazioni.
 
+## Fix `epic2-2.3-p2` — E2-F2, la strada della scadenza
+
+Secondo verdetto di Murat: quattro P1 chiusi, **E2-F2 chiusa a metà**. Il
+finding era stato scritto — e quindi chiuso — sul solo `useLogout`. Ma il
+logout non è l'unico modo in cui una sessione finisce, e su tutti gli altri
+nessun `onSuccess` parte.
+
+**Lo scenario che restava aperto, e non richiede nessun logout:** la sessione
+di Host A muore da sé (cookie scaduto, `purge_sessioni_scadute`, riavvio del
+backend — oppure un «Esci» la cui risposta si perde *dopo* che il server
+l'ha processata). `useMe` prende un 401, la shell fa `router.replace`, che è
+navigazione lato client: **la cache resta intatta**. Host B accede nella
+stessa scheda, `useLogin` scriveva solo `["me"]`, e al primo paint di
+`/calendario` la chiave è byte-identica → TanStack serve le Prenotazioni di
+A, `ospite_principale` compreso. NFR-14, dati personali di terzi.
+
+**Il presidio si sposta dalle uscite all'ingresso.** I modi di finire una
+sessione non sono enumerabili; le porte per entrare sono due. `entra`
+(`lib/api/hooks.ts`) svuota e **poi** scrive, ed è l'unico punto che
+`useLogin` e `useRegistrazione` attraversano — stessa scelta di E2-F3: vero
+per costruzione invece che «ricordarsi di azzerare».
+
+`useLogout` continua a svuotare: quando la strada del bottone c'è, non ha
+senso tenere dati personali in memoria un istante più del necessario. Ma il
+commento che dichiarava di chiudere il buco «per intero» è stato corretto:
+era più forte del codice, ed è la cosa che la review ha ripreso.
+
+| Test | Cosa pinna |
+| :--- | --- |
+| `useLogin \| useRegistrazione non lascia entrare l'Host nuovo sui dati del precedente` | Le due porte, con la cache di A popolata e `["me"]` già a `null` per il 401 |
+| `la garanzia non passa dal logout: quella strada non viene percorsa` | Asserisce che `/api/v1/auth/logout` **non** compare fra le chiamate: se qualcuno «richiudesse» il buco di nuovo sull'uscita, gli altri test cadrebbero e questo no |
+| `lo svuotamento precede la scrittura di `me`, non la annulla` | L'ordine — l'unico modo di sbagliare questo rimedio |
+
+**Rosso visto, due mutazioni:**
+
+- `clear()` rimosso dall'ingresso (il difetto originale): `3 failed | 5 passed`.
+- ordine invertito, `clear()` dopo la scrittura: `4 failed | 4 passed` — cade
+  anche `["me"]`, cioè la shell resterebbe su «Caricamento…».
+
+E2-F19…E2-F22 **non toccati**: sono a registro e vanno a Fahad con gli altri
+P2, come chiesto.
+
 ### Change log
 
 - 2026-07-27 — Story creata, implementata test-first e consegnata in PR
@@ -374,3 +416,9 @@ Prenotazioni.
   dall'opacità sul testo, baseline axe estesa ai chip, guardia AD-14 puntata
   su tutta la superficie. Rosso visto su tutti e cinque. Backend
   586 → **595** test, frontend 121 → **136**, e2e 16 → **18**.
+- 2026-07-27 — Secondo verdetto di Murat: quattro P1 chiusi, E2-F2 chiusa a
+  metà. Fix `epic2-2.3-p2`, una voce sola: il presidio della cache si sposta
+  dalle uscite all'**ingresso** (`entra`, attraversato da `useLogin` e
+  `useRegistrazione`), così la sessione può finire in qualunque modo senza
+  lasciare dati dell'Host precedente alla portata del successivo. Test dalla
+  strada della **scadenza**, non del bottone. Frontend 136 → **140**.

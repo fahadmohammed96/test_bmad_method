@@ -4,7 +4,12 @@
  * Hook di accesso all'API (AD-14): tutte le chiamate passano dal client
  * generato + TanStack Query. Nessun fetch tipizzato a mano.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { api } from "./client";
 import type { components } from "./schema";
 
@@ -45,6 +50,37 @@ export function useMe() {
   });
 }
 
+/**
+ * Ingresso di un Host nella scheda: **prima si svuota, poi si scrive**.
+ *
+ * Il presidio sta qui e non sulle uscite (E2-F2). Una sessione finisce in
+ * molti modi — il bottone «Esci», un cookie scaduto,
+ * `purge_sessioni_scadute`, un riavvio del backend, o un logout la cui
+ * risposta si perde dopo che il server l'ha processata — e su tutti quelli
+ * che non sono il bottone nessun `onSuccess` parte: `useMe` prende un 401,
+ * la shell fa `router.replace("/accesso")`, che è navigazione lato client, e
+ * la cache resta intatta.
+ *
+ * Le chiavi non portano l'identità dell'Host, quindi
+ * `["calendario","2026-08-01","2026-08-31","tutte"]` di chi se n'è andato è
+ * **byte-identica** a quella di chi entra dopo: entro i cinque minuti di
+ * `gcTime` TanStack la servirebbe `success`, e il primo paint del secondo
+ * Host sarebbero le Prenotazioni del primo, `ospite_principale` compreso.
+ * NFR-14 regge sul server e cadrebbe qui.
+ *
+ * Presidiare l'ingresso invece delle uscite rende la cosa vera per
+ * costruzione: i modi di finire una sessione non sono enumerabili, le porte
+ * per entrare sono due e sono queste.
+ *
+ * L'ORDINE è l'unico modo di sbagliare questo rimedio: uno `clear()` dopo la
+ * scrittura cancellerebbe l'Host appena entrato, e la shell resterebbe su
+ * «Caricamento…». C'è un test che lo pinna.
+ */
+function entra(queryClient: QueryClient, host: HostOutput) {
+  queryClient.clear();
+  queryClient.setQueryData(["me"], host);
+}
+
 export function useRegistrazione() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -55,7 +91,7 @@ export function useRegistrazione() {
       if (!data) throw new Error(titoloErrore(error) ?? "registrazione fallita");
       return data;
     },
-    onSuccess: (host) => queryClient.setQueryData(["me"], host),
+    onSuccess: (host) => entra(queryClient, host),
   });
 }
 
@@ -69,7 +105,7 @@ export function useLogin() {
       if (!data) throw new Error(titoloErrore(error) ?? "accesso fallito");
       return data;
     },
-    onSuccess: (host) => queryClient.setQueryData(["me"], host),
+    onSuccess: (host) => entra(queryClient, host),
   });
 }
 
@@ -90,10 +126,18 @@ export function useLogout() {
       // come `success`, e il primo paint del secondo Host sarebbero le
       // Prenotazioni del primo — nomi di Ospiti compresi.
       //
-      // NFR-14 regge sul server e cadeva qui. Il buco preesisteva su
-      // `["strutture"]` e `["me"]`; da questa Story dentro ci sono dati
-      // personali di terzi, quindi si chiude adesso e per intero.
+      // NFR-14 regge sul server e cadeva qui.
+      //
+      // Questa però è la strada del BOTTONE, e da sola non basta (E2-F2): la
+      // garanzia sta in `entra`, sull'ingresso, perché le uscite che non
+      // passano di qui — cookie scaduto, 401, o questa stessa risposta
+      // perduta — non eseguono nessun `onSuccess`. Qui si svuota comunque,
+      // per non tenere dati personali in memoria un istante più del
+      // necessario quando la strada del bottone c'è davvero.
       queryClient.clear();
+      // `me` esplicitamente `null` e non `undefined`: «so che non c'è»
+      // invece di «non lo so», altrimenti la shell resta su «Caricamento…»
+      // invece di mandare all'accesso.
       queryClient.setQueryData(["me"], null);
     },
   });
