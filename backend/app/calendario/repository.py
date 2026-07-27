@@ -19,6 +19,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.calendario.models import (
+    AzzeramentoAudit,
     CanaleFeed,
     EsitoSyncRun,
     FeedIcal,
@@ -268,7 +269,23 @@ class PrenotazioneRepository:
             set_={
                 "check_in": inserimento.excluded.check_in,
                 "check_out": inserimento.excluded.check_out,
-                "sommario": inserimento.excluded.sommario,
+                # Un campo azzerato non è ripopolabile da un sync successivo
+                # (AD-21): su una Prenotazione anonimizzata il `sommario` resta
+                # quello che è, cioè `NULL`. Senza questa clausola un feed che
+                # conserva i VEVENT passati riscriverebbe il campo appena
+                # azzerato, e `anonimizzato_il` resterebbe lì ad attestare un
+                # azzeramento non più vero — un'evidenza che mente, peggio
+                # dell'assenza di evidenza.
+                #
+                # La guardia è sul CAMPO, non sulla riga: `check_in`,
+                # `check_out` e `stato` qui sopra continuano ad aggiornarsi.
+                "sommario": case(
+                    (
+                        Prenotazione.anonimizzato_il.is_not(None),
+                        Prenotazione.sommario,
+                    ),
+                    else_=inserimento.excluded.sommario,
+                ),
                 "stato": case(
                     (
                         Prenotazione.stato == StatoPrenotazione.RIMOSSA_DAL_FEED,
@@ -512,6 +529,11 @@ class OspiteRepository:
         self._db.add(ospite)
         return ospite
 
+    def by_id(self, host_id: uuid.UUID, ospite_id: uuid.UUID) -> Ospite | None:
+        return self._db.scalars(
+            select(Ospite).where(Ospite.host_id == host_id, Ospite.id == ospite_id)
+        ).one_or_none()
+
     def della_prenotazione(
         self, host_id: uuid.UUID, prenotazione_id: uuid.UUID
     ) -> list[Ospite]:
@@ -554,3 +576,21 @@ class OspiteRepository:
         for ospite in righe:
             raggruppati.setdefault(ospite.prenotazione_id, []).append(ospite)
         return raggruppati
+
+
+class AzzeramentoAuditRepository:
+    """Traccia chi/cosa/quando degli azzeramenti CHIESTI (NFR-15).
+
+    Append-only: si scrive e non si rilegge da nessun percorso applicativo —
+    esiste per essere interrogata quando qualcuno deve dimostrare che una
+    richiesta è stata evasa, e una traccia che il codice può modificare non
+    dimostra niente.
+    """
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def add(self, host_id: uuid.UUID, audit: AzzeramentoAudit) -> AzzeramentoAudit:
+        audit.host_id = host_id
+        self._db.add(audit)
+        return audit

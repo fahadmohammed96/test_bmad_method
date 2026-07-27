@@ -7,6 +7,7 @@ host/sessione avvengono SOLO qui (AD-18).
 
 import hashlib
 import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -32,6 +33,10 @@ _DUMMY_HASH = _hasher.hash("password-fittizia-anti-enumerazione")
 
 
 class EmailGiaRegistrataError(Exception):
+    pass
+
+
+class HostNonTrovatoError(Exception):
     pass
 
 
@@ -135,6 +140,22 @@ def login(
     token = _apri_sessione(db, host)
     db.commit()
     return SessioneAperta(host=host, token=token)
+
+
+def leggi_host(db: Session, host_id: uuid.UUID) -> Host:
+    """L'Host, per gli altri moduli. Solleva se non esiste (AD-18).
+
+    `identity` è il proprietario di `host`: chi ha bisogno di sapere se un
+    Host esiste — per esempio l'endpoint interno che azzera tutti i suoi
+    Ospiti su richiesta — passa di qui e non dalla tabella. Senza questa
+    domanda un `host_id` inesistente non produrrebbe un errore ma un
+    azzeramento riuscito su zero righe, cioè una richiesta GDPR dichiarata
+    evasa e mai evasa.
+    """
+    host = HostRepository(db).by_id(host_id)
+    if host is None:
+        raise HostNonTrovatoError()
+    return host
 
 
 def host_da_token(db: Session, token: str) -> Host | None:

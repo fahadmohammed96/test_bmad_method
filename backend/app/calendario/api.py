@@ -22,6 +22,8 @@ from app.api.problems import DomainProblem
 from app.calendario import service
 from app.calendario.models import FeedIcal
 from app.calendario.schemas import (
+    AzzeramentoInput,
+    AzzeramentoOutput,
     CalendarioOutput,
     FeedIcalInput,
     FeedIcalOutput,
@@ -31,12 +33,24 @@ from app.calendario.schemas import (
     VoceCalendarioOutput,
 )
 from app.calendario.uscita_rete import url_redatto
+
+# La dipendenza del token di servizio si importa dal modulo che la possiede,
+# come `CurrentHost` da `identity`: sono le due sole protezioni ammesse dalla
+# guardia `tests/test_auth_convention.py`, e duplicarne una qui darebbe due
+# controlli da tenere allineati.
+from app.config_normativa.deps import AdminToken
 from app.core.db import get_db
 from app.identity.deps import CurrentHost
+from app.identity.service import HostNonTrovatoError
 from app.strutture.service import StrutturaNonTrovataError
 
 router = APIRouter(prefix="/feed-ical", tags=["calendario"])
 calendario_router = APIRouter(prefix="/calendario", tags=["calendario"])
+# Endpoint di servizio, non esposti all'Host finale: la cancellazione su
+# richiesta GDPR (NFR-15) arriva oggi come istanza al titolare, non come
+# bottone nell'app. Vivono sotto `/interno` come quelli di `config_normativa`,
+# quindi dietro il token di servizio e con audit chi/cosa/quando (AD-9).
+interno_router = APIRouter(prefix="/interno", tags=["calendario"])
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -169,6 +183,74 @@ def prenotazioni(
             )
             for riga in service.prenotazioni_del_feed(db, host.id, feed_id)
         ],
+    )
+
+
+@interno_router.post("/host/{host_id}/ospiti/{ospite_id}/azzeramento")
+def azzera_ospite(
+    host_id: uuid.UUID,
+    ospite_id: uuid.UUID,
+    dati: AzzeramentoInput,
+    db: DbSession,
+    _: AdminToken,
+) -> AzzeramentoOutput:
+    """Azzera i campi personali di UN Ospite su richiesta (NFR-15, AD-21).
+
+    Riusa la procedura del job di retention: cambia la selezione, non
+    l'azzeramento. Mai una `DELETE` — sarebbe una quarta forma distruttiva
+    fuori dalla lista esaustiva di AD-20, e GS-6 la fermerebbe.
+
+    L'Ospite sta sotto il suo Host anche nel percorso: la tenancy di un
+    endpoint senza sessione deve essere scritta da qualche parte, e il
+    percorso è il posto in cui si vede (AD-2).
+    """
+    try:
+        esito = service.azzera_ospite_su_richiesta(
+            db, host_id, ospite_id, attore=dati.attore
+        )
+    except service.OspiteNonTrovatoError:
+        raise DomainProblem(
+            status=404,
+            title="Ospite non trovato",
+            type_slug="ospite-not-found",
+        ) from None
+    return _azzeramento_in_uscita(esito)
+
+
+@interno_router.post("/host/{host_id}/azzeramento-ospiti")
+def azzera_ospiti_dell_host(
+    host_id: uuid.UUID,
+    dati: AzzeramentoInput,
+    db: DbSession,
+    _: AdminToken,
+) -> AzzeramentoOutput:
+    """Azzera i campi personali di TUTTI gli Ospiti di un Host (NFR-15).
+
+    Resta dentro il perimetro di quell'Host (AD-2): non esiste una forma
+    «tutti gli Host», e non è una dimenticanza.
+    """
+    try:
+        esito = service.azzera_ospiti_dell_host_su_richiesta(
+            db, host_id, attore=dati.attore
+        )
+    except HostNonTrovatoError:
+        raise DomainProblem(
+            status=404,
+            title="Host non trovato",
+            type_slug="host-not-found",
+        ) from None
+    return _azzeramento_in_uscita(esito)
+
+
+def _azzeramento_in_uscita(
+    esito: service.EsitoAzzeramentoSuRichiesta,
+) -> AzzeramentoOutput:
+    return AzzeramentoOutput(
+        ambito=esito.ambito,
+        riferimento=esito.riferimento,
+        anagrafiche_azzerate=esito.anagrafiche_azzerate,
+        sommari_azzerati=esito.sommari_azzerati,
+        eseguito_il=esito.eseguito_il,
     )
 
 

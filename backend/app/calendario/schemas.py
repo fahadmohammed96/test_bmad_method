@@ -16,7 +16,12 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.calendario.models import CanaleFeed, CategoriaErroreSync, StatoPrenotazione
+from app.calendario.models import (
+    AmbitoAzzeramento,
+    CanaleFeed,
+    CategoriaErroreSync,
+    StatoPrenotazione,
+)
 
 
 class StatoSincronizzazione(enum.Enum):
@@ -180,3 +185,31 @@ class CalendarioOutput(BaseModel):
     feed_in_errore: int
     strutture: list[StrutturaDelCalendarioOutput]
     voci: list[VoceCalendarioOutput]
+
+
+class AzzeramentoInput(BaseModel):
+    """Chi chiede l'azzeramento (NFR-15). Nient'altro.
+
+    Solo l'attore, perché il «cosa» sta nel percorso e il «quando» lo decide
+    il server: un payload che portasse un nome o un contatto scriverebbe un
+    dato personale nel log della richiesta, cioè proprio ciò che
+    l'azzeramento sta per togliere (AD-16, NFR-11).
+    """
+
+    attore: str = Field(min_length=1, max_length=200)
+
+
+class AzzeramentoOutput(BaseModel):
+    """L'evidenza, in conteggi e identificatori.
+
+    I due conteggi sono distinti e non sommati: «un'anagrafica azzerata» e
+    «un `sommario` azzerato» sono adempimenti diversi su tabelle diverse, e
+    un totale unico nasconderebbe il caso in cui uno dei due non è avvenuto —
+    che è esattamente il buco che questo lotto chiude.
+    """
+
+    ambito: AmbitoAzzeramento
+    riferimento: uuid.UUID
+    anagrafiche_azzerate: int
+    sommari_azzerati: int
+    eseguito_il: datetime
