@@ -76,6 +76,7 @@ _Testo completo in PRD §6 e §7._
 - **NFR-7** — Osservabilità degli esiti di compliance (stato tracciato e verificabile; storico audit).
 - **NFR-8** — Accessibilità (WCAG 2.1 AA come baseline, confermata da Sally).
 - **NFR-9** — Localizzazione (UI/contenuti it-IT; date, valute, formati italiani).
+- **NFR-17** — Politica di uscita di rete sui contenuti scaricati dall'Host (URL del Feed = input non fidato: solo `http(s)`, blocco di loopback/reti private/link-local/metadati d'istanza validato sull'indirizzo risolto e dopo ogni redirect, timeout e cap di dimensione come configurazione). Requisito di hardening accolto su proposta del Test Architect (MYL-39), in attesa di ratifica di Fahad.
 - **NFR-10…NFR-16** — Privacy/GDPR: base giuridica obbligo legale (10), minimizzazione (11), retention (12, = G2-D), cifratura at-rest (13), controllo accessi Host proprietario (14), diritti dell'interessato/cancellazione (15), nessun dato reale nei test (16).
 
 ### Additional Requirements
@@ -157,7 +158,7 @@ L'Host crea l'account, entra in un'app navigabile e italiana, registra da 1 a 3 
 
 ### Epic 2: Calendario unificato e anti double-booking
 L'Host collega i Feed iCal di Airbnb/Booking, vede tutte le Prenotazioni in un'unica griglia, inserisce prenotazioni manuali, e viene avvisato e guidato quando due prenotazioni si sovrappongono — senza che il prodotto finga mai una sincronia che i Feed non hanno. È la funzione di fiducia n.1 (zero double-booking).
-**FR coperte:** FR-3, FR-4, FR-5, FR-6, FR-7. **NFR:** NFR-1, NFR-2, NFR-3.
+**FR coperte:** FR-3, FR-4, FR-5, FR-6, FR-7. **NFR:** NFR-1, NFR-2, NFR-3, NFR-17.
 
 ### Epic 3: Adempimenti italiani "in regola"
 L'Host tiene sotto controllo i quattro Adempimenti (Alloggiati Web, Tassa di soggiorno, ISTAT/ROSS1000, CIN) da un unico cruscotto, con scadenze, promemoria affidabili e compilazione assistita — e i dati d'identità degli Ospiti trattati con GDPR by design. È il differenziatore nativo e la funzione di fiducia n.2 (nessuna scadenza persa).
@@ -307,6 +308,8 @@ So that abbia in HostPilot le prenotazioni che oggi tengo sparse sui portali, co
 **And** il parsing dei VEVENT normalizza e fa **upsert idempotente** con chiave naturale `(feed_id, ical_uid)`: rieseguire il sync non duplica né perde Prenotazioni (AD-4, NFR-1)
 **And** l'import **non cancella mai** una Prenotazione: un evento scomparso dal feed porta la Prenotazione a stato `rimossa_dal_feed` (AD-4, AD-19)
 **And** un URL non valido o irraggiungibile produce un **errore inline immediato** sul campo/Struttura, mai un fallimento silenzioso (FR-3)
+**And** l'URL è trattato come **input non fidato** e il fetch rispetta la politica di uscita di rete: soli schemi `http`/`https`; l'**indirizzo risolto** via DNS è rifiutato se ricade su loopback, reti private, link-local o endpoint di metadati d'istanza; la validazione è ripetuta **dopo ogni redirect**; il rifiuto produce lo stesso errore inline dell'URL irraggiungibile, senza rivelare l'esito della risoluzione (NFR-17)
+**And** il fetch ha **timeout** di connessione e lettura e un **cap sulla dimensione** della risposta, entrambi configurazione e non costanti di codice; il superamento chiude la connessione e scrive un `sync_run` fallito, senza saturare il worker (NFR-17, NFR-4)
 **And** ogni run scrive un record `sync_run` (esito, timestamp) e le Prenotazioni importate sono associate alla Struttura corretta (AD-4)
 
 ### Story 2.2: Poller periodico di sincronizzazione durevole e resiliente
