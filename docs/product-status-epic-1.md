@@ -108,8 +108,10 @@ livello che serve a orientarsi:
   sorvegliato da una guardia strutturale automatica, non solo da una convenzione scritta —
   un Host non può leggere o scrivere dati di un altro Host per costruzione verificata.
 
-Per l'elenco completo degli invarianti architetturali (tutti gli `AD-n` elencati in
-`ARCHITECTURE-SPINE.md`) e la loro copertura di test, vedi `docs/qa/test-design-epic-1.md` §7.2.
+L'elenco degli invarianti architetturali è nello spine
+(`docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`). Quelli
+**esercitati nell'Epic 1** e la loro copertura di test sono in
+`docs/qa/test-design-epic-1.md` §7.2 — fotografia al 2026-07-25.
 
 ## 5. Qualità alla chiusura dell'Epic
 

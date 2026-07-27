@@ -4,7 +4,7 @@ Backend di **HostPilot** — monolite modulare a strati con eventi di dominio
 (transactional outbox) + worker, stesso codebase (AD-1). Consumato dal
 frontend Next.js via client TypeScript generato dall'OpenAPI (AD-14).
 Contratto vincolante: `docs/architecture/architecture-HostPilot-2026-07-24/ARCHITECTURE-SPINE.md`
-(tutti gli invarianti AD-n elencati lì + Consistency Conventions).
+(tutti gli invarianti `AD-n` elencati lì + Consistency Conventions).
 
 # Stack
 
