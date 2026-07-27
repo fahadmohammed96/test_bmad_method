@@ -21,6 +21,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -106,6 +107,21 @@ class FeedIcal(Base):
     collegato_il: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
+    # Validatori di cache HTTP dell'ultimo import RIUSCITO (RFC 9110 §8.8):
+    # si rimandano come `If-None-Match` / `If-Modified-Since` e permettono al
+    # portale di rispondere 304 invece di ritrasmettere il calendario (AD-4).
+    #
+    # Si scrivono SOLO dopo una riconciliazione completa, mai dopo un run
+    # fallito: un validatore scritto su un corpo che non abbiamo importato
+    # farebbe rispondere 304 a un feed che nel database non è mai arrivato,
+    # e il Feed resterebbe fermo dichiarandosi aggiornato — la falsa
+    # sincronia di NFR-2 nella sua forma peggiore, perché silenziosa.
+    #
+    # Opachi per contratto: `Text` e non una forma strutturata. L'`ETag` è
+    # una stringa arbitraria del portale e `Last-Modified` va rimandato
+    # VERBATIM, non riformattato da noi.
+    etag: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_modified: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SyncRun(Base):
@@ -162,6 +178,14 @@ class SyncRun(Base):
     eventi_ricorrenti_non_espansi: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )
+    # Il portale ha risposto `304 Not Modified`: run RIUSCITO in cui non si è
+    # scaricato né riconciliato nulla, perché non c'era nulla di nuovo (AD-4).
+    #
+    # Senza questa colonna un run da 304 sarebbe indistinguibile da un run che
+    # ha riconciliato un feed vuoto di novità: entrambi hanno tutti i
+    # contatori a zero. La differenza conta — il primo dice «il portale
+    # conferma che è tutto uguale», il secondo «abbiamo riletto tutto».
+    non_modificato: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     iniziato_il: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

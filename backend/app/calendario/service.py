@@ -24,11 +24,12 @@ SAVEPOINT (G-1) e un `commit` interno lo scavalcherebbe.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.calendario import ical, jobs
+from app.calendario.intervallo import ParametriIntervallo, intervallo_di_sync
 from app.calendario.models import (
     CanaleFeed,
     CategoriaErroreSync,
@@ -53,8 +54,10 @@ from app.calendario.trasporto import (
     ClientFeedHttp,
     ErroreDiTrasporto,
     EsitoHttpInattesoError,
+    RispostaFeed,
     RispostaTroppoGrandeError,
     TimeoutFeedError,
+    Validatori,
 )
 from app.calendario.uscita_rete import (
     PoliticaUscitaRete,
@@ -63,7 +66,7 @@ from app.calendario.uscita_rete import (
     valida_formato,
 )
 from app.core.config import get_settings
-from app.core.date_range import utcnow
+from app.core.date_range import today_rome, utcnow
 from app.strutture import service as strutture_service
 
 logger = logging.getLogger(__name__)
@@ -89,6 +92,10 @@ class StatoFeed:
     ultimo_sync_riuscito_il: datetime | None
     ultimo_tentativo_il: datetime | None
     categoria_errore: CategoriaErroreSync | None
+    # Quante volte di fila il sync è fallito dall'ultimo riuscito (AR-10).
+    # È il segnale che distingue «un tentativo andato male» da «questo Feed
+    # ha smesso di funzionare», e senza di esso l'Host li vede uguali.
+    fallimenti_consecutivi: int
     prenotazioni_attive: int
     prenotazioni_rimosse_dal_feed: int
     eventi_malformati: int
@@ -130,6 +137,11 @@ def collega_feed(db: Session, host_id: uuid.UUID, dati: DatiFeed) -> FeedIcal:
     )
     db.flush()
     jobs.accoda_sync_immediato(db, feed)
+    # Il ciclo periodico parte SUBITO col collegamento, non al prossimo
+    # riavvio del worker: il bootstrap all'avvio è una rete di sicurezza, e
+    # affidargli il primo giro significherebbe che un Feed collegato oggi
+    # comincia a risincronizzarsi al prossimo rilascio (AD-10, NFR-1).
+    jobs.assicura_sync_periodico(db, feed)
     db.commit()
     return feed
 
@@ -163,6 +175,43 @@ def ultimo_run_riuscito(
     return SyncRunRepository(db).ultimo_riuscito(host_id, feed_id)
 
 
+def intervallo_prossimo_sync(
+    db: Session, host_id: uuid.UUID, feed: FeedIcal
+) -> timedelta:
+    """Quanto attendere prima del prossimo sync di questo Feed (G3-5).
+
+    Lo stato (il prossimo check-in) si legge qui; la REGOLA sta in
+    `intervallo.py` ed è pura. La separazione non è estetica: è ciò che
+    permette di provare la regola su tutti i suoi confini senza un database e
+    senza attendere quindici minuti.
+
+    **Si cerca dal primo giorno NON ancora iniziato**, cioè da domani. Un
+    check-in di oggi ha la propria mezzanotte alle spalle: l'ospite è già
+    arrivato, e la finestra che l'intervallo stretto protegge è quella che
+    *precede* l'arrivo. Cercando da oggi, il `LIMIT 1` restituiva proprio
+    quel check-in passato e **oscurava quello di domani**, riportando
+    l'intervallo al pieno — cioè l'AC 10 si invertiva nel giorno di massima
+    occupazione, che è quello in cui una cancellazione tardiva non vista costa
+    di più. La regola pura scarta comunque un arrivo passato, ma non può
+    vedere quello che la query non le ha passato.
+    """
+    impostazioni = get_settings()
+    prossimo = PrenotazioneRepository(db).prossimo_check_in(
+        host_id,
+        struttura_id=feed.struttura_id,
+        da=today_rome() + timedelta(days=1),
+    )
+    return intervallo_di_sync(
+        adesso=utcnow(),
+        prossimo_check_in=prossimo,
+        parametri=ParametriIntervallo(
+            intervallo_minuti=impostazioni.feed_sync_intervallo_minuti,
+            intervallo_minimo_minuti=impostazioni.feed_sync_intervallo_minimo_minuti,
+            finestra_prossimita_ore=impostazioni.feed_sync_finestra_prossimita_ore,
+        ),
+    )
+
+
 def prenotazioni_del_feed(
     db: Session, host_id: uuid.UUID, feed_id: uuid.UUID
 ) -> list[Prenotazione]:
@@ -178,6 +227,14 @@ def stato_del_feed(db: Session, host_id: uuid.UUID, feed: FeedIcal) -> StatoFeed
     run = SyncRunRepository(db)
     ultimo = run.ultimo(host_id, feed.id)
     riuscito = run.ultimo_riuscito(host_id, feed.id)
+    # Due domande diverse, e sarebbe un difetto confonderle. Il TIMESTAMP
+    # viene dall'ultimo run riuscito, 304 compresi: un 304 è una verifica
+    # riuscita e i dati mostrati sono correnti. I CONTEGGI di eventi non
+    # importati vengono dall'ultima RICONCILIAZIONE: un run da 304 li ha a
+    # zero perché non ha letto nulla, e derivarli da lì spegnerebbe l'avviso
+    # proprio quando il portale conferma che gli eventi illeggibili ci sono
+    # ancora tutti.
+    riconciliato = run.ultimo_riconciliato(host_id, feed.id)
     conteggi = PrenotazioneRepository(db).conta_per_stato(host_id, feed.id)
 
     if ultimo is None:
@@ -200,13 +257,16 @@ def stato_del_feed(db: Session, host_id: uuid.UUID, feed: FeedIcal) -> StatoFeed
         ultimo_sync_riuscito_il=None if riuscito is None else riuscito.concluso_il,
         ultimo_tentativo_il=None if ultimo is None else ultimo.concluso_il,
         categoria_errore=None if ultimo is None else ultimo.categoria_errore,
+        fallimenti_consecutivi=run.fallimenti_consecutivi(host_id, feed.id),
         prenotazioni_attive=conteggi.get(StatoPrenotazione.ATTIVA, 0),
         prenotazioni_rimosse_dal_feed=conteggi.get(
             StatoPrenotazione.RIMOSSA_DAL_FEED, 0
         ),
-        eventi_malformati=0 if riuscito is None else riuscito.eventi_malformati,
+        eventi_malformati=(
+            0 if riconciliato is None else riconciliato.eventi_malformati
+        ),
         eventi_ricorrenti_non_espansi=(
-            0 if riuscito is None else riuscito.eventi_ricorrenti_non_espansi
+            0 if riconciliato is None else riconciliato.eventi_ricorrenti_non_espansi
         ),
     )
 
@@ -229,6 +289,7 @@ def _scrivi_run(
     esito: EsitoSyncRun,
     categoria: CategoriaErroreSync | None = None,
     conteggi: EsitoImport | None = None,
+    non_modificato: bool = False,
 ) -> SyncRun:
     contatori = conteggi or EsitoImport()
     run = SyncRunRepository(db).add(
@@ -243,12 +304,55 @@ def _scrivi_run(
             prenotazioni_ricomparse=contatori.ricomparse,
             eventi_malformati=contatori.malformati,
             eventi_ricorrenti_non_espansi=contatori.ricorrenti_non_espansi,
+            non_modificato=non_modificato,
             iniziato_il=iniziato_il,
             concluso_il=utcnow(),
         ),
     )
+    # `flush` prima di contare: il run appena scritto DEVE essere fra quelli
+    # che l'alert conta, altrimenti la soglia scatterebbe con un giro di
+    # ritardo — cioè al fallimento N+1, non all'N.
     db.flush()
+    if esito is EsitoSyncRun.FALLITO:
+        _valuta_alert_fallimenti(db, feed, categoria)
     return run
+
+
+def _valuta_alert_fallimenti(
+    db: Session, feed: FeedIcal, categoria: CategoriaErroreSync | None
+) -> None:
+    """Alert interno all'ATTRAVERSAMENTO della soglia (AR-10, NFR-1).
+
+    Solo all'attraversamento, non a ogni fallimento oltre la soglia: un
+    portale giù per un giorno produrrebbe novantasei righe identiche, e un
+    alert che si ripete è un alert che si impara a ignorare. Il fatto nuovo è
+    «questo Feed ha smesso di funzionare», e succede una volta sola per
+    guasto — al successivo successo il contatore torna a zero da sé
+    (`fallimenti_consecutivi` è derivato) e un nuovo guasto tornerà a
+    segnalare.
+
+    L'artefatto è un log strutturato: NFR-7 mappa metriche e canali di alert
+    sull'Epic 3, quindi qui non esiste ancora un canale verso cui uscire. Il
+    log è il minimo verificabile proposto dal test design (§4.2-9) e non
+    pregiudica quella scelta — è un `logger.error` con i campi già pronti per
+    essere raccolti.
+    """
+    soglia = get_settings().feed_sync_fallimenti_per_alert
+    consecutivi = SyncRunRepository(db).fallimenti_consecutivi(feed.host_id, feed.id)
+    if consecutivi != soglia:
+        return
+    logger.error(
+        "alert: feed non sincronizza da %s tentativi consecutivi",
+        consecutivi,
+        extra={
+            "feed_id": str(feed.id),
+            "host_id": str(feed.host_id),
+            "struttura_id": str(feed.struttura_id),
+            "fallimenti_consecutivi": consecutivi,
+            "soglia": soglia,
+            "categoria_errore": None if categoria is None else categoria.value,
+        },
+    )
 
 
 def esegui_sync(
@@ -270,7 +374,14 @@ def esegui_sync(
     iniziato_il = utcnow()
 
     try:
-        risposta = trasporto.scarica(feed.url)
+        # Richiesta CONDIZIONALE: se il portale non ha novità risponde 304 e
+        # non ritrasmette il calendario (AD-4). I validatori vengono da
+        # `feed`, cioè dall'ultimo import davvero riconciliato — mai da un run
+        # fallito, altrimenti chiederemmo «è cambiato rispetto a una cosa che
+        # non abbiamo?» e ci sentiremmo rispondere «no».
+        risposta = trasporto.scarica(
+            feed.url, validatori=Validatori(feed.etag, feed.last_modified)
+        )
     except ErroreDiTrasporto as exc:
         logger.warning(
             "sync del feed fallito nel trasporto",
@@ -282,6 +393,30 @@ def esegui_sync(
             iniziato_il=iniziato_il,
             esito=EsitoSyncRun.FALLITO,
             categoria=_categoria(exc),
+        )
+
+    if risposta.non_modificato:
+        # Il portale conferma che i validatori che gli abbiamo mandato sono
+        # ancora buoni: non c'è corpo, quindi non c'è NULLA da riconciliare.
+        #
+        # È l'interazione che il test design marca come il rischio peggiore
+        # dell'Epic (R2-C): un 304 letto come «il feed è arrivato ed è vuoto»
+        # marcherebbe `rimossa_dal_feed` l'intero calendario, con esito
+        # riuscito e quindi in silenzio. Il ritorno anticipato qui è la
+        # ragione per cui non può succedere — non c'è nessun percorso da
+        # questa riga a `_riconcilia`.
+        #
+        # Il run è comunque RIUSCITO e il suo timestamp fa avanzare «dati
+        # aggiornati alle HH:MM»: abbiamo davvero verificato con il portale
+        # che i dati che mostriamo sono correnti, ed è esattamente ciò che
+        # NFR-2 chiede di dire all'Host.
+        _memorizza_validatori(db, feed, risposta)
+        return _scrivi_run(
+            db,
+            feed,
+            iniziato_il=iniziato_il,
+            esito=EsitoSyncRun.RIUSCITO,
+            non_modificato=True,
         )
 
     try:
@@ -326,12 +461,27 @@ def esegui_sync(
             categoria=CategoriaErroreSync.FEED_SENZA_EVENTI,
         )
 
+    conteggi = _riconcilia(db, feed, analizzato, uid_presenti)
+    # DOPO la riconciliazione, mai prima: il validatore certifica che questo
+    # corpo è entrato nel database. Scriverlo prima significherebbe che un
+    # errore a metà riconciliazione lascerebbe un validatore che promette
+    # dati che non abbiamo, e il prossimo 304 congelerebbe il Feed su di essi.
+    _memorizza_validatori(db, feed, risposta)
     return _scrivi_run(
         db,
         feed,
         iniziato_il=iniziato_il,
         esito=EsitoSyncRun.RIUSCITO,
-        conteggi=_riconcilia(db, feed, analizzato, uid_presenti),
+        conteggi=conteggi,
+    )
+
+
+def _memorizza_validatori(db: Session, feed: FeedIcal, risposta: RispostaFeed) -> None:
+    FeedIcalRepository(db).aggiorna_validatori(
+        feed.host_id,
+        feed_id=feed.id,
+        etag=risposta.etag,
+        last_modified=risposta.last_modified,
     )
 
 

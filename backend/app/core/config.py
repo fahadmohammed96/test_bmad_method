@@ -70,6 +70,24 @@ class Settings(BaseSettings):
     # vuoto è sorvegliato da un test: la denylist non si allenta per svista.
     feed_reti_consentite: str = ""
 
+    # Poller periodico dei Feed (AD-10, G3-5, NFR-4). Il default di 15 minuti
+    # e la riduzione a 5 «in prossimità di un check-in» sono parametri
+    # operativi tarabili coi dati del pilota, non costanti di codice: un
+    # intervallo hardcoded renderebbe «configurabile» una parola del
+    # documento invece di una proprietà del sistema.
+    feed_sync_intervallo_minuti: int = 15
+    feed_sync_intervallo_minimo_minuti: int = 5
+    # Quanto prima di un check-in l'intervallo scende al minimo. «In
+    # prossimità» non è quantificato in `epics.md` (test design §4.2-8):
+    # questo è il parametro proposto DAL test design, non
+    # un'interpretazione scelta qui — l'AC resta tracciato come non
+    # chiudibile finché la decisione di prodotto non arriva.
+    feed_sync_finestra_prossimita_ore: int = 24
+    # Dopo quanti fallimenti CONSECUTIVI il Feed produce un alert interno
+    # (AR-10, NFR-1). Mai hardcoded: la soglia giusta dipende
+    # dall'intervallo, e i due parametri si tarano insieme.
+    feed_sync_fallimenti_per_alert: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -29,8 +29,13 @@ class RegimeLettura(Base):
     __tablename__ = "regime_lettura"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    # `unique=True` senza `index=True`: insieme SQLAlchemy li rende come un
+    # unico indice unico, mentre lo schema porta un UNIQUE constraint (che ha
+    # già il suo indice) — la deriva di `alembic check` chiusa dalla
+    # migrazione 0009 (MYL-44). Il vincolo resta lo stesso: un solo record di
+    # lettura per Host.
     host_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("host.id"), nullable=False, unique=True, index=True
+        ForeignKey("host.id"), nullable=False, unique=True
     )
     conteggio_confermato: Mapped[int] = mapped_column(Integer, nullable=False)
     confermato_il: Mapped[datetime] = mapped_column(

@@ -27,6 +27,7 @@ const FEED_BASE = {
   ultimo_sync_riuscito_il: null,
   ultimo_tentativo_il: null,
   categoria_errore: null,
+  fallimenti_consecutivi: 0,
   prenotazioni_attive: 0,
   prenotazioni_rimosse_dal_feed: 0,
   eventi_malformati: 0,
@@ -123,7 +124,81 @@ describe("FeedIcalStruttura (FR-3, UJ-1)", () => {
     expect(
       screen.getByText("Importate 2 prenotazioni — ultimo aggiornamento 08:00"),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/12:30/)).not.toBeInTheDocument();
+    // L'orario del tentativo fallito compare, ma come TENTATIVO — mai come
+    // «ultimo aggiornamento». Confondere le due frasi è la falsa sincronia.
+    expect(screen.getByText("Ultimo tentativo alle 12:30")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/ultimo aggiornamento 12:30/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("dice QUANDO è stato l'ultimo tentativo, non solo che è fallito", () => {
+    // Da quando il poller gira da solo: un tentativo fallito due minuti fa e
+    // uno fallito tre giorni fa portavano la stessa identica etichetta, e
+    // hanno conseguenze opposte per l'Host.
+    montaCon([
+      {
+        ...FEED_BASE,
+        stato_sync: "fallito",
+        categoria_errore: "timeout",
+        ultimo_tentativo_il: "2026-07-26T10:30:00Z",
+      },
+    ]);
+    expect(screen.getByText("Ultimo tentativo alle 12:30")).toBeInTheDocument();
+  });
+
+  it("su un Feed MAI riuscito non mostra alcun orario di aggiornamento", () => {
+    // AC 11 (P0): il caso in cui la falsa sincronia fa il danno massimo. Il
+    // sistema dice «non so» — non un trattino, che si legge come un valore.
+    montaCon([
+      {
+        ...FEED_BASE,
+        stato_sync: "fallito",
+        categoria_errore: "url_non_raggiungibile",
+        ultimo_sync_riuscito_il: null,
+        ultimo_tentativo_il: "2026-07-26T10:30:00Z",
+      },
+    ]);
+    expect(
+      screen.getByText(
+        "Non abbiamo mai ricevuto le prenotazioni di questo calendario.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/ultimo aggiornamento/)).not.toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+
+  it("distingue un tentativo andato male da un Feed che ha smesso di funzionare", () => {
+    // AR-10: è lo stesso segnale su cui il backend fa scattare l'alert
+    // interno. Senza, i due casi arrivano identici alla superficie.
+    montaCon([
+      {
+        ...FEED_BASE,
+        stato_sync: "fallito",
+        categoria_errore: "url_non_raggiungibile",
+        fallimenti_consecutivi: 4,
+        ultimo_tentativo_il: "2026-07-26T10:30:00Z",
+      },
+    ]);
+    expect(
+      screen.getByText(/non riusciamo a sincronizzare questo calendario da 4 tentativi di fila/i),
+    ).toBeInTheDocument();
+  });
+
+  it("un solo fallimento NON viene presentato come un guasto", () => {
+    // L'altra metà: se la frase forte comparisse al primo intoppo, l'Host
+    // imparerebbe a ignorarla e non servirebbe più quando conta.
+    montaCon([
+      {
+        ...FEED_BASE,
+        stato_sync: "fallito",
+        categoria_errore: "timeout",
+        fallimenti_consecutivi: 1,
+        ultimo_tentativo_il: "2026-07-26T10:30:00Z",
+      },
+    ]);
+    expect(screen.queryByText(/tentativi di fila/)).not.toBeInTheDocument();
+    expect(screen.getByText("Ultimo tentativo non riuscito")).toBeInTheDocument();
   });
 
   it("dice che le prenotazioni uscite dal feed sono state conservate", () => {

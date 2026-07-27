@@ -40,6 +40,15 @@ class RispostaPreparata:
     # ogni hop una FRAZIONE del budget complessivo, che e' l'unico modo di
     # distinguere «budget del fetch» da «budget per hop».
     ritardo_secondi: float | None = None
+    # Validatori di cache che il portale espone e CONFRONTA: con `etag`
+    # valorizzato la risposta porta l'intestazione `ETag` e, se la richiesta
+    # arriva con un `If-None-Match` uguale, il server risponde 304 da se'.
+    #
+    # Il confronto lo fa il SERVER, non il test: preparare a mano un 304
+    # proverebbe che il codice sa leggere un 304, non che sappia CHIEDERE in
+    # modo condizionale — e la differenza fra le due cose e' l'AC 4.
+    etag: str | None = None
+    last_modified: str | None = None
 
 
 class ServerFeed:
@@ -105,7 +114,16 @@ class ServerFeed:
                 if preparata.sgocciola_intestazioni_secondi is not None:
                     self._sgocciola_intestazioni(preparata)
                     return
+                if self._validatori_ancora_buoni(preparata):
+                    # 304: niente corpo, niente Content-Length (RFC 9110
+                    # §15.4.5). I validatori si ripetono, come fa un portale
+                    # vero.
+                    self.send_response(304)
+                    self._intestazioni_dei_validatori(preparata)
+                    self.end_headers()
+                    return
                 self.send_response(preparata.stato)
+                self._intestazioni_dei_validatori(preparata)
                 for chiave, valore in preparata.intestazioni.items():
                     self.send_header(chiave, valore)
                 if preparata.chiudi_a_meta:
@@ -130,6 +148,29 @@ class ServerFeed:
                     return
                 if preparata.corpo:
                     self.wfile.write(preparata.corpo)
+
+            def _validatori_ancora_buoni(self, preparata: RispostaPreparata) -> bool:
+                """La richiesta condizionale del client e' soddisfatta?
+
+                `If-None-Match` prima di `If-Modified-Since`, come impone RFC
+                9110 §13.1.3: l'`ETag` e' un confronto esatto, la data e' un
+                ripiego a granularita' di secondo.
+                """
+                if preparata.etag is not None:
+                    return self.headers.get("If-None-Match") == preparata.etag
+                if preparata.last_modified is not None:
+                    return (
+                        self.headers.get("If-Modified-Since") == preparata.last_modified
+                    )
+                return False
+
+            def _intestazioni_dei_validatori(
+                self, preparata: RispostaPreparata
+            ) -> None:
+                if preparata.etag is not None:
+                    self.send_header("ETag", preparata.etag)
+                if preparata.last_modified is not None:
+                    self.send_header("Last-Modified", preparata.last_modified)
 
             def _sgocciola_intestazioni(self, preparata: RispostaPreparata) -> None:
                 """Riga di stato, poi intestazioni un byte alla volta, senza

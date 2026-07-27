@@ -10,9 +10,10 @@ constraint (lezione G-2 dell'Epic 1, test di gara A3-1).
 
 import uuid
 from collections.abc import Sequence
+from datetime import date
 from typing import cast
 
-from sqlalchemy import Select, case, func, select, text, update
+from sqlalchemy import Select, case, func, literal, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
@@ -57,6 +58,29 @@ class FeedIcalRepository:
             )
         )
 
+    def aggiorna_validatori(
+        self,
+        host_id: uuid.UUID,
+        *,
+        feed_id: uuid.UUID,
+        etag: str | None,
+        last_modified: str | None,
+    ) -> None:
+        """Sostituisce i validatori di cache dopo un import riuscito (AD-4).
+
+        Si SOSTITUISCONO, non si fondono: una risposta 200 senza `ETag` deve
+        azzerare quello vecchio. Tenerlo significherebbe continuare a mandare
+        un `If-None-Match` che il portale non ha più modo di soddisfare — e
+        se per qualunque ragione lo soddisfacesse, il Feed resterebbe fermo
+        su un validatore che non descrive più niente, dichiarandosi
+        aggiornato.
+        """
+        self._db.execute(
+            update(FeedIcal)
+            .where(FeedIcal.host_id == host_id, FeedIcal.id == feed_id)
+            .values(etag=etag, last_modified=last_modified)
+        )
+
     def sync_in_coda(
         self, host_id: uuid.UUID, feed_id: uuid.UUID, *, tipo_job: str
     ) -> bool:
@@ -95,11 +119,76 @@ class SyncRunRepository:
         return self._db.scalars(self._per_feed(host_id, feed_id).limit(1)).first()
 
     def ultimo_riuscito(self, host_id: uuid.UUID, feed_id: uuid.UUID) -> SyncRun | None:
+        """Sorgente del «dati aggiornati alle HH:MM»: include i run da 304.
+
+        Un 304 è una verifica riuscita — abbiamo chiesto al portale e ci ha
+        confermato che i dati che mostriamo sono correnti — quindi il
+        timestamp deve avanzare. Per i CONTEGGI serve l'altra domanda:
+        `ultimo_riconciliato`.
+        """
         return self._db.scalars(
             self._per_feed(host_id, feed_id)
             .where(SyncRun.esito == EsitoSyncRun.RIUSCITO)
             .limit(1)
         ).first()
+
+    def ultimo_riconciliato(
+        self, host_id: uuid.UUID, feed_id: uuid.UUID
+    ) -> SyncRun | None:
+        """L'ultimo run che ha davvero letto e riconciliato un calendario.
+
+        Distinto da `ultimo_riuscito` per una ragione che si vede solo
+        mettendo insieme il 304 e la superficie: `eventi_malformati` e
+        `eventi_ricorrenti_non_espansi` sono AVVISI all'Host su righe che non
+        sono state importate. Un run da 304 è riuscito e ha tutti i contatori
+        a zero, quindi derivarli da `ultimo_riuscito` li spegnerebbe — e li
+        spegnerebbe **perché non è cambiato niente**, cioè proprio quando gli
+        eventi illeggibili ci sono ancora tutti. Un avviso che sparisce da sé
+        è peggio di nessun avviso.
+        """
+        return self._db.scalars(
+            self._per_feed(host_id, feed_id)
+            .where(
+                SyncRun.esito == EsitoSyncRun.RIUSCITO,
+                SyncRun.non_modificato.is_(False),
+            )
+            .limit(1)
+        ).first()
+
+    def fallimenti_consecutivi(self, host_id: uuid.UUID, feed_id: uuid.UUID) -> int:
+        """Quanti run falliti dall'ultimo riuscito in poi (AR-10, NFR-1).
+
+        DERIVATO dalla traccia append-only, non tenuto in un contatore sul
+        Feed. È la stessa scelta di `ultimo_sync_riuscito_il`, e per la stessa
+        ragione: un contatore mantenuto a parte ha due punti di scrittura —
+        l'incremento sul fallimento e **l'azzeramento al primo successo** — e
+        il secondo è quello che si dimentica. Un contatore che non si azzera
+        fa suonare l'alert per sempre su un Feed che ha ripreso a funzionare,
+        e un alert che suona sempre è un alert spento.
+
+        Derivandolo, l'azzeramento non è codice che qualcuno deve ricordarsi
+        di scrivere: è una conseguenza della domanda.
+        """
+        ultimo_riuscito = self.ultimo_riuscito(host_id, feed_id)
+        falliti = select(func.count()).where(
+            SyncRun.host_id == host_id,
+            SyncRun.feed_id == feed_id,
+            SyncRun.esito == EsitoSyncRun.FALLITO,
+        )
+        if ultimo_riuscito is not None:
+            # Tupla `(concluso_il, id)` e non il solo timestamp: è lo stesso
+            # ordinamento di `_per_feed`, e due run conclusi nello stesso
+            # istante — che nei test succede, e in produzione può succedere —
+            # devono ordinarsi allo stesso modo qui e là, altrimenti il
+            # conteggio e «l'ultimo riuscito» parlerebbero di insiemi diversi.
+            falliti = falliti.where(
+                tuple_(SyncRun.concluso_il, SyncRun.id)
+                > tuple_(
+                    literal(ultimo_riuscito.concluso_il),
+                    literal(ultimo_riuscito.id),
+                )
+            )
+        return int(self._db.scalar(falliti) or 0)
 
     @staticmethod
     def _per_feed(host_id: uuid.UUID, feed_id: uuid.UUID) -> Select[tuple[SyncRun]]:
@@ -244,6 +333,37 @@ class PrenotazioneRepository:
                 .order_by(Prenotazione.check_in)
             )
         )
+
+    def prossimo_check_in(
+        self, host_id: uuid.UUID, *, struttura_id: uuid.UUID, da: date
+    ) -> date | None:
+        """Il primo check-in ATTIVO della Struttura da `da` in poi (G3-5).
+
+        Serve all'intervallo adattivo: un Feed che ha un ospite in arrivo si
+        risincronizza più spesso, perché è lì che una cancellazione tardiva
+        non vista costa di più.
+
+        `da` è il primo giorno che al chiamante interessa, e non è «oggi»: il
+        chiamante passa il primo giorno NON ancora iniziato, perché un
+        check-in odierno è un arrivo già avvenuto e con `LIMIT 1`
+        oscurerebbe quello di domani. La decisione sta nel service, che è
+        l'unico posto in cui «arrivo futuro» ha un significato.
+
+        Solo le Prenotazioni `attiva`: una `rimossa_dal_feed` o `cancellata`
+        non è un arrivo, e trattarla come tale terrebbe un Feed morto sul
+        ritmo stretto per sempre.
+        """
+        return self._db.scalars(
+            select(Prenotazione.check_in)
+            .where(
+                Prenotazione.host_id == host_id,
+                Prenotazione.struttura_id == struttura_id,
+                Prenotazione.stato == StatoPrenotazione.ATTIVA,
+                Prenotazione.check_in >= da,
+            )
+            .order_by(Prenotazione.check_in)
+            .limit(1)
+        ).first()
 
     def conta_per_stato(
         self, host_id: uuid.UUID, feed_id: uuid.UUID

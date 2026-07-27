@@ -10,7 +10,7 @@ import logging
 
 # Import con effetto di registrazione: ogni modulo dichiara qui i propri
 # handler di job e i propri subscriber di eventi.
-from app.calendario import jobs as calendario_jobs  # noqa: F401
+from app.calendario import jobs as calendario_jobs
 from app.core.db import get_sessionmaker
 from app.core.worker import main as ciclo_worker
 from app.identity import jobs as identity_jobs  # noqa: F401
@@ -19,9 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 def bootstrap_job_periodici() -> None:
-    """Rimette in coda i cicli periodici se mancano (idempotente)."""
+    """Rimette in coda i cicli periodici se mancano (idempotente).
+
+    Una sola transazione per entrambi: se il bootstrap del poller fallisce, il
+    purge non deve restare accodato da solo dando l'impressione che l'avvio
+    sia riuscito.
+    """
     with get_sessionmaker()() as db:
         identity_jobs.assicura_purge_periodico(db)
+        calendario_jobs.bootstrap_sync_periodico(db)
         db.commit()
 
 

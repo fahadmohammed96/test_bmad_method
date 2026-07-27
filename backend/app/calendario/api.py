@@ -22,6 +22,7 @@ from app.calendario.schemas import (
     FeedIcalInput,
     FeedIcalOutput,
     PrenotazioneOutput,
+    PrenotazioniDelFeedOutput,
 )
 from app.calendario.uscita_rete import url_redatto
 from app.core.db import get_db
@@ -63,6 +64,7 @@ def _in_uscita(db: Session, host_id: uuid.UUID, feed: FeedIcal) -> FeedIcalOutpu
         ultimo_sync_riuscito_il=stato.ultimo_sync_riuscito_il,
         ultimo_tentativo_il=stato.ultimo_tentativo_il,
         categoria_errore=stato.categoria_errore,
+        fallimenti_consecutivi=stato.fallimenti_consecutivi,
         prenotazioni_attive=stato.prenotazioni_attive,
         prenotazioni_rimosse_dal_feed=stato.prenotazioni_rimosse_dal_feed,
         eventi_malformati=stato.eventi_malformati,
@@ -119,28 +121,39 @@ def dettaglio(feed_id: uuid.UUID, db: DbSession, host: CurrentHost) -> FeedIcalO
 @router.get("/{feed_id}/prenotazioni")
 def prenotazioni(
     feed_id: uuid.UUID, db: DbSession, host: CurrentHost
-) -> list[PrenotazioneOutput]:
+) -> PrenotazioniDelFeedOutput:
     """Prenotazioni importate dal Feed, comprese quelle non più attive.
 
     Una Prenotazione uscita da `attiva` resta visibile: farla sparire senza
     traccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host
     (AD-20).
+
+    La risposta porta con sé lo stato di sincronizzazione e l'orario
+    dell'ultimo sync riuscito: questa è una superficie che mostra dati da
+    Feed, e UX-DR6 vuole «dati aggiornati alle HH:MM» su ognuna. La guardia
+    `tests/test_superfici_feed_convention.py` (GS-7) impone che resti vero
+    anche per le superfici che non esistono ancora.
     """
     try:
-        service.leggi_feed(db, host.id, feed_id)
+        feed = service.leggi_feed(db, host.id, feed_id)
     except service.FeedNonTrovatoError:
         raise _feed_non_trovato() from None
-    return [
-        PrenotazioneOutput(
-            id=riga.id,
-            struttura_id=riga.struttura_id,
-            canale=riga.canale,
-            ical_uid=riga.ical_uid,
-            check_in=riga.check_in,
-            check_out=riga.check_out,
-            notti=riga.soggiorno.nights,
-            sommario=riga.sommario,
-            stato=riga.stato,
-        )
-        for riga in service.prenotazioni_del_feed(db, host.id, feed_id)
-    ]
+    stato = service.stato_del_feed(db, host.id, feed)
+    return PrenotazioniDelFeedOutput(
+        stato_sync=stato.stato,
+        ultimo_sync_riuscito_il=stato.ultimo_sync_riuscito_il,
+        prenotazioni=[
+            PrenotazioneOutput(
+                id=riga.id,
+                struttura_id=riga.struttura_id,
+                canale=riga.canale,
+                ical_uid=riga.ical_uid,
+                check_in=riga.check_in,
+                check_out=riga.check_out,
+                notti=riga.soggiorno.nights,
+                sommario=riga.sommario,
+                stato=riga.stato,
+            )
+            for riga in service.prenotazioni_del_feed(db, host.id, feed_id)
+        ],
+    )
