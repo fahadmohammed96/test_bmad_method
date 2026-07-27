@@ -108,8 +108,8 @@ livello che serve a orientarsi:
   sorvegliato da una guardia strutturale automatica, non solo da una convenzione scritta —
   un Host non può leggere o scrivere dati di un altro Host per costruzione verificata.
 
-Per l'elenco completo degli invarianti architetturali (AD-1…AD-20) e la loro copertura di
-test, vedi `docs/qa/test-design-epic-1.md` §7.2.
+Per l'elenco completo degli invarianti architetturali (tutti gli `AD-n` elencati in
+`ARCHITECTURE-SPINE.md`) e la loro copertura di test, vedi `docs/qa/test-design-epic-1.md` §7.2.
 
 ## 5. Qualità alla chiusura dell'Epic
 

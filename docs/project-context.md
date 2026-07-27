@@ -90,6 +90,12 @@ Questi punti richiedono **ricerca normativa accurata in Fase Analysis** e non va
 
 ## 7. Critical Implementation Rules
 
-- Il contratto vincolante di implementazione è lo **spine** (AD-1…AD-21 + Consistency Conventions): naming di dominio in italiano verbatim, PK UUIDv7, importi in centesimi interi, enum di stato con literal del Glossario, mutazioni solo nei service del modulo proprietario, eventi/job solo dal catalogo `core/events.py`. Le convenzioni operative per package sono in `backend/AGENTS.md` e `frontend/AGENTS.md`.
+- Il contratto vincolante di implementazione è lo **spine** (**tutti** gli invarianti `AD-n` elencati in `ARCHITECTURE-SPINE.md`, più le Consistency Conventions): naming di dominio in italiano verbatim, PK UUIDv7, importi in centesimi interi, enum di stato con literal del Glossario, mutazioni solo nei service del modulo proprietario, eventi/job solo dal catalogo `core/events.py`. Le convenzioni operative per package sono in `backend/AGENTS.md` e `frontend/AGENTS.md`.
 - **Segreti**: mai committare `.env` o credenziali; usare `.env.example`. Nessun dato reale di ospiti nei fixture/test.
 - **Memoria sidecar**: ogni agente legge la propria `_bmad/_memory/<ruolo>-sidecar/` all'avvio e la aggiorna **via PR** quando impara qualcosa di importante (vedi `_bmad/_memory/README.md`).
+
+### Convenzione di citazione degli ID (`AD-n`, `FR-n`, `NFR-n`, `UJ-n`)
+
+Nelle frasi **normative** — quelle che definiscono un contratto vincolante — si cita l'**insieme**, non l'intervallo: «tutti gli invarianti `AD-n` elencati in `ARCHITECTURE-SPINE.md`» (non «AD-1…AD-21»). Un intervallo scritto a mano è **una fotografia**: resta vero solo finché nessuno aggiunge un elemento, e quando succede la frase diventa falsa senza che nulla fallisca — la voce più recente ne resta silenziosamente esclusa. È la formulazione già adottata in `docs/epics.md`.
+
+Il numero resta ammesso **solo** dove è dichiaratamente una fotografia datata: frontmatter `depends_on`/`inputDocuments`, tabelle di copertura, documenti di stato — cioè dove chi legge sa già di avere davanti un'istantanea con una data accanto, non una definizione.
