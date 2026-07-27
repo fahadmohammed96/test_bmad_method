@@ -43,7 +43,12 @@ from app.core.config import get_settings
 from app.core.date_range import utcnow
 from app.core.events import catalog
 from app.core.jobs import Job, JobStatus, handlers, schedule
-from app.core.lock import NAMESPACE_SYNC_PERIODICO, blocca_per_id
+from app.core.lock import (
+    NAMESPACE_RETENTION_OSPITE,
+    NAMESPACE_SYNC_PERIODICO,
+    blocca_per_id,
+    blocca_singoletto,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -237,10 +242,26 @@ def _riprogramma_retention(db: Session) -> Job:
 def assicura_retention_periodica(db: Session) -> None:
     """Bootstrap idempotente del ciclo di retention: un solo job in coda.
 
-    Stessa forma di `assicura_purge_periodico` (Epic 1), deliberatamente
-    non fattorizzata: la duplicazione è nota ed è una proposta parcheggiata
-    per Fahad, non una decisione da prendere dentro questa Story.
+    `SELECT`-poi-`schedule`, cioè un **check-then-write**: senza
+    serializzazione due chiamanti concorrenti lasciano due cicli di retention
+    in coda, che è il doppio dei giri per sempre e nessun errore che lo dica.
+    Il rimedio è quello di `assicura_sync_periodico` — lock consultivo e non
+    `UNIQUE`, perché la condizione è un predicato su un sottoinsieme di una
+    coda generica del kernel e un indice parziale su `(job_type, payload->>…)`
+    legherebbe `core` alla forma del payload di un dominio (AD-1).
+
+    La differenza dal poller: questo ciclo è un **singoletto** — uno per tutto
+    il sistema, non uno per Feed — quindi la chiave del lock è costante e a
+    distinguerlo è il namespace (`blocca_singoletto`).
+
+    Stessa forma di `identity/jobs.py::assicura_purge_periodico` e di
+    `core/manutenzione.py::assicura_purge_job_periodico`, deliberatamente non
+    fattorizzata: la duplicazione è nota, è alla quarta occorrenza, ed è una
+    proposta aperta per Fahad — non una decisione da prendere qui.
+
+    Il test di gara è `tests/test_gara_bootstrap_singoletti.py`.
     """
+    blocca_singoletto(db, NAMESPACE_RETENTION_OSPITE)
     gia_in_coda = db.scalars(
         select(Job.id)
         .where(

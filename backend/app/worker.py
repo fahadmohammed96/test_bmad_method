@@ -11,6 +11,7 @@ import logging
 # Import con effetto di registrazione: ogni modulo dichiara qui i propri
 # handler di job e i propri subscriber di eventi.
 from app.calendario import jobs as calendario_jobs
+from app.core import manutenzione as core_manutenzione
 from app.core.db import get_sessionmaker
 from app.core.worker import main as ciclo_worker
 from app.identity import jobs as identity_jobs  # noqa: F401
@@ -29,6 +30,7 @@ def bootstrap_job_periodici() -> None:
         identity_jobs.assicura_purge_periodico(db)
         calendario_jobs.bootstrap_sync_periodico(db)
         calendario_jobs.assicura_retention_periodica(db)
+        core_manutenzione.assicura_purge_job_periodico(db)
         db.commit()
 
 
