@@ -1,6 +1,6 @@
-"""Entità del modulo `calendario` (AD-4, AD-18, AD-19, AD-20).
+"""Entità del modulo `calendario` (AD-4, AD-18, AD-19, AD-20, AD-21).
 
-Tre tabelle, tutte tenant-owned (AD-2):
+Quattro tabelle, tutte tenant-owned (AD-2):
 
 - `feed_ical` — il collegamento fra una Struttura e l'URL di export di un
   Canale. L'URL è input non fidato (NFR-17): qui si conserva, non si fida.
@@ -11,6 +11,8 @@ Tre tabelle, tutte tenant-owned (AD-2):
 - `prenotazione` — chiave naturale `(feed_id, ical_uid)` imposta da un
   UNIQUE del database, non da un controllo applicativo: sotto concorrenza
   a decidere deve essere il vincolo (A3-1).
+- `ospite` — anagrafica dell'Ospite (AD-21): contatti facoltativi, mai
+  dedotti, con retention per AZZERAMENTO dei campi.
 
 Nessuna di queste righe si cancella mai: la guardia
 `tests/test_append_preserving_convention.py` (GS-6) lo impone.
@@ -26,10 +28,12 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -240,8 +244,93 @@ class Prenotazione(Base):
     aggiornata_il: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
+    # Istante in cui la Prenotazione è USCITA da `attiva` (AD-19), `NULL`
+    # finché è attiva. Non è `aggiornata_il`, che avanza a ogni sync anche
+    # senza cambio di stato: qui serve una data che non si muove più.
+    #
+    # Esiste perché AD-21 fa decorrere la retention dell'anagrafica Ospite
+    # dal `check_out` «o dall'uscita dallo stato `attiva` se precedente». Una
+    # Prenotazione cancellata sei mesi prima dell'arrivo ha contatti da
+    # dimenticare subito, non fra sei mesi più la retention: senza questa
+    # colonna la decorrenza anticipata non è calcolabile e la metà «se
+    # precedente» dell'invariante resterebbe scritta e non applicata.
+    cessata_il: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     @property
     def soggiorno(self) -> DateRange:
         """Intervallo semiaperto [check_in, check_out) (AD-3)."""
         return DateRange(check_in=self.check_in, check_out=self.check_out)
+
+
+class Ospite(Base):
+    """Anagrafica Ospite (AD-21, decisione MYL-40 → PRD §14.2).
+
+    Quattro proprietà la definiscono, e nessuna è negoziabile:
+
+    1. **Tenant-owned** — `host_id` NOT NULL sotto la guardia strutturale
+       (AD-2, AR-4). Non è un dato di riferimento e non entra in nessuna
+       allowlist.
+    2. **Minimizzata** — `nome`, `email`, `telefono` sono TUTTI nullable e
+       mai obbligatori. Si scrive solo ciò che il Feed fornisce
+       esplicitamente o che l'Host inserisce volontariamente (Story 2.4):
+       nessun valore dedotto. In particolare il `sommario` del VEVENT resta
+       testo opaco della Prenotazione e **non viene mai promosso a `nome`**
+       — è la ragione per cui la Story 2.1 ha deliberatamente rinviato
+       questa tabella, e `tests/test_calendario_ospite.py` la pinna.
+    3. **Senza documenti d'identità** — quei campi vivono SOLO in
+       `ospite_documento` (Epic 3, AD-11), con cifratura e retention
+       proprie. Qui non c'è e non deve esserci nulla del genere.
+    4. **Con retention per AZZERAMENTO** — alla scadenza si azzerano i tre
+       campi personali; la riga resta, con `anonimizzato_il` a farne
+       evidenza. Non è mai una `DELETE` (AD-20, GS-6).
+
+    Una Prenotazione può registrare più Ospiti (ERD: `PRENOTAZIONE ||--o{
+    OSPITE`); al più uno è `principale`, ed è quello che la griglia mostra.
+    """
+
+    __tablename__ = "ospite"
+    __table_args__ = (
+        # Un solo Ospite principale per Prenotazione, imposto dal DATABASE:
+        # «quello indicato dall'Host» è un'identità, e con due righe marcate
+        # la griglia sceglierebbe a caso quale nome mostrare. Indice UNIQUE
+        # PARZIALE perché il vincolo riguarda il sottoinsieme `principale`,
+        # non tutte le righe.
+        Index(
+            "uq_ospite_principale_per_prenotazione",
+            "prenotazione_id",
+            unique=True,
+            postgresql_where=text("principale"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    host_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("host.id"), nullable=False, index=True
+    )
+    prenotazione_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("prenotazione.id"), nullable=False, index=True
+    )
+    principale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    nome: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    creato_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    aggiornato_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    # Evidenza dell'azzeramento (AD-21, NFR-15): senza, una riga con i campi
+    # a `NULL` perché scaduta e una che non ha mai avuto contatti sono
+    # indistinguibili — e la prima è un adempimento eseguito, che va potuto
+    # dimostrare. È anche ciò che rende l'handler idempotente per
+    # costruzione: una riga già azzerata non rientra più nella selezione.
+    anonimizzato_il: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    @property
+    def ha_contatti(self) -> bool:
+        return any((self.nome, self.email, self.telefono))

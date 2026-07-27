@@ -24,7 +24,7 @@ SAVEPOINT (G-1) e un `commit` interno lo scavalcherebbe.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ from app.calendario.models import (
     CategoriaErroreSync,
     EsitoSyncRun,
     FeedIcal,
+    Ospite,
     Prenotazione,
     StatoPrenotazione,
     SyncRun,
@@ -45,6 +46,7 @@ from app.calendario.normalizzazione import (
 )
 from app.calendario.repository import (
     FeedIcalRepository,
+    OspiteRepository,
     PrenotazioneRepository,
     SyncRunRepository,
 )
@@ -267,6 +269,247 @@ def stato_del_feed(db: Session, host_id: uuid.UUID, feed: FeedIcal) -> StatoFeed
         ),
         eventi_ricorrenti_non_espansi=(
             0 if riconciliato is None else riconciliato.eventi_ricorrenti_non_espansi
+        ),
+    )
+
+
+# ------------------------------------------------ anagrafica Ospite (AD-21)
+
+
+class PrenotazioneNonTrovataError(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class DatiOspite:
+    """Ciò che si può sapere di un Ospite, e nulla di più (AD-21, NFR-11).
+
+    Tre campi, tutti facoltativi. Non esiste un costruttore che ne richieda
+    uno, e non esiste un percorso che li ricavi da altro: `sommario` è
+    testo opaco del portale e resta sulla Prenotazione. Se l'unica cosa che
+    si sa è che c'è qualcuno, si registra un Ospite senza contatti — che è
+    un'informazione, non un errore.
+
+    Nessun campo di documento d'identità: quelli vivono solo in
+    `ospite_documento` (Epic 3, AD-11), con cifratura e retention proprie.
+    """
+
+    nome: str | None = None
+    email: str | None = None
+    telefono: str | None = None
+    principale: bool = False
+
+
+def registra_ospite(
+    db: Session,
+    host_id: uuid.UUID,
+    prenotazione_id: uuid.UUID,
+    dati: DatiOspite,
+) -> Ospite:
+    """Scrive un Ospite sull'anagrafica. `calendario` è l'unico scrittore (AD-18).
+
+    Non fa `commit`: la transazione è del chiamante, come ovunque sul
+    percorso dei job. La Prenotazione si verifica prima, e con l'`host_id`
+    della sessione: un Ospite appeso alla Prenotazione di un altro Host
+    sarebbe una fuga scritta a mano (AD-2, NFR-14).
+    """
+    prenotazione = PrenotazioneRepository(db).by_id(host_id, prenotazione_id)
+    if prenotazione is None:
+        raise PrenotazioneNonTrovataError()
+    return OspiteRepository(db).add(
+        host_id,
+        Ospite(
+            prenotazione_id=prenotazione_id,
+            nome=dati.nome,
+            email=dati.email,
+            telefono=dati.telefono,
+            principale=dati.principale,
+        ),
+    )
+
+
+def ospiti_della_prenotazione(
+    db: Session, host_id: uuid.UUID, prenotazione_id: uuid.UUID
+) -> list[Ospite]:
+    """Lettura dell'anagrafica per gli altri moduli (AD-18).
+
+    Epic 3 (Alloggiati) ed Epic 5 (Messaggi) leggono da qui e mai dalle
+    tabelle: è l'unico punto in cui la proprietà dell'entità resta
+    verificabile invece di essere una raccomandazione.
+    """
+    return OspiteRepository(db).della_prenotazione(host_id, prenotazione_id)
+
+
+def _principale(ospiti: list[Ospite]) -> Ospite | None:
+    """L'Ospite che la griglia mostra: quello indicato, o l'unico noto.
+
+    Con più Ospiti e nessuno indicato non se ne elegge uno d'ufficio: il
+    primo in ordine di inserimento non è «il principale», è il primo, e
+    presentarlo come tale sarebbe un'identità dedotta — la stessa cosa che
+    l'invariante vieta di fare col `sommario`. In quel caso la griglia dice
+    che l'Ospite non è indicato e mostra quanti sono.
+    """
+    indicato = [ospite for ospite in ospiti if ospite.principale]
+    if indicato:
+        return indicato[0]
+    return ospiti[0] if len(ospiti) == 1 else None
+
+
+# --------------------------------------------- calendario unificato (FR-4)
+
+
+@dataclass(frozen=True, slots=True)
+class VoceCalendario:
+    """Una Prenotazione con ciò che serve a mostrarla, già derivato."""
+
+    prenotazione: Prenotazione
+    ospite_principale: str | None
+    altri_ospiti: int
+
+
+@dataclass(frozen=True, slots=True)
+class StrutturaDelCalendario:
+    """Id e nome di una Struttura, copiati al confine fra i moduli.
+
+    `calendario` non tipizza nulla sull'entità di un altro modulo: legge dal
+    suo service e tiene ciò che gli serve. Portarsi dietro l'oggetto
+    `Struttura` significherebbe che una colonna aggiunta in `strutture`
+    arriva fino alla risposta del Calendario senza che nessuno l'abbia
+    deciso (AD-1, AD-18).
+    """
+
+    id: uuid.UUID
+    nome: str
+
+
+@dataclass(frozen=True, slots=True)
+class Calendario:
+    da: date
+    a: date
+    stato: StatoSincronizzazione
+    ultimo_sync_riuscito_il: datetime | None
+    feed_collegati: int
+    feed_mai_sincronizzati: int
+    feed_in_errore: int
+    strutture: list[StrutturaDelCalendario]
+    voci: list[VoceCalendario]
+
+
+# Precedenza fra gli stati di sync dei Feed aggregati: il peggiore vince.
+# Un solo portale in errore rende la vista incompleta, e l'aggregato deve
+# dirlo — non annegarlo nella media degli altri.
+_PEGGIORE = (
+    StatoSincronizzazione.FALLITO,
+    StatoSincronizzazione.IN_CORSO,
+    StatoSincronizzazione.MAI_SINCRONIZZATO,
+    StatoSincronizzazione.RIUSCITO,
+)
+
+
+def calendario(
+    db: Session,
+    host_id: uuid.UUID,
+    *,
+    da: date,
+    a: date,
+    struttura_id: uuid.UUID | None = None,
+) -> Calendario:
+    """La griglia unificata di un periodo (FR-4, UX-DR1, NFR-2, AD-14).
+
+    Un solo perimetro governa tutto: se `struttura_id` è dato, la Struttura
+    si legge dal service di `strutture` — che solleva per una Struttura di
+    un altro Host — e Prenotazioni e Feed si filtrano su di essa. La vista
+    aggregata e la singola Struttura sono la stessa lettura con un filtro
+    diverso, che è la ragione per cui il selettore non cambia schermata.
+
+    Ogni valore che la griglia mostrerà è derivato QUI: notti, Ospite
+    principale, conteggio degli altri, stato di sincronizzazione. Il
+    frontend li presenta e non li ricalcola (AD-14) — il modo realistico in
+    cui quell'invariante si perde è che il client rifaccia un conto «uguale»
+    con la timezone del browser, e allora smettono di coincidere il giorno
+    del cambio d'ora.
+    """
+    if struttura_id is not None:
+        elencate = [strutture_service.leggi_struttura(db, host_id, struttura_id)]
+    else:
+        elencate = strutture_service.lista_strutture(db, host_id)
+    strutture = [
+        StrutturaDelCalendario(id=riga.id, nome=riga.nome) for riga in elencate
+    ]
+
+    prenotazioni = PrenotazioneRepository(db).nel_periodo(
+        host_id, da=da, a=a, struttura_id=struttura_id
+    )
+    ospiti = OspiteRepository(db).per_prenotazioni(
+        host_id, [riga.id for riga in prenotazioni]
+    )
+    voci = []
+    for riga in prenotazioni:
+        registrati = ospiti.get(riga.id, [])
+        principale = _principale(registrati)
+        voci.append(
+            VoceCalendario(
+                prenotazione=riga,
+                ospite_principale=None if principale is None else principale.nome,
+                altri_ospiti=len(registrati) - (0 if principale is None else 1),
+            )
+        )
+
+    stato = _stato_aggregato(db, host_id, struttura_id=struttura_id)
+    return Calendario(
+        da=da,
+        a=a,
+        stato=stato.stato,
+        ultimo_sync_riuscito_il=stato.ultimo_sync_riuscito_il,
+        feed_collegati=stato.collegati,
+        feed_mai_sincronizzati=stato.mai_sincronizzati,
+        feed_in_errore=stato.in_errore,
+        strutture=strutture,
+        voci=voci,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class StatoAggregato:
+    stato: StatoSincronizzazione
+    ultimo_sync_riuscito_il: datetime | None
+    collegati: int
+    mai_sincronizzati: int
+    in_errore: int
+
+
+def _stato_aggregato(
+    db: Session, host_id: uuid.UUID, *, struttura_id: uuid.UUID | None
+) -> StatoAggregato:
+    """La verità temporale di una vista che aggrega più Feed (NFR-2, UX-DR6).
+
+    Il timestamp è il **minimo** fra gli ultimi sync riusciti, e diventa
+    `None` appena un Feed non ne ha mai avuto uno: la vista non è più
+    fresca del suo Feed più vecchio, e con un Feed muto non esiste un
+    orario che descriva l'insieme.
+    """
+    feed = FeedIcalRepository(db).dell_host(host_id, struttura_id=struttura_id)
+    if not feed:
+        return StatoAggregato(
+            stato=StatoSincronizzazione.MAI_SINCRONIZZATO,
+            ultimo_sync_riuscito_il=None,
+            collegati=0,
+            mai_sincronizzati=0,
+            in_errore=0,
+        )
+
+    stati = [stato_del_feed(db, host_id, riga) for riga in feed]
+    orari = [riga.ultimo_sync_riuscito_il for riga in stati]
+    return StatoAggregato(
+        stato=min(
+            (riga.stato for riga in stati),
+            key=_PEGGIORE.index,
+        ),
+        ultimo_sync_riuscito_il=None if None in orari else min(orari),  # type: ignore[type-var]
+        collegati=len(feed),
+        mai_sincronizzati=sum(1 for orario in orari if orario is None),
+        in_errore=sum(
+            1 for riga in stati if riga.stato is StatoSincronizzazione.FALLITO
         ),
     )
 
@@ -566,17 +809,25 @@ def _upsert(
 
 
 __all__ = [
+    "Calendario",
     "DatiFeed",
+    "DatiOspite",
     "EsitoImport",
     "FeedNonTrovatoError",
+    "PrenotazioneNonTrovataError",
     "StatoFeed",
+    "StrutturaDelCalendario",
     "UrlFeedNonValidoError",
+    "VoceCalendario",
+    "calendario",
     "client_di_produzione",
     "collega_feed",
     "esegui_sync",
     "leggi_feed",
     "lista_feed",
+    "ospiti_della_prenotazione",
     "prenotazioni_del_feed",
+    "registra_ospite",
     "stato_del_feed",
     "ultimo_run",
     "ultimo_run_riuscito",

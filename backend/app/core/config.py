@@ -7,6 +7,7 @@ I parametri normativi NON vivono qui: stanno nelle tabelle `config_normativa`
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,6 +88,29 @@ class Settings(BaseSettings):
     # (AR-10, NFR-1). Mai hardcoded: la soglia giusta dipende
     # dall'intervallo, e i due parametri si tarano insieme.
     feed_sync_fallimenti_per_alert: int = 3
+
+    # Retention dell'anagrafica Ospite (AD-21, NFR-12). Il PERIODO è un
+    # parametro, mai una costante: il valore qui è **provvisorio** in attesa
+    # dell'esito di R-5, che deve qualificare la base giuridica dei contatti
+    # — dati personali di TERZI, non del cliente. 90 giorni è il valore
+    # proposto nel Deferred dello spine, dello stesso ordine del bound M di
+    # G2-D. Alla scadenza si azzerano i campi, mai si cancella una riga.
+    #
+    # La DECORRENZA non è qui e non è configurabile: vive in AD-21
+    # (`check_out`, o l'uscita da `attiva` se precedente) ed è implementata
+    # in `app/calendario/retention.py`.
+    #
+    # `gt=0` sui due parametri, e non solo nel codice che li consuma: un
+    # `HOSTPILOT_OSPITE_RETENTION_GIORNI=0` azzererebbe i contatti della
+    # Prenotazione in corso, e un intervallo di 0 minuti riaccoderebbe il job
+    # già scaduto consumando la coda di tutti i tenant. `retention.py`
+    # dichiara che un parametro sbagliato «deve fermare l'avvio»: la
+    # validazione va dove l'avvio la incontra, cioè qui, altrimenti
+    # `import app.main` riesce e il difetto si manifesta a regime.
+    ospite_retention_giorni: int = Field(default=90, gt=0)
+    # Ogni quanto gira il job di azzeramento. Distinto dal periodo: è la
+    # granularità con cui si esegue l'adempimento, non la sua scadenza.
+    ospite_retention_intervallo_minuti: int = Field(default=60, gt=0)
 
 
 @lru_cache

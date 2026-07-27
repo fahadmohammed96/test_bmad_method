@@ -69,3 +69,71 @@ export const calendarioCopy = {
       ? "1 evento ricorrente è stato importato come singola prenotazione."
       : `${quanti} eventi ricorrenti sono stati importati come singole prenotazioni.`,
 } as const;
+
+/** Copy it-IT della griglia unificata (FR-4, UJ-1, UX-DR1, UX-DR6). */
+export const grigliaCopy = {
+  titolo: "Calendario",
+  sottotitolo:
+    "Le prenotazioni di tutte le tue Strutture e di tutti i portali, in un'unica griglia.",
+
+  vistaMese: "Mese",
+  vistaSettimana: "Settimana",
+  vistaEtichetta: "Vista",
+  periodoPrecedente: "Periodo precedente",
+  periodoSuccessivo: "Periodo successivo",
+  oggi: "Oggi",
+
+  intestazioneStruttura: "Struttura",
+  descrizioneTabella:
+    "Prenotazioni per Struttura e per notte: ogni colonna è una notte del periodo.",
+  // Su schermo stretto la griglia scorre in orizzontale: la regione deve
+  // essere raggiungibile da tastiera e avere un nome, altrimenti chi non usa
+  // il mouse non può vedere la seconda metà del mese (NFR-8, UX-DR10).
+  regioneScorrevole: "Griglia del calendario, scorrevole in orizzontale",
+
+  caricamento: "Caricamento del calendario…",
+  // Distinto da «non ci sono prenotazioni»: «non riusciamo a leggerle» è
+  // un'affermazione diversa, e confonderle fa dire al prodotto una cosa
+  // falsa sullo stato del calendario dell'Host.
+  nonCaricato:
+    "Non riusciamo a caricare il calendario. Riprova fra poco: le tue prenotazioni non sono state toccate.",
+  nessunaPrenotazione: "Nessuna prenotazione in questo periodo.",
+  nessunaStruttura:
+    "Registra una Struttura per vedere qui le sue prenotazioni.",
+
+  // AD-21 / NFR-11: mai un segnaposto che somigli a un nome. Il sistema dice
+  // che non lo sa, e una Prenotazione senza Ospite resta valida.
+  ospiteNonIndicato: "Ospite non indicato",
+  altriOspiti: (quanti: number) =>
+    quanti === 1 ? "e un altro Ospite" : `e altri ${quanti} Ospiti`,
+  notti: (quante: number) =>
+    quante === 1 ? "1 notte" : `${quante} notti`,
+
+  // Trattamento delle Prenotazioni non più attive (AD-19, AD-20): restano
+  // visibili con la loro etichetta. Farle sparire senza traccia
+  // contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host, che
+  // quella prenotazione l'ha vista ieri.
+  stato: {
+    attiva: "Attiva",
+    cancellata: "Cancellata",
+    rimossa_dal_feed: "Non più nel portale",
+  },
+
+  // UX-DR6 / NFR-2: etichetta PERSISTENTE, mai un tooltip da scoprire.
+  aggiornatoAlle: (orario: string) => `Dati aggiornati alle ${orario}`,
+  // Con più portali la freschezza della vista è quella del più vecchio: si
+  // dice, invece di mostrare l'orario più recente e lasciar credere che
+  // valga per tutto.
+  aggiornatoAlleDiPiuFeed: (orario: string, quanti: number) =>
+    `Dati aggiornati alle ${orario} — è l'orario del più vecchio fra ${quanti} calendari collegati`,
+  nessunFeedCollegato:
+    "Nessun calendario collegato: qui compaiono solo le prenotazioni inserite a mano.",
+  maiSincronizzato: (quanti: number) =>
+    quanti === 1
+      ? "Non abbiamo ancora ricevuto le prenotazioni di 1 calendario collegato: la griglia potrebbe essere incompleta."
+      : `Non abbiamo ancora ricevuto le prenotazioni di ${quanti} calendari collegati: la griglia potrebbe essere incompleta.`,
+  feedInErrore: (quanti: number) =>
+    quanti === 1
+      ? "1 calendario non si sincronizza: quello che vedi potrebbe non essere aggiornato."
+      : `${quanti} calendari non si sincronizzano: quello che vedi potrebbe non essere aggiornato.`,
+} as const;

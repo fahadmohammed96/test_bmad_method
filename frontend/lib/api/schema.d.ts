@@ -55,6 +55,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/calendario": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Griglia
+         * @description Il calendario unificato di un periodo (FR-4, UJ-1).
+         *
+         *     `struttura_id` assente = vista aggregata su tutte le Strutture; presente
+         *     = una sola Struttura. È lo stesso endpoint, ed è il motivo per cui il
+         *     selettore di UX-DR1 filtra senza cambiare schermata: cambia un parametro
+         *     di query, non la superficie.
+         */
+        get: operations["griglia_api_v1_calendario_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/comuni": {
         parameters: {
             query?: never;
@@ -421,6 +446,55 @@ export interface components {
             promemoria_manuale: boolean;
             stato: components["schemas"]["StatoConfigurazione"];
         };
+        /**
+         * CalendarioOutput
+         * @description La griglia unificata: Prenotazioni di tutte le Strutture e i Canali.
+         *
+         *     Envelope, e per la ragione di sempre: UX-DR6 vuole «dati aggiornati
+         *     alle HH:MM» su ogni superficie che mostra dati da Feed, e questa li
+         *     mostra da PIÙ Feed insieme.
+         *
+         *     `ultimo_sync_riuscito_il` è il **meno recente** fra i Feed del
+         *     perimetro, non il più recente: la freschezza di una vista aggregata è
+         *     quella della sua fonte più vecchia. Prendere il massimo direbbe
+         *     all'Host che il calendario è aggiornato a due minuti fa mentre uno dei
+         *     due portali non risponde da tre giorni — la falsa sincronia di NFR-2
+         *     con l'aggravante di essere aritmeticamente vera.
+         *
+         *     È `None` appena un Feed del perimetro non ha MAI avuto un sync
+         *     riuscito: lì non esiste un orario da mostrare, e il sistema dice «non
+         *     lo so» invece di mostrarne uno che parla solo degli altri Feed.
+         *
+         *     I tre conteggi esistono perché «nessun Feed collegato», «un Feed che
+         *     non ha mai importato» e «un Feed in errore» arrivano altrimenti alla
+         *     superficie con lo stesso aspetto — timestamp assente — e sono
+         *     affermazioni diverse.
+         */
+        CalendarioOutput: {
+            /**
+             * A
+             * Format: date
+             */
+            a: string;
+            /**
+             * Da
+             * Format: date
+             */
+            da: string;
+            /** Feed Collegati */
+            feed_collegati: number;
+            /** Feed In Errore */
+            feed_in_errore: number;
+            /** Feed Mai Sincronizzati */
+            feed_mai_sincronizzati: number;
+            stato_sync: components["schemas"]["StatoSincronizzazione"];
+            /** Strutture */
+            strutture: components["schemas"]["StrutturaDelCalendarioOutput"][];
+            /** Ultimo Sync Riuscito Il */
+            ultimo_sync_riuscito_il: string | null;
+            /** Voci */
+            voci: components["schemas"]["VoceCalendarioOutput"][];
+        };
         /** CambioPasswordInput */
         CambioPasswordInput: {
             /** Password Attuale */
@@ -763,6 +837,24 @@ export interface components {
          * @enum {string}
          */
         StatoStruttura: "attiva" | "archiviata";
+        /**
+         * StrutturaDelCalendarioOutput
+         * @description Le Strutture del perimetro, per etichettare le righe della griglia.
+         *
+         *     Viaggiano dentro la risposta del Calendario e non da una seconda
+         *     chiamata: la griglia aggrega più Strutture (FR-4) e senza i nomi
+         *     mostrerebbe degli UUID, oppure il client dovrebbe correlare a mano due
+         *     letture che possono divergere.
+         */
+        StrutturaDelCalendarioOutput: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nome */
+            nome: string;
+        };
         /** StrutturaInput */
         StrutturaInput: {
             /** Cin */
@@ -824,6 +916,56 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VoceCalendarioOutput
+         * @description Una Prenotazione come la griglia la mostra (FR-4).
+         *
+         *     Porta Canale d'origine, Struttura, date **e Ospite**. Tre valori sono
+         *     derivati dal server e il frontend li presenta senza ricalcolarli
+         *     (AD-14): `notti`, che è la lunghezza dell'intervallo semiaperto
+         *     `[check_in, check_out)` di AD-3; `ospite_principale`, che è la scelta
+         *     fra più Ospiti registrati; `altri_ospiti`, il loro conteggio.
+         *
+         *     `ospite_principale` è `None` quando l'Ospite non è noto — e non è un
+         *     errore: una Prenotazione senza Ospite resta valida, e la superficie
+         *     scrive «Ospite non indicato», mai un segnaposto che somigli a un nome
+         *     (NFR-11, AD-21).
+         *
+         *     `sommario` resta il testo OPACO del portale, dove il portale l'ha
+         *     scritto: non è il nome dell'Ospite e non lo diventa passando di qui.
+         */
+        VoceCalendarioOutput: {
+            /** Altri Ospiti */
+            altri_ospiti: number;
+            canale: components["schemas"]["CanaleFeed"];
+            /**
+             * Check In
+             * Format: date
+             */
+            check_in: string;
+            /**
+             * Check Out
+             * Format: date
+             */
+            check_out: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Notti */
+            notti: number;
+            /** Ospite Principale */
+            ospite_principale: string | null;
+            /** Sommario */
+            sommario: string | null;
+            stato: components["schemas"]["StatoPrenotazione"];
+            /**
+             * Struttura Id
+             * Format: uuid
+             */
+            struttura_id: string;
         };
     };
     responses: never;
@@ -905,6 +1047,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    griglia_api_v1_calendario_get: {
+        parameters: {
+            query: {
+                da: string;
+                a: string;
+                struttura_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarioOutput"];
                 };
             };
             /** @description Validation Error */

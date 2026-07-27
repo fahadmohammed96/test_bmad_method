@@ -362,7 +362,7 @@ class TestBootstrapIdempotente:
         assert TIPO_JOB_PURGE_SESSIONI in tipi
         assert TIPO_JOB_SYNC_PERIODICO in tipi
 
-    def test_l_ENTRYPOINT_del_worker_accoda_entrambi_i_cicli(
+    def test_l_ENTRYPOINT_del_worker_accoda_tutti_i_cicli(
         self, db_session: Session, feed_pronto: FeedIcal
     ) -> None:
         """P1-4: `app.worker.bootstrap_job_periodici` eseguito davvero.
@@ -378,6 +378,7 @@ class TestBootstrapIdempotente:
         silenzio. E' la cosa che questa Story esiste per impedire.
         """
         from app import worker
+        from app.calendario.jobs import TIPO_JOB_RETENTION_OSPITE
         from app.identity.jobs import TIPO_JOB_PURGE_SESSIONI
 
         for job in db_session.scalars(select(Job)):
@@ -395,8 +396,15 @@ class TestBootstrapIdempotente:
                 select(Job).where(Job.status == JobStatus.PENDING)
             )
         ]
+        # Uguaglianza esatta, non contenimento: un ciclo periodico nuovo che
+        # nessuno accoda all'avvio è la stessa assenza silenziosa, e qui deve
+        # far fallire chi lo aggiunge senza toccare l'entrypoint.
         assert sorted(tipi) == sorted(
-            [TIPO_JOB_PURGE_SESSIONI, TIPO_JOB_SYNC_PERIODICO]
+            [
+                TIPO_JOB_PURGE_SESSIONI,
+                TIPO_JOB_SYNC_PERIODICO,
+                TIPO_JOB_RETENTION_OSPITE,
+            ]
         )
 
 

@@ -89,6 +89,75 @@
         "title": "AreaTassaOutput",
         "type": "object"
       },
+      "CalendarioOutput": {
+        "description": "La griglia unificata: Prenotazioni di tutte le Strutture e i Canali.\n\nEnvelope, e per la ragione di sempre: UX-DR6 vuole «dati aggiornati\nalle HH:MM» su ogni superficie che mostra dati da Feed, e questa li\nmostra da PIÙ Feed insieme.\n\n`ultimo_sync_riuscito_il` è il **meno recente** fra i Feed del\nperimetro, non il più recente: la freschezza di una vista aggregata è\nquella della sua fonte più vecchia. Prendere il massimo direbbe\nall'Host che il calendario è aggiornato a due minuti fa mentre uno dei\ndue portali non risponde da tre giorni — la falsa sincronia di NFR-2\ncon l'aggravante di essere aritmeticamente vera.\n\nÈ `None` appena un Feed del perimetro non ha MAI avuto un sync\nriuscito: lì non esiste un orario da mostrare, e il sistema dice «non\nlo so» invece di mostrarne uno che parla solo degli altri Feed.\n\nI tre conteggi esistono perché «nessun Feed collegato», «un Feed che\nnon ha mai importato» e «un Feed in errore» arrivano altrimenti alla\nsuperficie con lo stesso aspetto — timestamp assente — e sono\naffermazioni diverse.",
+        "properties": {
+          "a": {
+            "format": "date",
+            "title": "A",
+            "type": "string"
+          },
+          "da": {
+            "format": "date",
+            "title": "Da",
+            "type": "string"
+          },
+          "feed_collegati": {
+            "title": "Feed Collegati",
+            "type": "integer"
+          },
+          "feed_in_errore": {
+            "title": "Feed In Errore",
+            "type": "integer"
+          },
+          "feed_mai_sincronizzati": {
+            "title": "Feed Mai Sincronizzati",
+            "type": "integer"
+          },
+          "stato_sync": {
+            "$ref": "#/components/schemas/StatoSincronizzazione"
+          },
+          "strutture": {
+            "items": {
+              "$ref": "#/components/schemas/StrutturaDelCalendarioOutput"
+            },
+            "title": "Strutture",
+            "type": "array"
+          },
+          "ultimo_sync_riuscito_il": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Sync Riuscito Il"
+          },
+          "voci": {
+            "items": {
+              "$ref": "#/components/schemas/VoceCalendarioOutput"
+            },
+            "title": "Voci",
+            "type": "array"
+          }
+        },
+        "required": [
+          "da",
+          "a",
+          "stato_sync",
+          "ultimo_sync_riuscito_il",
+          "feed_collegati",
+          "feed_mai_sincronizzati",
+          "feed_in_errore",
+          "strutture",
+          "voci"
+        ],
+        "title": "CalendarioOutput",
+        "type": "object"
+      },
       "CambioPasswordInput": {
         "properties": {
           "password_attuale": {
@@ -916,6 +985,26 @@
         "title": "StatoStruttura",
         "type": "string"
       },
+      "StrutturaDelCalendarioOutput": {
+        "description": "Le Strutture del perimetro, per etichettare le righe della griglia.\n\nViaggiano dentro la risposta del Calendario e non da una seconda\nchiamata: la griglia aggrega più Strutture (FR-4) e senza i nomi\nmostrerebbe degli UUID, oppure il client dovrebbe correlare a mano due\nletture che possono divergere.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nome": {
+            "title": "Nome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "nome"
+        ],
+        "title": "StrutturaDelCalendarioOutput",
+        "type": "object"
+      },
       "StrutturaInput": {
         "properties": {
           "cin": {
@@ -1152,6 +1241,81 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "VoceCalendarioOutput": {
+        "description": "Una Prenotazione come la griglia la mostra (FR-4).\n\nPorta Canale d'origine, Struttura, date **e Ospite**. Tre valori sono\nderivati dal server e il frontend li presenta senza ricalcolarli\n(AD-14): `notti`, che è la lunghezza dell'intervallo semiaperto\n`[check_in, check_out)` di AD-3; `ospite_principale`, che è la scelta\nfra più Ospiti registrati; `altri_ospiti`, il loro conteggio.\n\n`ospite_principale` è `None` quando l'Ospite non è noto — e non è un\nerrore: una Prenotazione senza Ospite resta valida, e la superficie\nscrive «Ospite non indicato», mai un segnaposto che somigli a un nome\n(NFR-11, AD-21).\n\n`sommario` resta il testo OPACO del portale, dove il portale l'ha\nscritto: non è il nome dell'Ospite e non lo diventa passando di qui.",
+        "properties": {
+          "altri_ospiti": {
+            "title": "Altri Ospiti",
+            "type": "integer"
+          },
+          "canale": {
+            "$ref": "#/components/schemas/CanaleFeed"
+          },
+          "check_in": {
+            "format": "date",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notti": {
+            "title": "Notti",
+            "type": "integer"
+          },
+          "ospite_principale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ospite Principale"
+          },
+          "sommario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sommario"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoPrenotazione"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "struttura_id",
+          "canale",
+          "check_in",
+          "check_out",
+          "notti",
+          "sommario",
+          "stato",
+          "ospite_principale",
+          "altri_ospiti"
+        ],
+        "title": "VoceCalendarioOutput",
+        "type": "object"
       }
     }
   },
@@ -1255,6 +1419,77 @@
         "summary": "Registrazione",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/api/v1/calendario": {
+      "get": {
+        "description": "Il calendario unificato di un periodo (FR-4, UJ-1).\n\n`struttura_id` assente = vista aggregata su tutte le Strutture; presente\n= una sola Struttura. È lo stesso endpoint, ed è il motivo per cui il\nselettore di UX-DR1 filtra senza cambiare schermata: cambia un parametro\ndi query, non la superficie.",
+        "operationId": "griglia_api_v1_calendario_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "da",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Da",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "A",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "struttura_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Struttura Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarioOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Griglia",
+        "tags": [
+          "calendario"
         ]
       }
     },

@@ -30,8 +30,13 @@ from app.calendario import schemas
 
 # Superfici che mostrano dati derivati da un Feed: DEVONO esporre la verità
 # temporale. `FeedIcalOutput` è lo stato del Feed stesso;
-# `PrenotazioniDelFeedOutput` è l'envelope delle Prenotazioni importate.
-SUPERFICI_CON_DATI_DA_FEED = frozenset({"FeedIcalOutput", "PrenotazioniDelFeedOutput"})
+# `PrenotazioniDelFeedOutput` è l'envelope delle Prenotazioni importate;
+# `CalendarioOutput` è la griglia unificata, che aggrega dati di PIÙ Feed —
+# ed è la superficie per cui questa guardia è stata scritta un Epic prima
+# che esistesse.
+SUPERFICI_CON_DATI_DA_FEED = frozenset(
+    {"FeedIcalOutput", "PrenotazioniDelFeedOutput", "CalendarioOutput"}
+)
 
 # Schemi che NON sono una superficie, con il motivo per cui non lo sono.
 # Il motivo è dato: un'esenzione senza motivo è un'esenzione che si allarga.
@@ -41,6 +46,15 @@ SUPERFICI_ESENTI = {
         "elemento dentro `PrenotazioniDelFeedOutput`, che porta il timestamp "
         "per l'intera risposta: ripeterlo su ogni riga direbbe la stessa cosa "
         "N volte e inviterebbe a mostrarlo dove non serve"
+    ),
+    "VoceCalendarioOutput": (
+        "elemento dentro `CalendarioOutput`, che porta il timestamp per "
+        "l'intera griglia: la freschezza è una proprietà della vista, non "
+        "della singola Prenotazione"
+    ),
+    "StrutturaDelCalendarioOutput": (
+        "etichetta di riga (id + nome della Struttura): non mostra alcun dato "
+        "derivato da un Feed"
     ),
 }
 

@@ -13,12 +13,21 @@ Comuni sono inventati.
 import ipaddress
 import uuid
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.calendario import service
-from app.calendario.models import CanaleFeed, FeedIcal, Prenotazione, SyncRun
+from app.calendario.models import (
+    CanaleFeed,
+    EsitoSyncRun,
+    FeedIcal,
+    Ospite,
+    Prenotazione,
+    StatoPrenotazione,
+    SyncRun,
+)
 from app.calendario.trasporto import ClientFeedHttp
 from app.calendario.uscita_rete import PoliticaUscitaRete
 from app.identity.models import Host
@@ -119,3 +128,88 @@ def sincronizza(db: Session, feed: FeedIcal, trasporto: ClientFeedHttp) -> SyncR
 
 def prenotazioni(db: Session, feed: FeedIcal) -> list[Prenotazione]:
     return service.prenotazioni_del_feed(db, feed.host_id, feed.id)
+
+
+def crea_sync_run(
+    db: Session,
+    feed: FeedIcal,
+    *,
+    concluso_il: datetime,
+    esito: EsitoSyncRun = EsitoSyncRun.RIUSCITO,
+) -> SyncRun:
+    """Esito di sync scritto a mano: qui interessa il TIMESTAMP, non il fetch.
+
+    Il `sync_run` è la sorgente unica di «dati aggiornati alle HH:MM»
+    (NFR-2): per provare l'aggregazione fra più Feed serve poter dire quando
+    ciascuno è andato a buon fine, e farlo passando dalla rete costerebbe un
+    server per ogni istante.
+    """
+    run = SyncRun(
+        host_id=feed.host_id,
+        feed_id=feed.id,
+        esito=esito,
+        iniziato_il=concluso_il,
+        concluso_il=concluso_il,
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
+def crea_prenotazione(
+    db: Session,
+    contesto: Contesto,
+    *,
+    check_in: date,
+    check_out: date,
+    struttura_id: uuid.UUID | None = None,
+    canale: CanaleFeed = CanaleFeed.ALTRO,
+    stato: StatoPrenotazione = StatoPrenotazione.ATTIVA,
+    cessata_il: datetime | None = None,
+    sommario: str | None = None,
+) -> Prenotazione:
+    """Prenotazione scritta direttamente: qui interessa lo STATO, non l'import.
+
+    Senza `feed_id`/`ical_uid`, come sarà una manuale della Story 2.4: il
+    UNIQUE `(feed_id, ical_uid)` non morde sui NULL, quindi più righe così
+    convivono senza collidere.
+    """
+    prenotazione = Prenotazione(
+        host_id=contesto.host_id,
+        struttura_id=struttura_id or contesto.struttura_id,
+        canale=canale,
+        check_in=check_in,
+        check_out=check_out,
+        stato=stato,
+        cessata_il=cessata_il,
+        sommario=sommario,
+    )
+    db.add(prenotazione)
+    db.flush()
+    return prenotazione
+
+
+def registra_ospite(
+    db: Session,
+    contesto: Contesto,
+    prenotazione: Prenotazione,
+    *,
+    nome: str | None = None,
+    email: str | None = None,
+    telefono: str | None = None,
+    principale: bool = False,
+) -> Ospite:
+    """Ospite scritto dal service, che è l'unico scrittore ammesso (AD-18).
+
+    I valori sono inventati e restano inventati: NFR-16 vieta dati reali di
+    Ospiti in fixture e test, e questa è la prima Story che ha una tabella
+    dove metterli.
+    """
+    return service.registra_ospite(
+        db,
+        contesto.host_id,
+        prenotazione.id,
+        service.DatiOspite(
+            nome=nome, email=email, telefono=telefono, principale=principale
+        ),
+    )
