@@ -421,13 +421,20 @@ def _azzera_su_richiesta(
     (AD-21) resta vera anche quando la procedura cambierà — il `sommario` è
     già la prova che cambia.
 
+    `esegui_su_richiesta` è quella procedura più un passo che il job non può
+    avere: il SIGILLO. Il job ripassa e compensa, la richiesta si evade una
+    volta sola — senza sigillo, un `sommario` vuoto al momento della richiesta
+    lasciava `anonimizzato_il` a `NULL` e il portale poteva ripubblicare il
+    nome di chi aveva chiesto la cancellazione.
+
     Nessun `try/except`: qui un fallimento NON è recuperabile e deve arrivare
     al chiamante. Il savepoint del job serve a non spegnere un ciclo
     periodico; una richiesta che fallisce in silenzio direbbe a chi l'ha fatta
-    che è stata evasa.
+    che è stata evasa. Un solo `commit`, con l'audit nella stessa transazione
+    delle UPDATE: «azzeramento senza evidenza» non è raggiungibile.
     """
     adesso = utcnow()
-    esito = azzeramento.esegui(db, selezione, adesso=adesso)
+    esito = azzeramento.esegui_su_richiesta(db, selezione, adesso=adesso)
     AzzeramentoAuditRepository(db).add(
         host_id,
         AzzeramentoAudit(

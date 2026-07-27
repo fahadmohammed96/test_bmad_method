@@ -30,7 +30,21 @@ from app.calendario.models import (
     Prenotazione,
 )
 from app.identity.service import HostNonTrovatoError
-from tests.calendario import Contesto, crea_contesto, crea_prenotazione, registra_ospite
+from tests.calendario import (
+    Contesto,
+    calendario,
+    collega,
+    crea_contesto,
+    crea_prenotazione,
+    prenotazioni,
+    registra_ospite,
+    sincronizza,
+    vevent,
+)
+from tests.calendario import (
+    client as client_feed,
+)
+from tests.server_feed import RispostaPreparata, ServerFeed
 
 ATTORE = "privacy@hostpilot.example"
 TOKEN = {"X-Admin-Token": "token-di-test-per-endpoint-interni"}
@@ -308,6 +322,233 @@ class TestLEvidenza:
         emesso = " ".join(str(valore) for valore in vars(righe[0]).values())
         assert "Ospite Inventato" not in emesso
         assert "ospite.inventato@example.com" not in emesso
+
+
+def _vevent_senza_sommario(uid: str, *, dal: str, al: str) -> str:
+    """VEVENT legale e SENZA `SUMMARY`: `normalizza` lo porta a `sommario=None`.
+
+    È lo stato in cui si trova una Prenotazione appena importata da un portale
+    che non ha ancora pubblicato il nome — e il momento in cui una richiesta
+    NFR-15 non trova nulla da azzerare sul `sommario`.
+    """
+    return (
+        "BEGIN:VEVENT\r\n"
+        f"UID:{uid}\r\n"
+        f"DTSTART;VALUE=DATE:{dal}\r\n"
+        f"DTEND;VALUE=DATE:{al}\r\n"
+        "END:VEVENT\r\n"
+    )
+
+
+class TestUnaRichiestaEvasaNonSiDisfa:
+    """P1 della cross-review sulla PR #45: la richiesta si evade UNA volta.
+
+    Il job periodico e la richiesta hanno bisogni opposti sullo stesso
+    predicato. Il job chiede «c'è qualcosa da azzerare?» e può permetterselo
+    perché **ripassa**: se il `sommario` rientra, il giro dopo lo ritoglie. La
+    richiesta no — si evade una volta sola, e su un soggiorno futuro il job
+    non passerà per anni.
+
+    Senza sigillo, la durabilità di una cancellazione GDPR dipenderebbe da
+    come stava per caso quel campo in quell'istante: `sommario` valorizzato al
+    momento della richiesta ⇒ `anonimizzato_il` marcato ⇒ la guardia
+    dell'upsert è armata e il nome non rientra; `sommario` vuoto ⇒ nessuna
+    riga toccata ⇒ nessuna evidenza ⇒ il portale lo ripubblica e il dato di
+    chi ha chiesto la cancellazione **rientra**.
+
+    Il rimedio sta SOLO sul percorso della richiesta: il filtro del job resta
+    sui campi (trappola 2), e `test_retention_sommario.py::
+    test_non_marca_come_anonimizzata_una_prenotazione_senza_sommario` è la
+    guardia che cade se qualcuno «unifica» le due discipline.
+    """
+
+    def _prenotazione_futura_senza_sommario(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ):
+        """Feed HTTP reale su loopback: la guardia vive nell'upsert del sync."""
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(
+                    _vevent_senza_sommario("uid-futuro", dal="20300601", al="20300605")
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+        sincronizza(db_session, feed, client_feed())
+        importata = prenotazioni(db_session, feed)[0]
+        assert importata.sommario is None
+        ospite = registra_ospite(
+            db_session,
+            contesto,
+            importata,
+            nome="Ospite Inventato",
+            email="ospite.inventato@example.com",
+            principale=True,
+        )
+        db_session.commit()
+        return feed, importata, ospite
+
+    def _il_portale_pubblica_il_nome(self, server_feed: ServerFeed) -> None:
+        server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(vevent("uid-futuro", dal="20300601", al="20300605"))
+            ),
+        )
+
+    def test_un_sync_successivo_non_riporta_il_nome_su_un_singolo_ospite(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        feed, importata, ospite = self._prenotazione_futura_senza_sommario(
+            db_session, contesto, server_feed
+        )
+
+        esito = service.azzera_ospite_su_richiesta(
+            db_session, contesto.host_id, ospite.id, attore=ATTORE
+        )
+        # Non c'era nulla da azzerare sul `sommario`, e il conteggio lo dice.
+        assert esito.sommari_azzerati == 0
+
+        self._il_portale_pubblica_il_nome(server_feed)
+        sincronizza(db_session, feed, client_feed())
+
+        db_session.expire_all()
+        riletta = db_session.get(Prenotazione, importata.id)
+        assert riletta is not None
+        assert riletta.sommario is None, (
+            "il nome di un Ospite che ha CHIESTO la cancellazione è rientrato "
+            "dal feed dopo che la richiesta era stata evasa"
+        )
+
+    def test_un_sync_successivo_non_riporta_il_nome_sull_ambito_host(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        feed, importata, _ = self._prenotazione_futura_senza_sommario(
+            db_session, contesto, server_feed
+        )
+
+        service.azzera_ospiti_dell_host_su_richiesta(
+            db_session, contesto.host_id, attore=ATTORE
+        )
+
+        self._il_portale_pubblica_il_nome(server_feed)
+        sincronizza(db_session, feed, client_feed())
+
+        db_session.expire_all()
+        riletta = db_session.get(Prenotazione, importata.id)
+        assert riletta is not None
+        assert riletta.sommario is None
+
+    def test_la_controprova_col_sommario_gia_presente_regge_come_prima(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # L'altra metà: quando il `sommario` c'era, la guardia si armava già
+        # prima del sigillo. Il fix non deve cambiare questo percorso — se
+        # cadesse qui, il sigillo avrebbe rotto ciò che funzionava.
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=calendario(vevent("uid-futuro", dal="20300601", al="20300605"))
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+        sincronizza(db_session, feed, client_feed())
+        importata = prenotazioni(db_session, feed)[0]
+        assert importata.sommario is not None
+        ospite = registra_ospite(
+            db_session, contesto, importata, nome="Ospite Inventato", principale=True
+        )
+        db_session.commit()
+
+        esito = service.azzera_ospite_su_richiesta(
+            db_session, contesto.host_id, ospite.id, attore=ATTORE
+        )
+        assert esito.sommari_azzerati == 1
+
+        sincronizza(db_session, feed, client_feed())
+
+        db_session.expire_all()
+        riletta = db_session.get(Prenotazione, importata.id)
+        assert riletta is not None
+        assert riletta.sommario is None
+
+    def test_il_sigillo_si_scrive_anche_quando_non_c_era_nulla_da_azzerare(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        # Il sigillo è l'evidenza che la RICHIESTA è stata evasa su questa
+        # riga — cosa che è avvenuta — non l'evidenza di un campo cancellato,
+        # che infatti resta contata a parte e vale zero.
+        prenotazione = crea_prenotazione(
+            db_session, contesto, check_in=date(2030, 6, 1), check_out=date(2030, 6, 5)
+        )
+        ospite = registra_ospite(db_session, contesto, prenotazione, nome="Inventato")
+        db_session.commit()
+
+        esito = service.azzera_ospite_su_richiesta(
+            db_session, contesto.host_id, ospite.id, attore=ATTORE
+        )
+
+        assert esito.sommari_azzerati == 0
+        db_session.expire_all()
+        riletta = db_session.get(Prenotazione, prenotazione.id)
+        assert riletta is not None
+        assert riletta.sommario is None
+        assert riletta.anonimizzato_il is not None
+
+    def test_il_sigillo_e_idempotente(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        # Una seconda richiesta non deve spostare la data del sigillo: la
+        # prova di QUANDO la cancellazione è stata evasa è la prima.
+        prenotazione = crea_prenotazione(
+            db_session, contesto, check_in=date(2030, 6, 1), check_out=date(2030, 6, 5)
+        )
+        ospite = registra_ospite(db_session, contesto, prenotazione, nome="Inventato")
+        db_session.commit()
+        service.azzera_ospite_su_richiesta(
+            db_session, contesto.host_id, ospite.id, attore=ATTORE
+        )
+        db_session.expire_all()
+        prima = db_session.get(Prenotazione, prenotazione.id)
+        assert prima is not None
+        istantanea = (prima.anonimizzato_il, prima.aggiornata_il)
+
+        service.azzera_ospite_su_richiesta(
+            db_session, contesto.host_id, ospite.id, attore=ATTORE
+        )
+
+        db_session.expire_all()
+        dopo = db_session.get(Prenotazione, prenotazione.id)
+        assert dopo is not None
+        assert (dopo.anonimizzato_il, dopo.aggiornata_il) == istantanea
+
+    def test_il_sigillo_resta_dentro_il_perimetro_dell_host(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        # Il sigillo è irreversibile quanto l'azzeramento: farlo debordare su
+        # un altro tenant congelerebbe per sempre il `sommario` di Prenotazioni
+        # che nessuno ha chiesto di anonimizzare (AD-2).
+        altro = crea_contesto(
+            db_session, email="host.secondo@example.com", nome="Altra Struttura"
+        )
+        altrui = crea_prenotazione(
+            db_session, altro, check_in=date(2030, 6, 1), check_out=date(2030, 6, 5)
+        )
+        _, ospite = _con_ospite(db_session, contesto)
+        db_session.commit()
+
+        service.azzera_ospiti_dell_host_su_richiesta(
+            db_session, contesto.host_id, attore=ATTORE
+        )
+        service.azzera_ospite_su_richiesta(
+            db_session, contesto.host_id, ospite.id, attore=ATTORE
+        )
+
+        db_session.expire_all()
+        intatta = db_session.get(Prenotazione, altrui.id)
+        assert intatta is not None
+        assert intatta.anonimizzato_il is None
 
 
 class TestLEndpointInterno:

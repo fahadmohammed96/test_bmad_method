@@ -111,11 +111,59 @@ def di_un_host(host_id: uuid.UUID) -> Selezione:
 
 
 def esegui(db: Session, selezione: Selezione, *, adesso: datetime) -> EsitoAzzeramento:
-    """Azzera i campi personali della selezione. MAI una DELETE (AD-20, GS-6)."""
+    """Azzera i campi personali della selezione. MAI una DELETE (AD-20, GS-6).
+
+    È la procedura del job periodico: tocca solo ciò che ha davvero qualcosa
+    da azzerare. Il percorso su richiesta parte da qui e aggiunge un passo —
+    vedi `esegui_su_richiesta`, e la ragione per cui non può essere lo stesso.
+    """
     return EsitoAzzeramento(
         anagrafiche=_azzera_anagrafiche(db, selezione, adesso),
         sommari=_azzera_sommari(db, selezione, adesso),
     )
+
+
+def esegui_su_richiesta(
+    db: Session, selezione: Selezione, *, adesso: datetime
+) -> EsitoAzzeramento:
+    """La stessa procedura, più il SIGILLO: la richiesta si evade una volta.
+
+    Il job e la richiesta hanno bisogni **opposti** sullo stesso predicato, e
+    il punto in cui si incontrano è dove il difetto nasceva.
+
+    Il job chiede «c'è qualcosa da azzerare?» e può permetterselo perché
+    **ripassa**: se il `sommario` rientra da un sync, il giro dopo lo ritoglie.
+    Filtrare diversamente reintrodurrebbe la trappola 2 — un dato reinserito
+    che non scade mai più. Quel filtro non si tocca.
+
+    La richiesta NFR-15 si evade **una volta sola**, e non ha compensazione:
+    se al momento della richiesta il `sommario` era vuoto, nessuna riga veniva
+    toccata, `anonimizzato_il` restava `NULL`, la guardia dell'upsert non si
+    armava — e il portale poteva ripubblicare dopo un `SUMMARY` col nome di
+    chi aveva chiesto la cancellazione. Su un soggiorno futuro il job di
+    retention non passerà per anni. La durabilità di un adempimento non può
+    dipendere da come stava per caso quel campo in quell'istante.
+
+    Da qui il sigillo, che è un passo dichiarato e non un filtro diverso:
+    dopo una richiesta, ogni Prenotazione selezionata porta `anonimizzato_il`,
+    quindi l'upsert non le scriverà più un `sommario`.
+
+    **Cosa attesta `anonimizzato_il` dopo questo passo.** Sul percorso del job
+    significa «questo campo è stato azzerato». Qui significa, più
+    precisamente, «su questa riga la richiesta NFR-15 è stata evasa» — che è
+    avvenuto davvero, anche quando non c'era nulla da cancellare. La
+    distinzione non si perde: `EsitoAzzeramento.sommari` conta le righe
+    davvero azzerate ed è ciò che finisce nell'audit, quindi «evaso senza
+    trovare nulla» resta leggibile come `sommari_azzerati = 0`.
+
+    Il sigillo vale **solo** per il `sommario`. Sul lato `ospite` AD-21 non
+    vieta il ripopolamento — dalla Story 2.4 l'Host può reinserire un
+    contatto, e quel dato tornerà a scadere col job. L'asimmetria è
+    dell'invariante, non una svista.
+    """
+    esito = esegui(db, selezione, adesso=adesso)
+    _sigilla_sommari(db, selezione, adesso)
+    return esito
 
 
 def _azzera_anagrafiche(db: Session, selezione: Selezione, adesso: datetime) -> int:
@@ -154,6 +202,27 @@ def _azzera_sommari(db: Session, selezione: Selezione, adesso: datetime) -> int:
         update(Prenotazione)
         .where(Prenotazione.sommario.is_not(None), selezione.prenotazioni)
         .values(sommario=None, anonimizzato_il=adesso, aggiornata_il=adesso),
+    )
+
+
+def _sigilla_sommari(db: Session, selezione: Selezione, adesso: datetime) -> int:
+    """Marca `anonimizzato_il` sulle righe selezionate che ancora non l'hanno.
+
+    Gira DOPO `_azzera_sommari`, quindi le righe davvero azzerate hanno già
+    l'evidenza e questa istruzione non le tocca: `anonimizzato_il IS NULL`
+    lascia fuori anche i sigilli di richieste precedenti, che è ciò che rende
+    l'operazione idempotente — la prova di QUANDO la cancellazione è stata
+    evasa è la prima, e una richiesta ripetuta non deve spostarla.
+
+    È l'unico punto del codice in cui `anonimizzato_il IS NULL` compare in una
+    selezione, e non è la trappola 2: quella riguarda il filtro del JOB, che
+    chiede «c'è qualcosa da azzerare?» e resta sui campi.
+    """
+    return _righe(
+        db,
+        update(Prenotazione)
+        .where(Prenotazione.anonimizzato_il.is_(None), selezione.prenotazioni)
+        .values(anonimizzato_il=adesso, aggiornata_il=adesso),
     )
 
 
