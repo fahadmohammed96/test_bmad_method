@@ -11,11 +11,16 @@ vi.mock("@/lib/api/hooks", () => ({
   }),
 }));
 
+import { ProviderSelezioneStruttura } from "./SelezioneStruttura";
 import { SelettoreStruttura } from "./SelettoreStruttura";
 
 describe("SelettoreStruttura (UX-DR1)", () => {
   it('ha "Tutte le Strutture" come default e le sole attive in lista', () => {
-    render(<SelettoreStruttura />);
+    render(
+      <ProviderSelezioneStruttura>
+        <SelettoreStruttura />
+      </ProviderSelezioneStruttura>,
+    );
     const select = screen.getByRole("combobox", { name: /struttura/i });
     expect(select).toHaveValue("tutte");
     expect(

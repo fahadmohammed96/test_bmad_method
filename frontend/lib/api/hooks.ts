@@ -20,6 +20,9 @@ export type RegimeFiscale = components["schemas"]["RegimeFiscaleOutput"];
 export type FeedIcal = components["schemas"]["FeedIcalOutput"];
 export type FeedIcalInput = components["schemas"]["FeedIcalInput"];
 export type CanaleFeed = components["schemas"]["CanaleFeed"];
+export type Calendario = components["schemas"]["CalendarioOutput"];
+export type VoceCalendario = components["schemas"]["VoceCalendarioOutput"];
+export type StatoPrenotazione = components["schemas"]["StatoPrenotazione"];
 
 type Problem = { title?: string; detail?: string };
 
@@ -95,10 +98,14 @@ export function useAggiornaPreferenze() {
 }
 
 /** Il Regime fiscale è derivato dal numero di Strutture (AD-12): ogni
- * mutazione sulle Strutture invalida anche la sua cache. */
+ * mutazione sulle Strutture invalida anche la sua cache. Il Calendario
+ * aggrega le Strutture dell'Host, quindi vale lo stesso: una Struttura nuova
+ * che non compare nella griglia finché non si ricarica la pagina è la stessa
+ * classe di difetto della Story 1.6. */
 function invalidaStruttureERegime(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["strutture"] });
   queryClient.invalidateQueries({ queryKey: ["regime-fiscale"] });
+  queryClient.invalidateQueries({ queryKey: ["calendario"] });
 }
 
 export function useStrutture() {
@@ -256,10 +263,49 @@ export function useCollegaFeed() {
       if (!data) throw new Error(titoloErrore(error) ?? "collegamento fallito");
       return data;
     },
-    onSuccess: (feed) =>
+    onSuccess: (feed) => {
       queryClient.invalidateQueries({
         queryKey: ["feed-ical", feed.struttura_id],
-      }),
+      });
+      // Il Calendario deriva dagli stessi Feed: collegarne uno cambia sia le
+      // Prenotazioni sia l'etichetta «dati aggiornati alle HH:MM». Invalidare
+      // solo la prima cache lascia l'altra ferma su un orario vecchio — ed è
+      // precisamente la falsa sincronia che NFR-2 vieta.
+      queryClient.invalidateQueries({ queryKey: ["calendario"] });
+    },
+  });
+}
+
+/** Il calendario unificato di un periodo (FR-4, UX-DR1, NFR-2).
+ *
+ * **Una sola query per la griglia E per l'etichetta del timestamp**, ed è una
+ * scelta: sono valori derivati dalla stessa sorgente, e tenerli in due cache
+ * distinte significa poterle vedere divergere — la griglia aggiornata e
+ * l'orario fermo, cioè un calendario che si dichiara più vecchio (o più
+ * fresco) di quello che mostra. Con una voce sola di cache la divergenza non
+ * è un difetto improbabile: è impossibile.
+ *
+ * Finché un import è in corso la query si ripete, così il primo timestamp
+ * arriva senza che l'Host debba ricaricare. Appena lo stato non è più
+ * `in_corso` il polling si ferma da sé.
+ */
+export function useCalendario(parametri: {
+  da: string;
+  a: string;
+  struttura_id?: string;
+}) {
+  const { da, a, struttura_id } = parametri;
+  return useQuery<Calendario>({
+    queryKey: ["calendario", da, a, struttura_id ?? "tutte"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/calendario", {
+        params: { query: { da, a, ...(struttura_id ? { struttura_id } : {}) } },
+      });
+      if (!data) throw new Error(titoloErrore(error) ?? "calendario non disponibile");
+      return data;
+    },
+    refetchInterval: (query) =>
+      query.state.data?.stato_sync === "in_corso" ? 3000 : false,
   });
 }
 

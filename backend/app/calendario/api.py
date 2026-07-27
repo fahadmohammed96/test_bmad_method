@@ -1,8 +1,10 @@
-"""Endpoint di `calendario` (FR-3): /api/v1/feed-ical.
+"""Endpoint di `calendario` (FR-3, FR-4): /api/v1/feed-ical e /api/v1/calendario.
 
 Ogni rotta dichiara `CurrentHost`: `host_id` si risolve dalla sessione, mai
 da input del client (AD-15), e la guardia `tests/test_auth_convention.py` lo
-impone.
+impone. È anche il solo presidio di NFR-14 che regge per costruzione: il
+calendario di un Host non può mostrare le Prenotazioni di un altro perché
+non c'è un parametro con cui chiederle.
 
 Un URL non valido è un **422 inline sul campo**: si scopre senza toccare la
 rete. La raggiungibilità no — quella si scopre nel job, e arriva qui come
@@ -10,6 +12,7 @@ rete. La raggiungibilità no — quella si scopre nel job, e arriva qui come
 """
 
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -19,10 +22,13 @@ from app.api.problems import DomainProblem
 from app.calendario import service
 from app.calendario.models import FeedIcal
 from app.calendario.schemas import (
+    CalendarioOutput,
     FeedIcalInput,
     FeedIcalOutput,
     PrenotazioneOutput,
     PrenotazioniDelFeedOutput,
+    StrutturaDelCalendarioOutput,
+    VoceCalendarioOutput,
 )
 from app.calendario.uscita_rete import url_redatto
 from app.core.db import get_db
@@ -30,8 +36,15 @@ from app.identity.deps import CurrentHost
 from app.strutture.service import StrutturaNonTrovataError
 
 router = APIRouter(prefix="/feed-ical", tags=["calendario"])
+calendario_router = APIRouter(prefix="/calendario", tags=["calendario"])
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+# Tetto sull'ampiezza del periodo richiedibile in una volta. Non è una
+# preferenza di prodotto: è il bound su una query il cui costo cresce con
+# l'intervallo, e senza di esso `da=0001-01-01&a=9999-12-31` è una lettura
+# dell'intera tabella scritta da un client qualsiasi.
+GIORNI_MASSIMI_PERIODO = 366
 
 
 def _struttura_non_trovata() -> DomainProblem:
@@ -155,5 +168,71 @@ def prenotazioni(
                 stato=riga.stato,
             )
             for riga in service.prenotazioni_del_feed(db, host.id, feed_id)
+        ],
+    )
+
+
+@calendario_router.get("")
+def griglia(
+    da: date,
+    a: date,
+    db: DbSession,
+    host: CurrentHost,
+    struttura_id: uuid.UUID | None = None,
+) -> CalendarioOutput:
+    """Il calendario unificato di un periodo (FR-4, UJ-1).
+
+    `struttura_id` assente = vista aggregata su tutte le Strutture; presente
+    = una sola Struttura. È lo stesso endpoint, ed è il motivo per cui il
+    selettore di UX-DR1 filtra senza cambiare schermata: cambia un parametro
+    di query, non la superficie.
+    """
+    if a < da:
+        raise DomainProblem(
+            status=422,
+            title="Periodo non valido",
+            type_slug="periodo-calendario-non-valido",
+            detail="La data di fine non può precedere quella di inizio.",
+        )
+    if (a - da).days >= GIORNI_MASSIMI_PERIODO:
+        raise DomainProblem(
+            status=422,
+            title="Periodo troppo ampio",
+            type_slug="periodo-calendario-troppo-ampio",
+            detail=(
+                "Il calendario si consulta al massimo "
+                f"{GIORNI_MASSIMI_PERIODO} giorni per volta."
+            ),
+        )
+    try:
+        vista = service.calendario(db, host.id, da=da, a=a, struttura_id=struttura_id)
+    except StrutturaNonTrovataError:
+        raise _struttura_non_trovata() from None
+    return CalendarioOutput(
+        da=vista.da,
+        a=vista.a,
+        stato_sync=vista.stato,
+        ultimo_sync_riuscito_il=vista.ultimo_sync_riuscito_il,
+        feed_collegati=vista.feed_collegati,
+        feed_mai_sincronizzati=vista.feed_mai_sincronizzati,
+        feed_in_errore=vista.feed_in_errore,
+        strutture=[
+            StrutturaDelCalendarioOutput(id=riga.id, nome=riga.nome)
+            for riga in vista.strutture
+        ],
+        voci=[
+            VoceCalendarioOutput(
+                id=voce.prenotazione.id,
+                struttura_id=voce.prenotazione.struttura_id,
+                canale=voce.prenotazione.canale,
+                check_in=voce.prenotazione.check_in,
+                check_out=voce.prenotazione.check_out,
+                notti=voce.prenotazione.soggiorno.nights,
+                sommario=voce.prenotazione.sommario,
+                stato=voce.prenotazione.stato,
+                ospite_principale=voce.ospite_principale,
+                altri_ospiti=voce.altri_ospiti,
+            )
+            for voce in vista.voci
         ],
     )

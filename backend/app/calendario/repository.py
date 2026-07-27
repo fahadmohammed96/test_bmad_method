@@ -10,7 +10,7 @@ constraint (lezione G-2 dell'Epic 1, test di gara A3-1).
 
 import uuid
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from typing import cast
 
 from sqlalchemy import Select, case, func, literal, select, text, tuple_, update
@@ -22,6 +22,7 @@ from app.calendario.models import (
     CanaleFeed,
     EsitoSyncRun,
     FeedIcal,
+    Ospite,
     Prenotazione,
     StatoPrenotazione,
     SyncRun,
@@ -55,6 +56,24 @@ class FeedIcalRepository:
                     FeedIcal.struttura_id == struttura_id,
                 )
                 .order_by(FeedIcal.collegato_il)
+            )
+        )
+
+    def dell_host(
+        self, host_id: uuid.UUID, *, struttura_id: uuid.UUID | None = None
+    ) -> list[FeedIcal]:
+        """Tutti i Feed dell'Host, o quelli di una sola Struttura.
+
+        È il perimetro su cui il Calendario deriva «dati aggiornati alle
+        HH:MM»: la vista aggregata mostra dati che vengono da PIÙ Feed, e la
+        loro freschezza è quella del più vecchio (UX-DR1, NFR-2).
+        """
+        criteri = [FeedIcal.host_id == host_id]
+        if struttura_id is not None:
+            criteri.append(FeedIcal.struttura_id == struttura_id)
+        return list(
+            self._db.scalars(
+                select(FeedIcal).where(*criteri).order_by(FeedIcal.collegato_il)
             )
         )
 
@@ -242,6 +261,7 @@ class PrenotazioneRepository:
             stato=stato_dal_feed,
             creata_il=adesso,
             aggiornata_il=adesso,
+            cessata_il=adesso if cancellata else None,
         )
         istruzione = inserimento.on_conflict_do_update(
             constraint="uq_prenotazione_feed_ical_uid",
@@ -256,6 +276,12 @@ class PrenotazioneRepository:
                     ),
                     else_=inserimento.excluded.stato,
                 ),
+                # `cessata_il` segue lo stato RISULTANTE, e si conserva se
+                # c'era già: è la decorrenza della retention (AD-21), e
+                # riscriverla a ogni sync sposterebbe in avanti la scadenza
+                # di un'anagrafica ferma da mesi — un dato personale
+                # conservato per sempre, un sync alla volta.
+                "cessata_il": self._cessata_il_dopo_upsert(adesso, cancellata),
                 "aggiornata_il": inserimento.excluded.aggiornata_il,
             },
         ).returning(
@@ -271,6 +297,31 @@ class PrenotazioneRepository:
         if stato is StatoPrenotazione.RIMOSSA_DAL_FEED:
             return "ricomparsa"
         return "aggiornata"
+
+    @staticmethod
+    def _cessata_il_dopo_upsert(adesso: datetime, cancellata: bool) -> object:
+        """Quando la Prenotazione è uscita da `attiva`, dopo questo upsert.
+
+        Tre casi, e nessuno dei tre è «adesso» incondizionato:
+
+        - il feed la dà cancellata ⇒ è cessata; ma se lo era già, vale la
+          data di ALLORA (`COALESCE`), altrimenti ogni sync rimanderebbe
+          avanti la retention di novanta giorni;
+        - il feed la dà viva ma la riga è `rimossa_dal_feed` ⇒ lo stato non
+          risale (vedi sopra), quindi nemmeno la sua decorrenza;
+        - il feed la dà viva e la riga torna/resta `attiva` ⇒ `NULL`: una
+          Prenotazione attiva non ha una data di cessazione, e lasciarne una
+          vecchia farebbe scadere l'anagrafica di un soggiorno futuro.
+        """
+        if cancellata:
+            return func.coalesce(Prenotazione.cessata_il, adesso)
+        return case(
+            (
+                Prenotazione.stato == StatoPrenotazione.RIMOSSA_DAL_FEED,
+                Prenotazione.cessata_il,
+            ),
+            else_=None,
+        )
 
     def marca_rimosse_dal_feed(
         self, host_id: uuid.UUID, *, feed_id: uuid.UUID, uid_presenti: Sequence[str]
@@ -292,6 +343,7 @@ class PrenotazioneRepository:
         """
         if not uid_presenti:
             return 0
+        adesso = utcnow()
         istruzione = (
             update(Prenotazione)
             .where(
@@ -300,13 +352,30 @@ class PrenotazioneRepository:
                 Prenotazione.stato == StatoPrenotazione.ATTIVA,
                 Prenotazione.ical_uid.not_in(uid_presenti),
             )
-            .values(stato=StatoPrenotazione.RIMOSSA_DAL_FEED, aggiornata_il=utcnow())
+            .values(
+                stato=StatoPrenotazione.RIMOSSA_DAL_FEED,
+                # Uscita da `attiva`: da qui decorre la retention
+                # dell'anagrafica Ospite se precede il `check_out` (AD-21).
+                # Il filtro seleziona solo righe `attiva`, che hanno
+                # `cessata_il` a NULL: nessuna data preesistente da salvare.
+                cessata_il=adesso,
+                aggiornata_il=adesso,
+            )
         )
         # `cast`: `Session.execute` è tipizzato genericamente, ma una UPDATE
         # restituisce sempre un CursorResult, che espone `rowcount` (stesso
         # motivo del `cast` in app/identity/jobs.py).
         esito = cast(CursorResult, self._db.execute(istruzione))
         return int(esito.rowcount or 0)
+
+    def by_id(
+        self, host_id: uuid.UUID, prenotazione_id: uuid.UUID
+    ) -> Prenotazione | None:
+        return self._db.scalars(
+            select(Prenotazione).where(
+                Prenotazione.host_id == host_id, Prenotazione.id == prenotazione_id
+            )
+        ).one_or_none()
 
     def del_feed(self, host_id: uuid.UUID, feed_id: uuid.UUID) -> list[Prenotazione]:
         return list(
@@ -365,6 +434,53 @@ class PrenotazioneRepository:
             .limit(1)
         ).first()
 
+    def nel_periodo(
+        self,
+        host_id: uuid.UUID,
+        *,
+        da: date,
+        a: date,
+        struttura_id: uuid.UUID | None = None,
+    ) -> list[Prenotazione]:
+        """Prenotazioni che occupano almeno una notte fra `da` e `a` inclusi.
+
+        Il periodo della griglia è un insieme di NOTTI, e una Prenotazione
+        occupa `[check_in, check_out)` (AD-3): tocca il periodo quando
+        `check_in <= a` e `check_out > da`. Il `>` stretto sul `check_out` è
+        il confine dell'intervallo semiaperto — con `>=` una Prenotazione
+        che finisce il primo giorno visibile comparirebbe in un mese in cui
+        non c'è nessun suo pernottamento, e la stessa riga si vedrebbe due
+        volte cambiando pagina.
+
+        **Tutti gli stati**, non solo `attiva`: una Prenotazione uscita da
+        `attiva` resta visibile con la sua etichetta. Farla sparire senza
+        traccia contraddirebbe «archiviare, mai distruggere» agli occhi
+        dell'Host, che quella prenotazione l'ha vista ieri (AD-19, AD-20,
+        test design §4.2-12).
+        """
+        criteri = [
+            Prenotazione.host_id == host_id,
+            Prenotazione.check_in <= a,
+            Prenotazione.check_out > da,
+        ]
+        if struttura_id is not None:
+            criteri.append(Prenotazione.struttura_id == struttura_id)
+        return list(
+            self._db.scalars(
+                select(Prenotazione)
+                .where(*criteri)
+                # Ordine STABILE: la griglia assegna le corsie nell'ordine in
+                # cui riceve le Prenotazioni, e un ordine che dipende dal
+                # piano del database farebbe saltare le righe da una corsia
+                # all'altra fra due letture identiche.
+                .order_by(
+                    Prenotazione.check_in,
+                    Prenotazione.check_out,
+                    Prenotazione.id,
+                )
+            )
+        )
+
     def conta_per_stato(
         self, host_id: uuid.UUID, feed_id: uuid.UUID
     ) -> dict[StatoPrenotazione, int]:
@@ -377,3 +493,64 @@ class PrenotazioneRepository:
             .group_by(Prenotazione.stato)
         ).all()  # type: ignore[assignment]
         return {stato: conteggio for stato, conteggio in righe}
+
+
+class OspiteRepository:
+    """Anagrafica Ospite (AD-21): scritta SOLO da `calendario` (AD-18).
+
+    Nessun metodo scrive `nome`, `email` o `telefono` a partire da un altro
+    campo: i valori arrivano dal chiamante, che li ha ricevuti dall'Host o
+    letti esplicitamente dal Feed. Non c'è un percorso «deduci» perché non
+    deve essercene uno (NFR-11).
+    """
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def add(self, host_id: uuid.UUID, ospite: Ospite) -> Ospite:
+        ospite.host_id = host_id
+        self._db.add(ospite)
+        return ospite
+
+    def della_prenotazione(
+        self, host_id: uuid.UUID, prenotazione_id: uuid.UUID
+    ) -> list[Ospite]:
+        """Gli Ospiti di una Prenotazione, il principale per primo."""
+        return list(
+            self._db.scalars(
+                select(Ospite)
+                .where(
+                    Ospite.host_id == host_id,
+                    Ospite.prenotazione_id == prenotazione_id,
+                )
+                .order_by(Ospite.principale.desc(), Ospite.creato_il, Ospite.id)
+            )
+        )
+
+    def per_prenotazioni(
+        self, host_id: uuid.UUID, prenotazione_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Ospite]]:
+        """Gli Ospiti di più Prenotazioni in una lettura sola.
+
+        Con `prenotazione_ids` VUOTO non si interroga affatto: un `IN ()`
+        costruito da una lista calcolata a runtime è la trappola che in
+        questo stesso modulo è già costata un P0 (`NOT IN ()` che degenera
+        in «tutte le righe»). Qui l'`IN` vuoto darebbe zero righe invece di
+        tutte — ma la guardia sta comunque nel punto più basso, perché la
+        regola è «nessun predicato di insieme costruito da una lista che può
+        essere vuota», non «questo caso è innocuo».
+        """
+        if not prenotazione_ids:
+            return {}
+        raggruppati: dict[uuid.UUID, list[Ospite]] = {}
+        righe = self._db.scalars(
+            select(Ospite)
+            .where(
+                Ospite.host_id == host_id,
+                Ospite.prenotazione_id.in_(prenotazione_ids),
+            )
+            .order_by(Ospite.principale.desc(), Ospite.creato_il, Ospite.id)
+        )
+        for ospite in righe:
+            raggruppati.setdefault(ospite.prenotazione_id, []).append(ospite)
+        return raggruppati

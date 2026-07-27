@@ -26,11 +26,16 @@ morte per `max_attempts` il ciclo di tutti gli altri.
 
 import logging
 import uuid
+from datetime import timedelta
+from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
-from app.calendario.models import FeedIcal
+from app.calendario.models import FeedIcal, Ospite, Prenotazione
+from app.calendario.retention import filtro_scadute, limite_retention
+from app.core.config import get_settings
 from app.core.date_range import utcnow
 from app.core.events import catalog
 from app.core.jobs import Job, JobStatus, handlers, schedule
@@ -40,11 +45,17 @@ logger = logging.getLogger(__name__)
 
 TIPO_JOB_SYNC_FEED = "feed_ical.sync_richiesto"
 TIPO_JOB_SYNC_PERIODICO = "feed_ical.sync_periodico"
+TIPO_JOB_RETENTION_OSPITE = "ospite.azzera_scaduti"
 
 # AD-17: i tipi si dichiarano nel catalogo unico, con payload di SOLI
 # identificatori scalari — mai nomi di Ospiti, mai snapshot di stato.
 catalog.register_job(TIPO_JOB_SYNC_FEED, payload_keys=("feed_id", "host_id"))
 catalog.register_job(TIPO_JOB_SYNC_PERIODICO, payload_keys=("feed_id", "host_id"))
+# Payload VUOTO: il job di retention non porta con sé né identificatori né,
+# tanto meno, i campi che sta per azzerare. La coda `job` è leggibile da chi
+# amministra il sistema, e un nome Ospite scritto lì sopravviverebbe
+# all'azzeramento che il job stesso ha eseguito (AD-17, NFR-11).
+catalog.register_job(TIPO_JOB_RETENTION_OSPITE, payload_keys=())
 
 
 def _payload(feed: FeedIcal) -> dict[str, str]:
@@ -202,5 +213,106 @@ def esegui_sync_periodico(db: Session, payload: dict) -> None:
             "esito": run.esito.value,
             "non_modificato": run.non_modificato,
             "prossimo_il": prossimo.due_at.isoformat(),
+        },
+    )
+
+
+# ------------------------------------------- retention anagrafica Ospite (2.3)
+
+
+def _riprogramma_retention(db: Session) -> Job:
+    return schedule(
+        db,
+        TIPO_JOB_RETENTION_OSPITE,
+        {},
+        due_at=utcnow()
+        + timedelta(minutes=get_settings().ospite_retention_intervallo_minuti),
+    )
+
+
+def assicura_retention_periodica(db: Session) -> None:
+    """Bootstrap idempotente del ciclo di retention: un solo job in coda.
+
+    Stessa forma di `assicura_purge_periodico` (Epic 1), deliberatamente
+    non fattorizzata: la duplicazione è nota ed è una proposta parcheggiata
+    per Fahad, non una decisione da prendere dentro questa Story.
+    """
+    gia_in_coda = db.scalars(
+        select(Job.id)
+        .where(
+            Job.job_type == TIPO_JOB_RETENTION_OSPITE,
+            Job.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+        )
+        .limit(1)
+    ).first()
+    if gia_in_coda is None:
+        _riprogramma_retention(db)
+
+
+@handlers.register(TIPO_JOB_RETENTION_OSPITE)
+def azzera_anagrafiche_scadute(db: Session, payload: dict) -> None:
+    """Retention dell'anagrafica Ospite (AD-21, NFR-12): AZZERA, non cancella.
+
+    Alla scadenza si scrivono a `NULL` i tre campi personali e si marca
+    `anonimizzato_il`. La riga `ospite`, la Prenotazione e la sua storia
+    restano intatte: l'azzeramento è una delle **tre** sole cancellazioni
+    distruttive che AD-20 ammette, ed è distruttivo sui CAMPI — una `DELETE`
+    di riga sarebbe una quarta, cioè un invariante rotto (GS-6).
+
+    **Idempotente per costruzione, non per promessa.** La selezione prende
+    solo le righe che hanno davvero qualcosa da azzerare: al secondo giro
+    sullo stesso stato l'`UPDATE` tocca zero righe, perché i tre campi sono
+    già `NULL`. Non si marca `anonimizzato_il` su un'anagrafica che non ha
+    mai avuto contatti — sarebbe l'evidenza di un adempimento che non è
+    avvenuto, su dati che non sono mai esistiti.
+
+    Il filtro è sui CONTATTI e non su `anonimizzato_il IS NULL`, che
+    sembrerebbe la condizione naturale e sarebbe un difetto: dalla Story 2.4
+    l'Host può reinserire un contatto su un'anagrafica già azzerata, e con
+    quel filtro quel dato non scadrebbe mai più. La domanda giusta è «c'è
+    qualcosa da azzerare?», non «l'ho già fatto una volta?».
+
+    Query **non scopata per Host**, e deliberatamente: è manutenzione del
+    worker, non un percorso di richiesta, e scoparla per Host significherebbe
+    non adempiere per tutti gli altri. Per lo stesso motivo vive qui e non
+    nel repository, dove la guardia G-3 impone `host_id` su ogni metodo —
+    stessa forma dichiarata di `bootstrap_sync_periodico` e di
+    `identity/jobs.py::purge_sessioni_scadute`.
+    """
+    adesso = utcnow()
+    limite = limite_retention(
+        adesso=adesso,
+        periodo=timedelta(days=get_settings().ospite_retention_giorni),
+    )
+    scadute = select(Prenotazione.id).where(filtro_scadute(limite))
+    esito = cast(
+        CursorResult,
+        db.execute(
+            update(Ospite)
+            .where(
+                or_(
+                    Ospite.nome.is_not(None),
+                    Ospite.email.is_not(None),
+                    Ospite.telefono.is_not(None),
+                ),
+                Ospite.prenotazione_id.in_(scadute),
+            )
+            .values(
+                nome=None,
+                email=None,
+                telefono=None,
+                anonimizzato_il=adesso,
+                aggiornato_il=adesso,
+            )
+        ),
+    )
+    _riprogramma_retention(db)
+    # Soli conteggi e confini: i dati appena azzerati non possono
+    # sopravvivere nei log all'azzeramento stesso (AD-16, NFR-11).
+    logger.info(
+        "retention dell'anagrafica Ospite eseguita",
+        extra={
+            "anagrafiche_azzerate": esito.rowcount,
+            "decorrenza_entro_il": limite.giorno.isoformat(),
         },
     )

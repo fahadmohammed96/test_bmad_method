@@ -32,12 +32,15 @@ Base = carica_modelli()
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 
 # Tabelle che devono sopravvivere a tutto: si archivia, mai si distrugge.
-# `ospite` e `conflitto` arrivano con le Story 2.3/2.5: entrano in questa
-# lista quando esistono, e `test_le_tabelle_protette_esistono` impedisce che
-# la lista contenga nomi morti che la svuoterebbero in silenzio.
-TABELLE_PROTETTE = frozenset({"prenotazione", "sync_run", "feed_ical"})
+# `ospite` è entrata con la Story 2.3 e la sua presenza qui è la forma in cui
+# AD-21 diventa strutturale: la retention dell'anagrafica azzera i CAMPI, e
+# una `DELETE` della riga sarebbe una quarta cancellazione distruttiva, cioè
+# fuori dalla lista esaustiva di AD-20. `conflitto` arriva con la 2.5: entra
+# quando esiste, e `test_le_tabelle_protette_esistono` impedisce che la lista
+# contenga nomi morti che la svuoterebbero in silenzio.
+TABELLE_PROTETTE = frozenset({"prenotazione", "sync_run", "feed_ical", "ospite"})
 
-MODELLI_PROTETTI = frozenset({"Prenotazione", "SyncRun", "FeedIcal"})
+MODELLI_PROTETTI = frozenset({"Prenotazione", "SyncRun", "FeedIcal", "Ospite"})
 
 # Moduli il cui sorgente non può contenere alcuna cancellazione: `calendario`
 # è il proprietario unico scrittore delle tabelle protette (AD-18).

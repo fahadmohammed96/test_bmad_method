@@ -96,3 +96,87 @@ class PrenotazioniDelFeedOutput(BaseModel):
     stato_sync: StatoSincronizzazione
     ultimo_sync_riuscito_il: datetime | None
     prenotazioni: list[PrenotazioneOutput]
+
+
+class StrutturaDelCalendarioOutput(BaseModel):
+    """Le Strutture del perimetro, per etichettare le righe della griglia.
+
+    Viaggiano dentro la risposta del Calendario e non da una seconda
+    chiamata: la griglia aggrega più Strutture (FR-4) e senza i nomi
+    mostrerebbe degli UUID, oppure il client dovrebbe correlare a mano due
+    letture che possono divergere.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    nome: str
+
+
+class VoceCalendarioOutput(BaseModel):
+    """Una Prenotazione come la griglia la mostra (FR-4).
+
+    Porta Canale d'origine, Struttura, date **e Ospite**. Tre valori sono
+    derivati dal server e il frontend li presenta senza ricalcolarli
+    (AD-14): `notti`, che è la lunghezza dell'intervallo semiaperto
+    `[check_in, check_out)` di AD-3; `ospite_principale`, che è la scelta
+    fra più Ospiti registrati; `altri_ospiti`, il loro conteggio.
+
+    `ospite_principale` è `None` quando l'Ospite non è noto — e non è un
+    errore: una Prenotazione senza Ospite resta valida, e la superficie
+    scrive «Ospite non indicato», mai un segnaposto che somigli a un nome
+    (NFR-11, AD-21).
+
+    `sommario` resta il testo OPACO del portale, dove il portale l'ha
+    scritto: non è il nome dell'Ospite e non lo diventa passando di qui.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    struttura_id: uuid.UUID
+    canale: CanaleFeed
+    check_in: date
+    check_out: date
+    notti: int
+    sommario: str | None
+    stato: StatoPrenotazione
+    ospite_principale: str | None
+    altri_ospiti: int
+
+
+class CalendarioOutput(BaseModel):
+    """La griglia unificata: Prenotazioni di tutte le Strutture e i Canali.
+
+    Envelope, e per la ragione di sempre: UX-DR6 vuole «dati aggiornati
+    alle HH:MM» su ogni superficie che mostra dati da Feed, e questa li
+    mostra da PIÙ Feed insieme.
+
+    `ultimo_sync_riuscito_il` è il **meno recente** fra i Feed del
+    perimetro, non il più recente: la freschezza di una vista aggregata è
+    quella della sua fonte più vecchia. Prendere il massimo direbbe
+    all'Host che il calendario è aggiornato a due minuti fa mentre uno dei
+    due portali non risponde da tre giorni — la falsa sincronia di NFR-2
+    con l'aggravante di essere aritmeticamente vera.
+
+    È `None` appena un Feed del perimetro non ha MAI avuto un sync
+    riuscito: lì non esiste un orario da mostrare, e il sistema dice «non
+    lo so» invece di mostrarne uno che parla solo degli altri Feed.
+
+    I tre conteggi esistono perché «nessun Feed collegato», «un Feed che
+    non ha mai importato» e «un Feed in errore» arrivano altrimenti alla
+    superficie con lo stesso aspetto — timestamp assente — e sono
+    affermazioni diverse.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    da: date
+    a: date
+    stato_sync: StatoSincronizzazione
+    ultimo_sync_riuscito_il: datetime | None
+    feed_collegati: int
+    feed_mai_sincronizzati: int
+    feed_in_errore: int
+    strutture: list[StrutturaDelCalendarioOutput]
+    voci: list[VoceCalendarioOutput]

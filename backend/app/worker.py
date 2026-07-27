@@ -21,13 +21,14 @@ logger = logging.getLogger(__name__)
 def bootstrap_job_periodici() -> None:
     """Rimette in coda i cicli periodici se mancano (idempotente).
 
-    Una sola transazione per entrambi: se il bootstrap del poller fallisce, il
+    Una sola transazione per tutti: se il bootstrap del poller fallisce, il
     purge non deve restare accodato da solo dando l'impressione che l'avvio
     sia riuscito.
     """
     with get_sessionmaker()() as db:
         identity_jobs.assicura_purge_periodico(db)
         calendario_jobs.bootstrap_sync_periodico(db)
+        calendario_jobs.assicura_retention_periodica(db)
         db.commit()
 
 
