@@ -244,6 +244,14 @@ class TestIlJob:
     def test_la_prenotazione_e_la_sua_storia_restano_intatte(
         self, db_session: Session, contesto: Contesto
     ) -> None:
+        """La RIGA resta, con la sua storia: si azzerano i CAMPI (AD-20).
+
+        L'asserzione sul `sommario` è cambiata di segno rispetto alla Story
+        2.3, dove diceva che la retention dell'Ospite non lo toccava. Allora
+        era vero e MYL-47 era una proposta aperta; ora AD-21 su `main` lo
+        include nell'azzeramento, e questo test è il punto in cui il codice e
+        l'invariante tornano a dire la stessa cosa.
+        """
         prenotazione, _ = self._scaduta_con_contatti(db_session, contesto)
 
         azzera_anagrafiche_scadute(db_session, {})
@@ -254,10 +262,12 @@ class TestIlJob:
         assert sopravvissuta is not None
         assert sopravvissuta.stato is StatoPrenotazione.ATTIVA
         assert sopravvissuta.check_in == date(2020, 1, 1)
-        # Il `sommario` è testo del portale, non un dato dell'anagrafica: la
-        # retention dell'Ospite non lo tocca (la sua è una proposta aperta,
-        # MYL-47, e non si anticipa qui).
-        assert sopravvissuta.sommario == "Testo opaco del portale"
+        assert sopravvissuta.check_out == date(2020, 1, 5)
+        # Il `SUMMARY` dei feed OTA contiene spesso il nome dell'Ospite:
+        # azzerare l'anagrafica lasciandolo in vita vanificherebbe la
+        # retention (AD-21, decisione MYL-47).
+        assert sopravvissuta.sommario is None
+        assert sopravvissuta.anonimizzato_il is not None
 
     def test_rieseguirlo_non_cambia_NULLA(
         self, db_session: Session, contesto: Contesto
@@ -438,6 +448,9 @@ class TestIlJob:
         assert len(righe) == 1
         riga = righe[0]
         assert riga.anagrafiche_azzerate == 1
+        # Conteggi DISTINTI: un totale unico nasconderebbe il caso in cui uno
+        # dei due adempimenti non è avvenuto.
+        assert riga.sommari_azzerati == 1
         assert riga.decorrenza_entro_il
         emesso = " ".join(str(valore) for valore in vars(riga).values())
         assert "Ospite Inventato" not in emesso

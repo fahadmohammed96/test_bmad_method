@@ -28,9 +28,11 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.calendario import ical, jobs
+from app.calendario import azzeramento, ical, jobs
 from app.calendario.intervallo import ParametriIntervallo, intervallo_di_sync
 from app.calendario.models import (
+    AmbitoAzzeramento,
+    AzzeramentoAudit,
     CanaleFeed,
     CategoriaErroreSync,
     EsitoSyncRun,
@@ -45,6 +47,7 @@ from app.calendario.normalizzazione import (
     normalizza,
 )
 from app.calendario.repository import (
+    AzzeramentoAuditRepository,
     FeedIcalRepository,
     OspiteRepository,
     PrenotazioneRepository,
@@ -69,6 +72,7 @@ from app.calendario.uscita_rete import (
 )
 from app.core.config import get_settings
 from app.core.date_range import today_rome, utcnow
+from app.identity import service as identity_service
 from app.strutture import service as strutture_service
 
 logger = logging.getLogger(__name__)
@@ -338,6 +342,123 @@ def ospiti_della_prenotazione(
     verificabile invece di essere una raccomandazione.
     """
     return OspiteRepository(db).della_prenotazione(host_id, prenotazione_id)
+
+
+# ------------------------- azzeramento su richiesta (NFR-15, AD-21)
+
+
+class OspiteNonTrovatoError(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class EsitoAzzeramentoSuRichiesta:
+    """Cosa è stato azzerato, in soli conteggi e identificatori (NFR-11)."""
+
+    ambito: AmbitoAzzeramento
+    riferimento: uuid.UUID
+    anagrafiche_azzerate: int
+    sommari_azzerati: int
+    eseguito_il: datetime
+
+
+def azzera_ospite_su_richiesta(
+    db: Session, host_id: uuid.UUID, ospite_id: uuid.UUID, *, attore: str
+) -> EsitoAzzeramentoSuRichiesta:
+    """Cancellazione su richiesta di UN Ospite (NFR-15).
+
+    L'Ospite si legge prima, e con l'`host_id` del perimetro: una richiesta su
+    un Ospite che non è di quell'Host non è «zero righe azzerate», è una
+    richiesta a cui non si può rispondere (AD-2). Distinguere le due cose è
+    ciò che rende l'evidenza leggibile.
+    """
+    if OspiteRepository(db).by_id(host_id, ospite_id) is None:
+        raise OspiteNonTrovatoError()
+    return _azzera_su_richiesta(
+        db,
+        host_id,
+        azzeramento.di_un_ospite(host_id, ospite_id),
+        ambito=AmbitoAzzeramento.OSPITE,
+        riferimento=ospite_id,
+        attore=attore,
+    )
+
+
+def azzera_ospiti_dell_host_su_richiesta(
+    db: Session, host_id: uuid.UUID, *, attore: str
+) -> EsitoAzzeramentoSuRichiesta:
+    """Cancellazione su richiesta di TUTTI gli Ospiti di un Host (NFR-15).
+
+    L'Host si legge dal service di `identity`, mai dalla sua tabella (AD-18):
+    un `host_id` inesistente deve produrre un errore, non un azzeramento
+    riuscito su zero righe — cioè una richiesta dichiarata evasa e mai evasa.
+    """
+    identity_service.leggi_host(db, host_id)
+    return _azzera_su_richiesta(
+        db,
+        host_id,
+        azzeramento.di_un_host(host_id),
+        ambito=AmbitoAzzeramento.HOST,
+        riferimento=host_id,
+        attore=attore,
+    )
+
+
+def _azzera_su_richiesta(
+    db: Session,
+    host_id: uuid.UUID,
+    selezione: azzeramento.Selezione,
+    *,
+    ambito: AmbitoAzzeramento,
+    riferimento: uuid.UUID,
+    attore: str,
+) -> EsitoAzzeramentoSuRichiesta:
+    """La STESSA procedura del job periodico, con la selezione della richiesta.
+
+    Non c'è un azzeratore per il job e uno per la richiesta: c'è
+    `azzeramento.esegui`, e cambia solo cosa gli si dà da selezionare. È la
+    forma in cui «la cancellazione su richiesta riusa la stessa procedura»
+    (AD-21) resta vera anche quando la procedura cambierà — il `sommario` è
+    già la prova che cambia.
+
+    Nessun `try/except`: qui un fallimento NON è recuperabile e deve arrivare
+    al chiamante. Il savepoint del job serve a non spegnere un ciclo
+    periodico; una richiesta che fallisce in silenzio direbbe a chi l'ha fatta
+    che è stata evasa.
+    """
+    adesso = utcnow()
+    esito = azzeramento.esegui(db, selezione, adesso=adesso)
+    AzzeramentoAuditRepository(db).add(
+        host_id,
+        AzzeramentoAudit(
+            attore=attore,
+            ambito=ambito,
+            riferimento=riferimento,
+            anagrafiche_azzerate=esito.anagrafiche,
+            sommari_azzerati=esito.sommari,
+            eseguito_il=adesso,
+        ),
+    )
+    db.commit()
+    # Soli conteggi e identificatori: i dati appena azzerati non possono
+    # sopravvivere nei log all'azzeramento stesso (AD-16, NFR-11).
+    logger.info(
+        "azzeramento su richiesta eseguito",
+        extra={
+            "ambito": ambito.value,
+            "riferimento": str(riferimento),
+            "host_id": str(host_id),
+            "anagrafiche_azzerate": esito.anagrafiche,
+            "sommari_azzerati": esito.sommari,
+        },
+    )
+    return EsitoAzzeramentoSuRichiesta(
+        ambito=ambito,
+        riferimento=riferimento,
+        anagrafiche_azzerate=esito.anagrafiche,
+        sommari_azzerati=esito.sommari,
+        eseguito_il=adesso,
+    )
 
 
 def _principale(ospiti: list[Ospite]) -> Ospite | None:
@@ -812,13 +933,17 @@ __all__ = [
     "Calendario",
     "DatiFeed",
     "DatiOspite",
+    "EsitoAzzeramentoSuRichiesta",
     "EsitoImport",
     "FeedNonTrovatoError",
+    "OspiteNonTrovatoError",
     "PrenotazioneNonTrovataError",
     "StatoFeed",
     "StrutturaDelCalendario",
     "UrlFeedNonValidoError",
     "VoceCalendario",
+    "azzera_ospite_su_richiesta",
+    "azzera_ospiti_dell_host_su_richiesta",
     "calendario",
     "client_di_produzione",
     "collega_feed",

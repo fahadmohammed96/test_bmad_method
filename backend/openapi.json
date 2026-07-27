@@ -1,6 +1,15 @@
 {
   "components": {
     "schemas": {
+      "AmbitoAzzeramento": {
+        "description": "Su chi è stato chiesto l'azzeramento (NFR-15).\n\nDue soli valori, e sono il perimetro che AD-21 ammette per la\ncancellazione su richiesta: un singolo Ospite, oppure tutti gli Ospiti di\nun Host. Il secondo resta dentro quell'Host (AD-2): non esiste un ambito\n«tutti».",
+        "enum": [
+          "ospite",
+          "host"
+        ],
+        "title": "AmbitoAzzeramento",
+        "type": "string"
+      },
       "AreaIstatOutput": {
         "properties": {
           "messaggio": {
@@ -87,6 +96,57 @@
           "parametri"
         ],
         "title": "AreaTassaOutput",
+        "type": "object"
+      },
+      "AzzeramentoInput": {
+        "description": "Chi chiede l'azzeramento (NFR-15). Nient'altro.\n\nSolo l'attore, perché il «cosa» sta nel percorso e il «quando» lo decide\nil server: un payload che portasse un nome o un contatto scriverebbe un\ndato personale nel log della richiesta, cioè proprio ciò che\nl'azzeramento sta per togliere (AD-16, NFR-11).",
+        "properties": {
+          "attore": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Attore",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attore"
+        ],
+        "title": "AzzeramentoInput",
+        "type": "object"
+      },
+      "AzzeramentoOutput": {
+        "description": "L'evidenza, in conteggi e identificatori.\n\nI due conteggi sono distinti e non sommati: «un'anagrafica azzerata» e\n«un `sommario` azzerato» sono adempimenti diversi su tabelle diverse, e\nun totale unico nasconderebbe il caso in cui uno dei due non è avvenuto —\nche è esattamente il buco che questo lotto chiude.",
+        "properties": {
+          "ambito": {
+            "$ref": "#/components/schemas/AmbitoAzzeramento"
+          },
+          "anagrafiche_azzerate": {
+            "title": "Anagrafiche Azzerate",
+            "type": "integer"
+          },
+          "eseguito_il": {
+            "format": "date-time",
+            "title": "Eseguito Il",
+            "type": "string"
+          },
+          "riferimento": {
+            "format": "uuid",
+            "title": "Riferimento",
+            "type": "string"
+          },
+          "sommari_azzerati": {
+            "title": "Sommari Azzerati",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ambito",
+          "riferimento",
+          "anagrafiche_azzerate",
+          "sommari_azzerati",
+          "eseguito_il"
+        ],
+        "title": "AzzeramentoOutput",
         "type": "object"
       },
       "CalendarioOutput": {
@@ -1902,6 +1962,156 @@
         "summary": "Configura Comune",
         "tags": [
           "config_normativa"
+        ]
+      }
+    },
+    "/api/v1/interno/host/{host_id}/azzeramento-ospiti": {
+      "post": {
+        "description": "Azzera i campi personali di TUTTI gli Ospiti di un Host (NFR-15).\n\nResta dentro il perimetro di quell'Host (AD-2): non esiste una forma\n«tutti gli Host», e non è una dimenticanza.",
+        "operationId": "azzera_ospiti_dell_host_api_v1_interno_host__host_id__azzeramento_ospiti_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "host_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Host Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AzzeramentoInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AzzeramentoOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Azzera Ospiti Dell Host",
+        "tags": [
+          "calendario"
+        ]
+      }
+    },
+    "/api/v1/interno/host/{host_id}/ospiti/{ospite_id}/azzeramento": {
+      "post": {
+        "description": "Azzera i campi personali di UN Ospite su richiesta (NFR-15, AD-21).\n\nRiusa la procedura del job di retention: cambia la selezione, non\nl'azzeramento. Mai una `DELETE` — sarebbe una quarta forma distruttiva\nfuori dalla lista esaustiva di AD-20, e GS-6 la fermerebbe.\n\nL'Ospite sta sotto il suo Host anche nel percorso: la tenancy di un\nendpoint senza sessione deve essere scritta da qualche parte, e il\npercorso è il posto in cui si vede (AD-2).",
+        "operationId": "azzera_ospite_api_v1_interno_host__host_id__ospiti__ospite_id__azzeramento_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "host_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Host Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ospite_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ospite Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AzzeramentoInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AzzeramentoOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Azzera Ospite",
+        "tags": [
+          "calendario"
         ]
       }
     },

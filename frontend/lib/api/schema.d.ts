@@ -253,6 +253,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/interno/host/{host_id}/azzeramento-ospiti": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Azzera Ospiti Dell Host
+         * @description Azzera i campi personali di TUTTI gli Ospiti di un Host (NFR-15).
+         *
+         *     Resta dentro il perimetro di quell'Host (AD-2): non esiste una forma
+         *     «tutti gli Host», e non è una dimenticanza.
+         */
+        post: operations["azzera_ospiti_dell_host_api_v1_interno_host__host_id__azzeramento_ospiti_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interno/host/{host_id}/ospiti/{ospite_id}/azzeramento": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Azzera Ospite
+         * @description Azzera i campi personali di UN Ospite su richiesta (NFR-15, AD-21).
+         *
+         *     Riusa la procedura del job di retention: cambia la selezione, non
+         *     l'azzeramento. Mai una `DELETE` — sarebbe una quarta forma distruttiva
+         *     fuori dalla lista esaustiva di AD-20, e GS-6 la fermerebbe.
+         *
+         *     L'Ospite sta sotto il suo Host anche nel percorso: la tenancy di un
+         *     endpoint senza sessione deve essere scritta da qualche parte, e il
+         *     percorso è il posto in cui si vede (AD-2).
+         */
+        post: operations["azzera_ospite_api_v1_interno_host__host_id__ospiti__ospite_id__azzeramento_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/interno/parametri-fiscali": {
         parameters: {
             query?: never;
@@ -426,6 +477,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AmbitoAzzeramento
+         * @description Su chi è stato chiesto l'azzeramento (NFR-15).
+         *
+         *     Due soli valori, e sono il perimetro che AD-21 ammette per la
+         *     cancellazione su richiesta: un singolo Ospite, oppure tutti gli Ospiti di
+         *     un Host. Il secondo resta dentro quell'Host (AD-2): non esiste un ambito
+         *     «tutti».
+         * @enum {string}
+         */
+        AmbitoAzzeramento: "ospite" | "host";
         /** AreaIstatOutput */
         AreaIstatOutput: {
             /** Messaggio */
@@ -445,6 +507,45 @@ export interface components {
             /** Promemoria Manuale */
             promemoria_manuale: boolean;
             stato: components["schemas"]["StatoConfigurazione"];
+        };
+        /**
+         * AzzeramentoInput
+         * @description Chi chiede l'azzeramento (NFR-15). Nient'altro.
+         *
+         *     Solo l'attore, perché il «cosa» sta nel percorso e il «quando» lo decide
+         *     il server: un payload che portasse un nome o un contatto scriverebbe un
+         *     dato personale nel log della richiesta, cioè proprio ciò che
+         *     l'azzeramento sta per togliere (AD-16, NFR-11).
+         */
+        AzzeramentoInput: {
+            /** Attore */
+            attore: string;
+        };
+        /**
+         * AzzeramentoOutput
+         * @description L'evidenza, in conteggi e identificatori.
+         *
+         *     I due conteggi sono distinti e non sommati: «un'anagrafica azzerata» e
+         *     «un `sommario` azzerato» sono adempimenti diversi su tabelle diverse, e
+         *     un totale unico nasconderebbe il caso in cui uno dei due non è avvenuto —
+         *     che è esattamente il buco che questo lotto chiude.
+         */
+        AzzeramentoOutput: {
+            ambito: components["schemas"]["AmbitoAzzeramento"];
+            /** Anagrafiche Azzerate */
+            anagrafiche_azzerate: number;
+            /**
+             * Eseguito Il
+             * Format: date-time
+             */
+            eseguito_il: string;
+            /**
+             * Riferimento
+             * Format: uuid
+             */
+            riferimento: string;
+            /** Sommari Azzerati */
+            sommari_azzerati: number;
         };
         /**
          * CalendarioOutput
@@ -1380,6 +1481,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigSalvataOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    azzera_ospiti_dell_host_api_v1_interno_host__host_id__azzeramento_ospiti_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-token"?: string | null;
+            };
+            path: {
+                host_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AzzeramentoInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AzzeramentoOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    azzera_ospite_api_v1_interno_host__host_id__ospiti__ospite_id__azzeramento_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-token"?: string | null;
+            };
+            path: {
+                host_id: string;
+                ospite_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AzzeramentoInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AzzeramentoOutput"];
                 };
             };
             /** @description Validation Error */

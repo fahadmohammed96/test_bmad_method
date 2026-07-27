@@ -56,6 +56,13 @@ SUPERFICI_ESENTI = {
         "etichetta di riga (id + nome della Struttura): non mostra alcun dato "
         "derivato da un Feed"
     ),
+    "AzzeramentoInput": "input dell'endpoint interno, non mostra nulla",
+    "AzzeramentoOutput": (
+        "evidenza di un azzeramento su richiesta (NFR-15): conteggi e "
+        "identificatori di ciò che è stato appena CANCELLATO, non dati "
+        "mostrati all'Host — la freschezza di un Feed non ha alcun ruolo qui, "
+        "e aggiungerla suggerirebbe che questa risposta parli di dati vivi"
+    ),
 }
 
 # I campi che costituiscono la verità temporale (NFR-2, UX-DR6).

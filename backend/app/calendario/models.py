@@ -14,6 +14,10 @@ Quattro tabelle, tutte tenant-owned (AD-2):
 - `ospite` — anagrafica dell'Ospite (AD-21): contatti facoltativi, mai
   dedotti, con retention per AZZERAMENTO dei campi.
 
+Più `azzeramento_audit`, che non è un'entità del dominio ma la traccia
+chi/cosa/quando degli azzeramenti CHIESTI (NFR-15) — la stessa forma di
+`config_audit` per gli endpoint `/interno`.
+
 Nessuna di queste righe si cancella mai: la guardia
 `tests/test_append_preserving_convention.py` (GS-6) lo impone.
 """
@@ -33,6 +37,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -257,6 +262,18 @@ class Prenotazione(Base):
     cessata_il: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Evidenza dell'azzeramento del `sommario` (AD-21), sulla riga il cui campo
+    # è stato azzerato. Non è simmetria con `ospite.anonimizzato_il`: è la
+    # colonna su cui l'upsert di AD-4 decide se ha davanti una Prenotazione
+    # anonimizzata, e quindi se il `sommario` non va riscritto. Senza, un feed
+    # che conserva i VEVENT passati ripopolerebbe il campo appena azzerato e
+    # l'evidenza attesterebbe un azzeramento non più vero.
+    #
+    # Marca il CAMPO, non la riga: `check_in`, `check_out` e `stato` di una
+    # Prenotazione anonimizzata continuano a sincronizzare normalmente.
+    anonimizzato_il: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     @property
     def soggiorno(self) -> DateRange:
@@ -334,3 +351,57 @@ class Ospite(Base):
     @property
     def ha_contatti(self) -> bool:
         return any((self.nome, self.email, self.telefono))
+
+
+class AmbitoAzzeramento(enum.Enum):
+    """Su chi è stato chiesto l'azzeramento (NFR-15).
+
+    Due soli valori, e sono il perimetro che AD-21 ammette per la
+    cancellazione su richiesta: un singolo Ospite, oppure tutti gli Ospiti di
+    un Host. Il secondo resta dentro quell'Host (AD-2): non esiste un ambito
+    «tutti».
+    """
+
+    OSPITE = "ospite"
+    HOST = "host"
+
+
+class AzzeramentoAudit(Base):
+    """Chi/cosa/quando di ogni azzeramento CHIESTO (NFR-15, AD-21).
+
+    Il job periodico non passa di qui: la sua evidenza è `anonimizzato_il`
+    sulle righe, e l'esecuzione è nei log del worker. Qui si registra ciò che
+    l'evidenza sulle righe non può portare — che qualcuno ha *chiesto* quella
+    cancellazione, e chi. È lo stesso pattern di `config_audit` (AD-9), che è
+    il modo in cui gli endpoint `/interno` di questo progetto rendono
+    verificabile una scrittura fatta fuori dalla sessione di un Host.
+
+    **Nessun dato personale.** `riferimento` è un identificatore, i due
+    conteggi sono numeri: un nome scritto qui sopravviverebbe all'azzeramento
+    che questa riga attesta (AD-16, AD-17, NFR-11) — lo stesso motivo per cui
+    il payload del job di retention è vuoto.
+    """
+
+    __tablename__ = "azzeramento_audit"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    # Tenant-owned (AD-2): «tutti gli Ospiti di un Host» resta dentro il
+    # perimetro di quell'Host, e la traccia vive dove vive il dato.
+    host_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("host.id"), nullable=False, index=True
+    )
+    attore: Mapped[str] = mapped_column(String(200), nullable=False)
+    ambito: Mapped[AmbitoAzzeramento] = mapped_column(
+        Enum(
+            AmbitoAzzeramento,
+            name="ambito_azzeramento",
+            values_callable=lambda e: [a.value for a in e],
+        ),
+        nullable=False,
+    )
+    riferimento: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    anagrafiche_azzerate: Mapped[int] = mapped_column(Integer, nullable=False)
+    sommari_azzerati: Mapped[int] = mapped_column(Integer, nullable=False)
+    eseguito_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )

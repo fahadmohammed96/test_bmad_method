@@ -27,13 +27,13 @@ morte per `max_attempts` il ciclo di tutti gli altri.
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import cast
 
-from sqlalchemy import or_, select, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.calendario.models import FeedIcal, Ospite, Prenotazione
+from app.calendario import azzeramento
+from app.calendario.azzeramento import EsitoAzzeramento
+from app.calendario.models import FeedIcal
 from app.calendario.retention import (
     LimiteRetention,
     filtro_scadute,
@@ -257,24 +257,36 @@ def assicura_retention_periodica(db: Session) -> None:
 def azzera_anagrafiche_scadute(db: Session, payload: dict) -> None:
     """Retention dell'anagrafica Ospite (AD-21, NFR-12): AZZERA, non cancella.
 
-    Alla scadenza si scrivono a `NULL` i tre campi personali e si marca
-    `anonimizzato_il`. La riga `ospite`, la Prenotazione e la sua storia
-    restano intatte: l'azzeramento è una delle **tre** sole cancellazioni
-    distruttive che AD-20 ammette, ed è distruttivo sui CAMPI — una `DELETE`
-    di riga sarebbe una quarta, cioè un invariante rotto (GS-6).
+    Alla scadenza si scrivono a `NULL` i tre campi personali dell'anagrafica
+    **e il `sommario` della Prenotazione**, e si marca `anonimizzato_il` sulla
+    riga il cui campo è stato azzerato. La riga `ospite`, la Prenotazione e la
+    sua storia restano intatte: l'azzeramento è una delle **tre** sole
+    cancellazioni distruttive che AD-20 ammette — il `sommario` è un campo in
+    più della STESSA, non una quarta — ed è distruttivo sui CAMPI: una
+    `DELETE` di riga sarebbe l'invariante rotto (GS-6).
+
+    Il `sommario` è testo opaco del portale per tutto il resto del suo ciclo
+    di vita, ma il `SUMMARY` dei feed OTA contiene spesso il nome dell'Ospite:
+    azzerare l'anagrafica lasciandolo vivo vanificherebbe la retention. E la
+    sua `UPDATE` non è guidata dall'Ospite (`azzeramento.per_prenotazioni`):
+    l'Ospite non nasce mai dal sync, quindi il caso primario è la Prenotazione
+    scaduta **senza alcuna riga `ospite`**.
 
     **Idempotente per costruzione, non per promessa.** La selezione prende
     solo le righe che hanno davvero qualcosa da azzerare: al secondo giro
-    sullo stesso stato l'`UPDATE` tocca zero righe, perché i tre campi sono
-    già `NULL`. Non si marca `anonimizzato_il` su un'anagrafica che non ha
-    mai avuto contatti — sarebbe l'evidenza di un adempimento che non è
-    avvenuto, su dati che non sono mai esistiti.
+    sullo stesso stato le `UPDATE` toccano zero righe, perché i campi sono già
+    `NULL`. Non si marca `anonimizzato_il` su un'anagrafica che non ha mai
+    avuto contatti né su una Prenotazione senza `sommario` — sarebbe
+    l'evidenza di un adempimento che non è avvenuto, su dati che non sono mai
+    esistiti.
 
-    Il filtro è sui CONTATTI e non su `anonimizzato_il IS NULL`, che
-    sembrerebbe la condizione naturale e sarebbe un difetto: dalla Story 2.4
-    l'Host può reinserire un contatto su un'anagrafica già azzerata, e con
-    quel filtro quel dato non scadrebbe mai più. La domanda giusta è «c'è
-    qualcosa da azzerare?», non «l'ho già fatto una volta?».
+    Il filtro è sui CAMPI e non su `anonimizzato_il IS NULL`, che sembrerebbe
+    la condizione naturale e sarebbe un difetto: dalla Story 2.4 l'Host può
+    reinserire un contatto su un'anagrafica già azzerata, e con quel filtro
+    quel dato non scadrebbe mai più. La domanda giusta è «c'è qualcosa da
+    azzerare?», non «l'ho già fatto una volta?». La guardia di
+    NON-RIPOPOLAMENTO di AD-21 è un'altra cosa e vive nell'upsert, che è
+    l'unico punto in cui un `sommario` può tornare da solo.
 
     Query **non scopata per Host**, e deliberatamente: è manutenzione del
     worker, non un percorso di richiesta, e scoparla per Host significherebbe
@@ -320,49 +332,35 @@ def azzera_anagrafiche_scadute(db: Session, payload: dict) -> None:
     logger.info(
         "retention dell'anagrafica Ospite eseguita",
         extra={
-            "anagrafiche_azzerate": azzerate,
+            "anagrafiche_azzerate": azzerate.anagrafiche,
+            "sommari_azzerati": azzerate.sommari,
             "decorrenza_entro_il": limite.giorno.isoformat(),
         },
     )
 
 
-def _azzera(db: Session, limite: LimiteRetention, adesso: datetime) -> int | None:
-    """Azzera i campi personali scaduti; `None` se l'`UPDATE` è fallita.
+def _azzera(
+    db: Session, limite: LimiteRetention, adesso: datetime
+) -> EsitoAzzeramento | None:
+    """Azzera i campi personali scaduti; `None` se l'azzeramento è fallito.
 
     Il savepoint interno è ciò che rende recuperabile il fallimento: senza,
     una `UPDATE` andata male lascerebbe la transazione abortita e l'`INSERT`
     della riprogrammazione fallirebbe a sua volta — cioè il rimedio
     morirebbe dello stesso errore da cui deve proteggere.
+
+    **Entrambe le UPDATE stanno dentro QUESTO savepoint.** Metterne una fuori
+    riaprirebbe E2-F1 dalla porta accanto: un suo fallimento spegnerebbe la
+    riprogrammazione del ciclo, cioè il difetto appena chiuso.
     """
     try:
-        # La costruzione dell'istruzione sta DENTRO il try, non fuori: la
+        # La costruzione della selezione sta DENTRO il try, non fuori: la
         # protezione è su «qualunque cosa prima della riprogrammazione», e un
         # pezzo lasciato fuori è esattamente la riga da cui il ciclo si
         # spegnerebbe di nuovo.
-        scadute = select(Prenotazione.id).where(filtro_scadute(limite))
+        selezione = azzeramento.per_prenotazioni(filtro_scadute(limite))
         with db.begin_nested():
-            esito = cast(
-                CursorResult,
-                db.execute(
-                    update(Ospite)
-                    .where(
-                        or_(
-                            Ospite.nome.is_not(None),
-                            Ospite.email.is_not(None),
-                            Ospite.telefono.is_not(None),
-                        ),
-                        Ospite.prenotazione_id.in_(scadute),
-                    )
-                    .values(
-                        nome=None,
-                        email=None,
-                        telefono=None,
-                        anonimizzato_il=adesso,
-                        aggiornato_il=adesso,
-                    )
-                ),
-            )
-            return int(esito.rowcount or 0)
+            return azzeramento.esegui(db, selezione, adesso=adesso)
     except Exception:
         # Cattura larga e deliberata: l'insieme dei modi in cui una UPDATE
         # può fallire non è enumerabile a priori (deadlock, timeout, un
