@@ -41,6 +41,25 @@ class Settings(BaseSettings):
     # Ogni quanto gira il purge delle sessioni scadute (job durevole).
     purge_sessioni_intervallo_minuti: int = 60
 
+    # Retention della coda `job` (MYL-51). Dalla Story 2.2 `job` è una tabella
+    # a crescita ILLIMITATA e a ritmo noto — ~96 righe per Feed al giorno col
+    # poller a 15 minuti, più i cicli periodici di manutenzione — e nessuna
+    # riga veniva mai eliminata: l'ironia che la proposta segnala è che il job
+    # che pulisce le *sessioni* scadute esisteva e quello che pulisce i *job*
+    # no. Impatto immediato nullo, degrado silenzioso a regime.
+    #
+    # Finestra CONFIGURABILE e non costante di codice (stessa disciplina di
+    # AD-9): quanta storia della coda tenere è una scelta operativa — chi
+    # diagnostica un incidente vuole più giorni, chi ha poco disco ne vuole
+    # meno — e cambiarla non deve richiedere un rilascio.
+    #
+    # `gt=0` su entrambi, e qui e non solo nel codice che li consuma: una
+    # finestra di 0 giorni cancellerebbe i job appena completati, e un
+    # intervallo di 0 minuti riaccoderebbe il purge già scaduto consumando la
+    # coda di tutti i tenant. Un parametro assurdo deve fermare l'avvio.
+    job_retention_giorni: int = Field(default=30, gt=0)
+    job_retention_intervallo_minuti: int = Field(default=60, gt=0)
+
     # Token degli endpoint interni di configurazione normativa (AD-9).
     # Vive nel secret manager dell'ambiente; se vuoto, gli endpoint sono
     # chiusi (nessun accesso di default).

@@ -53,6 +53,26 @@ class Job(Base):
             "due_at",
             postgresql_where=text("status = 'pending'"),
         ),
+        # Indice PARZIALE sui job ATTIVI, per tipo: è la query di idempotenza
+        # di ogni bootstrap periodico («c'è già un ciclo di QUESTO tipo in
+        # coda?»). `ix_job_due` non la serve — è parziale su
+        # `status = 'pending'` e il predicato qui è `IN (pending, running)`,
+        # quindi il pianificatore non può usarlo e resta il sequential scan
+        # sull'intera tabella. Morde per primo al bootstrap del worker, che fa
+        # una query per Feed a ogni riavvio, su una coda fatta quasi
+        # interamente di righe `completed` (MYL-51).
+        #
+        # Solo `job_type`, senza espressione sul payload: un indice su
+        # `payload->>'feed_id'` legherebbe lo schema del kernel alla forma del
+        # payload di un dominio — è lo stesso argomento AD-1 con cui
+        # `assicura_sync_periodico` rifiuta il `UNIQUE` parziale — e non
+        # serve, perché la parte parziale riduce già i candidati ai soli job
+        # ATTIVI di quel tipo, che sono al più uno per Feed.
+        Index(
+            "ix_job_attivi",
+            "job_type",
+            postgresql_where=text("status IN ('pending', 'running')"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)

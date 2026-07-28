@@ -379,6 +379,7 @@ class TestBootstrapIdempotente:
         """
         from app import worker
         from app.calendario.jobs import TIPO_JOB_RETENTION_OSPITE
+        from app.core.manutenzione import TIPO_JOB_PURGE_JOB
         from app.identity.jobs import TIPO_JOB_PURGE_SESSIONI
 
         for job in db_session.scalars(select(Job)):
@@ -404,6 +405,7 @@ class TestBootstrapIdempotente:
                 TIPO_JOB_PURGE_SESSIONI,
                 TIPO_JOB_SYNC_PERIODICO,
                 TIPO_JOB_RETENTION_OSPITE,
+                TIPO_JOB_PURGE_JOB,
             ]
         )
 

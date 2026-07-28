@@ -1,0 +1,25 @@
+# Fine riga decisi dal REPOSITORY, non dalla configurazione locale di git.
+#
+# Senza questo file il trattamento dipende da `core.autocrlf` della macchina:
+# su Windows (`autocrlf=true`, il default dell'installer) il working tree esce
+# in CRLF, su Linux e macOS in LF. Per i sorgenti è un fastidio; per i fixture
+# di FORMATO è un difetto — i `.ics` di `backend/tests/fixtures/ical/` testano
+# folding, troncamenti e confini testuali, cioè proprietà che vivono nei byte,
+# e un fixture che cambia byte fra due macchine fa dire alla suite cose diverse
+# a seconda di chi la lancia. Un test che fallisce solo sulla macchina di
+# qualcun altro è la forma peggiore: si attribuisce all'ambiente.
+#
+# `text=auto eol=lf` significa LF in indice **e** in working tree, ovunque.
+# L'indice è già interamente LF, quindi non c'è alcuna renormalizzazione di
+# massa: il file rende esplicito lo stato che il repository ha già, e lo
+# sottrae alla configurazione di chi fa il checkout.
+* text=auto eol=lf
+
+# I fixture iCal, dichiarati a parte perché è qui che la regola serve davvero.
+# Il loro README dichiara «i file sono in LF» e che le varianti puramente di
+# trasporto (CRLF, BOM iniziale) si costruiscono NEL test, perché in un file
+# sarebbero invisibili in review e darebbero l'illusione di un caso coperto.
+# Questa riga è ciò che rende quella dichiarazione vera anche su Windows:
+# senza, il `read_bytes()` di `tests/calendario.py` restituisce CRLF lì e LF
+# altrove, e il caso «CRLF» risulta coperto per caso invece che per scelta.
+*.ics text eol=lf
