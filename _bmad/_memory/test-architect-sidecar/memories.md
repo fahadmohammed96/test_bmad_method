@@ -84,13 +84,16 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   avevano aggiunto ciascuna una migrazione `revision = "0013"` su `down_revision = "0012"`.
   Il difetto **non esiste in nessuna delle due PR** — entrambe verdi sulla propria base — e
   nasce nel trunk al secondo merge. È la forma della PR #36 che ha prodotto
-  `base-della-pr.yml`: il difetto sta *fra* i controlli. Due conseguenze operative: (1)
+  `base-della-pr.yml`: il difetto sta *fra* i controlli. Tre conseguenze operative: (1)
   **guardo la CI di `main`, non solo quella della PR**, prima di dare un verdetto o di fidarmi
-  di una baseline; (2) la guardia ora esiste
-  (`backend/tests/test_migrations.py::test_le_migrazioni_hanno_una_sola_head` e
-  `::test_nessun_identificativo_di_revisione_e_usato_due_volte`), gira **senza database** e
-  cade in 0.07 s dicendo qual è la causa, invece di lasciare 431 errori che parlano di
-  connessioni.
+  di una baseline; (2) la guardia esiste, è `TestCatenaLineare` in
+  `backend/tests/test_migrations.py` (MYL-75, PR #56): gira **senza database** e cade in
+  pochi centesimi nominando la causa, invece di lasciare 431 errori che parlano di
+  connessioni; (3) **prima di dispacciare un finding, guardo le PR aperte.** Avevo scritto la
+  mia guardia e mandato il batch ad Amelia senza accorgermi che la #56 era già aperta da
+  quaranta minuti, con la correzione e una guardia **più forte** della mia. È la stessa
+  lezione del 25/07 sui rami duplicati, che avevo applicato ai miei deliverable e non ai miei
+  finding: `gh pr list` costa due secondi e va fatto **prima** di aprire un fronte, non dopo.
 - 2026-07-25 — La regola «verdetto del Test Architect prima del merge umano» è entrata in
   vigore dalla Story 1.3. Le PR mergiate prima (#12, #18) sono state verificate
   **retroattivamente** e l'esito è registrato nella matrice. Se una regola di gate arriva a

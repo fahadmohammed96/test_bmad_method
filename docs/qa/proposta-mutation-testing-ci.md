@@ -380,8 +380,9 @@ report si adotta, questa riga va nel README del backend e non solo qui.
 ### 7.8 Nota di metodo
 
 La baseline è costata più dello spike. Su `main` (b15591e) la suite non parte:
-431 test in errore. La causa è fuori da questo documento (due migrazioni
-`0013`, vedi `backend/tests/test_migrations.py`), ma il punto di metodo resta:
-**ho misurato la suite prima di misurare lo strumento**, e senza quel passaggio
-avrei attribuito a `mutmut` un guasto che non era suo — che è esattamente
-l'errore da cui nascono i tre caveat di §5.
+431 test in errore, per due migrazioni che dichiarano entrambe `revision =
+"0013"`. La causa è fuori da questo documento — si chiude con MYL-75 (PR #56,
+che ripara la catena e aggiunge la guardia `TestCatenaLineare`) — ma il punto
+di metodo resta: **ho misurato la suite prima di misurare lo strumento**, e
+senza quel passaggio avrei attribuito a `mutmut` un guasto che non era suo, che
+è esattamente l'errore da cui nascono i tre caveat di §5.
