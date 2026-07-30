@@ -23,19 +23,38 @@ import { violazioniGravi } from "./axe-utils";
  * (E2-F4). Senza quello, «axe verde sulla superficie» sarebbe
  * un'affermazione più larga di ciò che è stato guardato.
  *
- * **Cosa questo spec NON copre, dichiarato invece che taciuto.** La metà
- * «sync concluso» dell'AC 6 non è esercitabile in questo ambiente: il
- * `webServer` di Playwright avvia l'API ma non il worker, e la politica di
- * uscita di rete rifiuta il loopback (NFR-17), quindi nessun import può
- * concludersi qui. Resta **non chiudibile** anche dopo la Story 2.4, e la
- * ragione non è il perimetro della Story: è l'ambiente.
+ * **Cosa questo spec NON copre, dichiarato invece che taciuto.** Un import che
+ * si **conclude davvero** non è esercitabile in questo ambiente: il `webServer`
+ * di Playwright avvia l'API ma non il worker, e la politica di uscita di rete
+ * rifiuta il loopback (NFR-17). Resta non esercitabile anche dopo la Story 2.4,
+ * e la ragione non è il perimetro della Story: è l'ambiente.
  *
- * Quello che la Story 2.4 chiude è l'altra metà dello stesso AC — la
- * **mutazione reale della sorgente** —, e la chiude per davvero: l'ultimo test
- * di questo file inserisce una Prenotazione dal form, non da un payload
- * intercettato, e osserva che griglia ed etichetta si muovono **insieme** senza
- * ricaricare la pagina. Con quella Prenotazione la baseline axe smette di
- * misurare un chip finto (AC 8).
+ * Quello che la Story 2.4 chiude è l'AC 6 nella sua sostanza — **una mutazione
+ * della sorgente aggiorna sia la griglia sia l'etichetta** — su due mutazioni
+ * entrambe reali, l'inserimento di una Prenotazione dal form e la sua
+ * cancellazione. L'ultimo test di questo file le esercita in sequenza e osserva
+ * le due metà separatamente, perché sono due affermazioni diverse:
+ *
+ * 1. **la griglia si muove** — chip nuovo, poi chip `Cancellata` — senza
+ *    ricaricare la pagina, che è l'unico posto in cui la cache esiste (nei test
+ *    di componente gli hook sono mockati);
+ * 2. **l'etichetta segue la sorgente**: quando l'orario di sincronizzazione
+ *    della sorgente cambia, dopo la mutazione l'etichetta porta il valore
+ *    **nuovo**, non quello con cui la pagina era stata caricata. Un'etichetta
+ *    ferma su un orario vecchio è la falsa sincronia che NFR-2 vieta, e questa
+ *    è la sola asserzione che la vede.
+ *
+ * Perché quell'orario venga sostituito nella risposta e non prodotto da un sync
+ * vero è spiegato sul route handler del test: è la parte che l'ambiente non può
+ * far avanzare da sé, e sostituire un campo è meno di quanto costerebbe non
+ * asserire nulla.
+ *
+ * Resta asserito anche il rovescio: inserire una Prenotazione a mano **non**
+ * deve far comparire un orario di aggiornamento dei portali. Un dato scritto
+ * dall'Host non rende più freschi quelli delle OTA (NFR-2).
+ *
+ * Con quelle Prenotazioni la baseline axe smette di misurare un chip finto
+ * (AC 8).
  */
 
 const CREDENZIALI = { password: "una-password-lunga" };
@@ -281,6 +300,16 @@ test("la griglia CON Prenotazioni non ha violazioni a11y gravi", async ({
   expect(await violazioniGravi(page)).toEqual([]);
 });
 
+/** I due istanti di sincronizzazione della sorgente, distinti all'HH:MM.
+ *
+ * Europe/Rome, ora legale: 12:35Z → «14:35», 16:05Z → «18:05». Distinti
+ * nell'unità che l'etichetta mostra, perché è quella che il test legge: due
+ * istanti diversi che si formattassero uguale renderebbero l'asserzione vera
+ * anche a etichetta ferma.
+ */
+const SYNC_PRIMA = { iso: "2026-08-17T12:35:00Z", orario: "14:35" };
+const SYNC_DOPO = { iso: "2026-08-17T16:05:00Z", orario: "18:05" };
+
 /**
  * La mutazione REALE della sorgente (AC 6 della Story 2.3, metà «Prenotazione
  * manuale») e la baseline axe su un chip **vero** (AC 8).
@@ -294,14 +323,35 @@ test("la griglia CON Prenotazioni non ha violazioni a11y gravi", async ({
  *
  * Qui la Prenotazione la scrive l'Host, dal form, e tutto il resto è vero: la
  * griglia si aggiorna **senza ricaricare la pagina** — è l'unico posto in cui la
- * cache esiste, nei test di componente gli hook sono mockati — e l'etichetta
- * «dati aggiornati alle HH:MM» viene interrogata sullo stesso istante.
+ * cache esiste, nei test di componente gli hook sono mockati.
  *
- * L'asserzione che porta più valore è quella **negativa**: inserire una
- * Prenotazione a mano NON deve far comparire un orario di aggiornamento. Un
- * dato scritto dall'Host non rende più freschi quelli dei portali, e un'etichetta
- * che dicesse «dati aggiornati alle 14:32» perché è stata inserita una manuale
- * sarebbe falsa sincronia prodotta dal prodotto stesso (NFR-2).
+ * Il test ha **due atti**, e la ragione per cui sono due è che l'AC 6 afferma
+ * due cose diverse sull'etichetta.
+ *
+ * **Atto 1 — la griglia si muove, l'etichetta non inventa.** Tutto vero, niente
+ * intercettato. Inserire una Prenotazione a mano NON deve far comparire un
+ * orario di aggiornamento: un dato scritto dall'Host non rende più freschi
+ * quelli dei portali, e un'etichetta che dicesse «dati aggiornati alle 14:32»
+ * perché è stata inserita una manuale sarebbe falsa sincronia prodotta dal
+ * prodotto stesso (NFR-2).
+ *
+ * **Atto 2 — l'etichetta segue la sorgente.** Qui l'atto 1 non arriva, e vale
+ * la pena dire perché invece di lasciarlo credere: in questo ambiente
+ * `ultimo_sync_riuscito_il` è `null` per tutta la durata della suite — nessun
+ * worker, nessun import concluso — quindi la pagina rende sempre il ramo «mai
+ * sincronizzato» e la stringa `HH:MM` **non è raggiungibile**. Un'asserzione
+ * sull'etichetta scritta nell'atto 1 è vera anche a etichetta ferma dal
+ * caricamento, cioè non vede il difetto per cui esiste.
+ *
+ * L'atto 2 fa avanzare quell'orario — l'unico campo che l'ambiente non può
+ * produrre — e osserva che dopo una mutazione **reale** (la cancellazione, un
+ * `POST` che scrive davvero) l'etichetta porta il valore **nuovo**. Il difetto
+ * che solo questa asserzione vede: un'etichetta che congeli la freschezza al
+ * primo render — un `useState` iniziale invece del valore della query — mentre
+ * la griglia continua ad aggiornarsi. Oggi griglia ed etichetta vengono dalla
+ * stessa query (`useCalendario`, una sola chiave invalidata): questa asserzione
+ * è ciò che rende **rosso** il giorno in cui le si separa senza invalidare
+ * entrambe, che è la classe di difetto della Story 1.6.
  */
 
 /** Il primo giorno mostrato dalla griglia, letto DALLA PAGINA.
@@ -324,7 +374,7 @@ async function primoGiornoVisibile(
   return `${anno}-${mese}-${giorno}`;
 }
 
-test("una Prenotazione inserita a mano aggiorna griglia ed etichetta senza reload", async ({
+test("una mutazione della sorgente muove la griglia e l'etichetta, senza reload", async ({
   page,
 }, testInfo) => {
   await registra(page, `manuale-${testInfo.project.name}`);
@@ -393,6 +443,51 @@ test("una Prenotazione inserita a mano aggiorna griglia ed etichetta senza reloa
   await page.getByRole("button", { name: "Chiudi" }).click();
   await expect(page.getByLabel("Arrivo")).toHaveCount(0);
 
+  // ------------------------------------------------------- Atto 2 (vedi sopra)
+
+  // L'orologio della sorgente, che questo ambiente non sa far avanzare: senza
+  // worker `ultimo_sync_riuscito_il` resta `null` per tutta la suite, e la
+  // stringa `HH:MM` dell'etichetta non viene mai renderizzata.
+  let sincronizzatoIl: string | null = SYNC_PRIMA.iso;
+
+  await page.route("**/api/v1/calendario**", async (rotta) => {
+    const richiesta = rotta.request();
+    // SOLO la lettura della griglia. Il `POST` della cancellazione deve
+    // arrivare al server e scrivere davvero, altrimenti non ci sarebbe alcuna
+    // mutazione da osservare e questo test misurerebbe se stesso.
+    if (
+      richiesta.method() !== "GET" ||
+      new URL(richiesta.url()).pathname !== "/api/v1/calendario"
+    ) {
+      await rotta.continue();
+      return;
+    }
+    // `fetch` + `fulfill(response)`: la risposta è quella VERA del server —
+    // le voci, le Strutture, il conteggio dei Feed, le intestazioni CORS — e
+    // si sostituisce **un solo campo**. Costruire il corpo da zero
+    // rimetterebbe la griglia in mano al test, cioè perderebbe la mutazione
+    // reale che è il punto dell'AC.
+    const risposta = await rotta.fetch();
+    await rotta.fulfill({
+      response: risposta,
+      json: {
+        ...(await risposta.json()),
+        ultimo_sync_riuscito_il: sincronizzatoIl,
+      },
+    });
+  });
+
+  // `goto` per portare in pagina l'orario «prima»: è il caricamento la cui
+  // cache deve poi restare coerente, e ciò che non deve esserci in mezzo è un
+  // reload fra la mutazione e le asserzioni.
+  await page.goto("/calendario");
+  await expect(
+    page.getByText(`Dati aggiornati alle ${SYNC_PRIMA.orario}`),
+  ).toBeVisible();
+
+  // La sorgente si è sincronizzata mentre l'Host guardava la pagina.
+  sincronizzatoIl = SYNC_DOPO.iso;
+
   // Cancellazione: transizione, non sparizione (AD-19, AD-20). Anche questa
   // senza reload.
   await page
@@ -404,6 +499,17 @@ test("una Prenotazione inserita a mano aggiorna griglia ed etichetta senza reloa
   // Resta lì, con la sua etichetta: è «archiviare, mai distruggere» visto dagli
   // occhi dell'Host, che quella prenotazione l'ha appena inserita.
   await expect(griglia.getByText("Ospite Inventato")).toBeVisible();
+
+  // L'etichetta ha seguito la sorgente: valore NUOVO, e quello vecchio non è
+  // più in pagina. Le due asserzioni servono entrambe — la prima vede
+  // l'etichetta ferma, la seconda vede due etichette contemporaneamente.
+  await expect(
+    page.getByText(`Dati aggiornati alle ${SYNC_DOPO.orario}`),
+  ).toBeVisible();
+  await expect(
+    page.getByText(`Dati aggiornati alle ${SYNC_PRIMA.orario}`),
+  ).toHaveCount(0);
+
   expect(await violazioniGravi(page)).toEqual([]);
 });
 

@@ -746,13 +746,26 @@ class TestApiCreazione:
         richiesti = set(schema["PrenotazioneManualeInput"]["required"])
         assert richiesti == {"struttura_id", "check_in", "check_out"}
 
+    @pytest.mark.parametrize(
+        "check_out",
+        [
+            # Partenza = arrivo: zero notti. È il confine dell'intervallo
+            # semiaperto, cioè il caso che si sbaglia per primo.
+            "2026-09-10",
+            # Partenza PRIMA dell'arrivo: l'errore di battitura più comune di
+            # chi compila due campi data, e finora coperto solo al livello del
+            # service. Il 422 lo deve dare il confine HTTP, che è dove l'Host
+            # arriva.
+            "2026-09-08",
+        ],
+    )
     def test_un_intervallo_vuoto_e_un_422_problem_json_mai_un_500(
-        self, client: TestClient
+        self, client: TestClient, check_out: str
     ) -> None:
         _accedi(client)
         struttura_id = _struttura(client)
 
-        risposta = _crea(client, struttura_id, check_out="2026-09-10")
+        risposta = _crea(client, struttura_id, check_out=check_out)
 
         assert risposta.status_code == 422
         assert risposta.headers["content-type"].startswith(PROBLEM)
@@ -931,6 +944,44 @@ class TestNessunDatoDellOspiteNeiLog:
         for record in caplog.records:
             valori = [str(valore) for valore in record.__dict__.values()]
             assert all("Nome Che Non Deve Uscire" not in v for v in valori)
+
+    def test_il_log_della_creazione_porta_soli_identificatori(
+        self,
+        db_session: Session,
+        contesto: Contesto,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """La creazione è il percorso da cui l'anagrafica ENTRA nel sistema.
+
+        Vale più della cancellazione, non meno: alla cancellazione l'Ospite
+        c'era già, alla creazione arriva adesso — e il `con_ospite` booleano nel
+        log esiste proprio per dire «ce n'era uno» senza dire chi. Il `sommario`
+        è nella stessa asserzione perché è testo scritto dall'Host e può
+        contenere qualunque cosa, incluso un nome (NFR-11).
+        """
+        with caplog.at_level("INFO", logger="app.calendario.service"):
+            crea_manuale(
+                db_session,
+                contesto,
+                check_in=DAL,
+                check_out=AL,
+                sommario="Nome Che Non Deve Uscire",
+                ospite=service.DatiOspite(
+                    nome="Nome Che Non Deve Uscire",
+                    email="non.deve.uscire@example.com",
+                    telefono="+39 000 0000000",
+                ),
+            )
+
+        assert caplog.records, "la creazione non lascia traccia"
+        for record in caplog.records:
+            valori = [str(valore) for valore in record.__dict__.values()]
+            for personale in (
+                "Nome Che Non Deve Uscire",
+                "non.deve.uscire@example.com",
+                "+39 000 0000000",
+            ):
+                assert all(personale not in valore for valore in valori)
 
 
 class TestUnAltraStruttura:
