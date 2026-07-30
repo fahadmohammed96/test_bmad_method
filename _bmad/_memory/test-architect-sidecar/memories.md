@@ -53,6 +53,44 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   sola la guardia che dipendeva da quel conteggio. Regola operativa: ogni cancello nuovo va
   consegnato con la prova che **cade** su un caso costruito per farlo cadere, non solo con la
   prova che passa.
+- 2026-07-30 — **`mutmut` 3.6 su questo stack: gira, ma non vede.** Spike MYL-72, esito in
+  `docs/qa/proposta-mutation-testing-ci.md` §7. Tre fatti da non rimisurare: (1) **17.4%**
+  delle righe di funzione di `backend/app/` è cieco per costruzione — `mutmut` salta funzioni
+  e classi **decorate**, quindi lo strato `api.py` è cieco al 78–100%, ogni `@dataclass`
+  (compresa `DateRange`, cioè `overlaps`, cioè l'anti-double-booking) riceve zero mutanti, e
+  così gli handler `@handlers.register`; (2) la sandbox `mutants/` riscrive i metodi in
+  `xǁClasseǁmetodo__mutmut_N`, quindi **tutte le nostre guardie strutturali per riflessione**
+  (tenancy, auth, conventions, copertura) cadono lì dentro e vanno deselezionate — la suite
+  della sandbox non è la suite del repo; (3) **il costo scala con quanto è importato il modulo
+  toccato, non con la dimensione del diff**: 15.49 mutazioni/s sui 7 file della Story 2.4,
+  **0.41** su `core/date_range.py`. Su 1712 mutanti reali: **0 sopravvissuti**. Adozione non
+  raccomandata; la decisione è di Fahad.
+- 2026-07-30 — **Prima di credere a «zero problemi», far dire allo strumento «un problema».**
+  Nello spike MYL-72 lo «zero sopravvissuti» sarebbe stato indistinguibile da uno strumento
+  mal configurato: la prova è stata iniettare una funzione con un ramo non testato e
+  verificare che `mutmut` la segnalasse (4 sopravvissuti, con diff leggibile). È la stessa
+  regola del 30/07 sui cancelli — **si consegna con la prova che cade**, non solo con la prova
+  che passa — applicata a uno strumento di misura invece che a un cancello.
+- 2026-07-30 — **Una misura presa con lo strumento mal configurato è peggio di nessuna
+  misura**, perché sembra un dato. I «3 mutanti sopravvissuti su 60, tutti falsi positivi su
+  stringhe» della proposta PR #50 erano l'effetto della calibrazione fallita: con la
+  configurazione corretta i sopravvissuti sono **0**. Su quella misura sbagliata era stata
+  costruita una raccomandazione, poi una decisione, poi un incarico di implementazione — e la
+  leva che l'incarico chiedeva («disattiva le mutazioni sui letterali stringa») **in `mutmut`
+  3.6 non esiste**. Regola: quando riporto un numero preso da uno strumento nuovo, dichiaro
+  accanto se il run era pulito; e se non lo era, il numero non si riporta affatto.
+- 2026-07-30 — **`main` può essere rosso per giorni senza che nessuno se ne accorga**: qui lo
+  è stato per **quattro merge consecutivi** (431 test in errore) perché le PR #52 e #53
+  avevano aggiunto ciascuna una migrazione `revision = "0013"` su `down_revision = "0012"`.
+  Il difetto **non esiste in nessuna delle due PR** — entrambe verdi sulla propria base — e
+  nasce nel trunk al secondo merge. È la forma della PR #36 che ha prodotto
+  `base-della-pr.yml`: il difetto sta *fra* i controlli. Due conseguenze operative: (1)
+  **guardo la CI di `main`, non solo quella della PR**, prima di dare un verdetto o di fidarmi
+  di una baseline; (2) la guardia ora esiste
+  (`backend/tests/test_migrations.py::test_le_migrazioni_hanno_una_sola_head` e
+  `::test_nessun_identificativo_di_revisione_e_usato_due_volte`), gira **senza database** e
+  cade in 0.07 s dicendo qual è la causa, invece di lasciare 431 errori che parlano di
+  connessioni.
 - 2026-07-25 — La regola «verdetto del Test Architect prima del merge umano» è entrata in
   vigore dalla Story 1.3. Le PR mergiate prima (#12, #18) sono state verificate
   **retroattivamente** e l'esito è registrato nella matrice. Se una regola di gate arriva a
