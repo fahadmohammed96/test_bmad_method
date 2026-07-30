@@ -83,7 +83,8 @@ import httpx
 #: Il nome del check che comparirà sulla PR. Cambiarlo significa che ogni
 #: protezione di ramo configurata sul vecchio nome smette di sorvegliare
 #: qualcosa, **restando verde**: è la forma di guasto silenzioso che questo
-#: file esiste per evitare. `tests/test_verdetto_convention.py` lo blocca.
+#: file esiste per evitare — vedi
+#: `tests/test_verdetto_gate.py::test_il_contesto_del_cancello_e_pinnato`.
 CONTESTO = "verdetto-murat"
 
 API = "https://api.github.com"
@@ -329,6 +330,38 @@ def _descrizione_stato(verdetto: Verdetto, motivo: str | None) -> str:
     return f"{testa} — {motivo}" if motivo else f"{testa} — verdetto su questo SHA"
 
 
+def _ritira_approvazione(http: httpx.Client, repo: str, pr: int, sha: str) -> None:
+    """Dichiara sulla PR che l'APPROVA appena scritta NON è un via libera.
+
+    Serve alla finestra fra le due scritture del percorso APPROVA: la review è
+    passata, lo stato no. Senza questa riga la pagina della PR direbbe
+    «APPROVA» mentre il cancello è chiuso — cioè di nuovo una pagina GitHub che
+    afferma una cosa diversa dalla verità, che è l'incidente di partenza con i
+    ruoli invertiti.
+
+    È a **sforzo migliore**: se anche questa fallisce, l'errore originale resta
+    quello che conta e viene comunque sollevato. Non aggiunge un modo di
+    fallire, ne toglie uno di ingannare.
+    """
+    try:
+        http.post(
+            f"/repos/{repo}/pulls/{pr}/reviews",
+            json={
+                "commit_id": sha,
+                "event": "COMMENT",
+                "body": (
+                    "⚠️ **Il verdetto APPROVA qui sopra NON è pubblicato come "
+                    f"cancello.** Lo stato di commit `{CONTESTO}` su `{sha}` "
+                    "non è stato scritto (permessi o rete), quindi il cancello "
+                    "**non è verde** e questa PR non va mergiata su questo SHA. "
+                    "Il verdetto va ripubblicato."
+                ),
+            },
+        )
+    except httpx.HTTPError:
+        pass
+
+
 def pubblica_verdetto(
     http: httpx.Client,
     repo: str,
@@ -346,6 +379,14 @@ def pubblica_verdetto(
     _valida(repo, sha)
     _valida_url(url_verdetto)
 
+    # Controllo di cortesia, NON la garanzia. Misurato il 30/07 sul banco di
+    # prova (PR #55): subito dopo un `git push` andato a buon fine, GET
+    # /pulls/{n} ha continuato a riportare la head PRECEDENTE per qualche
+    # secondo. Chi si fidasse di questo controllo come presidio unico
+    # pubblicherebbe, in quella finestra, un'approvazione su un albero già
+    # superato. Che non sia un problema dipende dall'architettura, non dalla
+    # fortuna: lo stato è legato allo SHA, quindi finirebbe sul commit
+    # vecchio, e la head nuova resterebbe senza stato — cancello non verde.
     head = head_della_pr(http, repo, pr)
     if head != sha:
         raise ErroreVerdetto(
@@ -367,7 +408,11 @@ def pubblica_verdetto(
         # `success` per ULTIMO. Ogni riga sopra questa può fallire, e finché
         # non è eseguita il cancello non è verde.
         evento = pubblica_review(http, repo, pr, sha, verdetto, corpo)
-        pubblica_stato(http, repo, sha, "success", descrizione, url_verdetto)
+        try:
+            pubblica_stato(http, repo, sha, "success", descrizione, url_verdetto)
+        except ErroreVerdetto:
+            _ritira_approvazione(http, repo, pr, sha)
+            raise
 
     # Rilettura di controllo. Uno strumento che dichiara di aver pubblicato uno
     # stato senza averlo mai riletto è esattamente il tipo di cancello non

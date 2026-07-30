@@ -231,6 +231,61 @@ def test_stato_fallito_su_approva_non_risulta_approvato() -> None:
         assert leggi_cancello(http, REPO, SHA) == "assente"
 
 
+def test_stato_fallito_dopo_la_review_ritira_l_approvazione() -> None:
+    """La pagina della PR non deve restare a dire «APPROVA» a cancello chiuso.
+
+    È l'incidente del 30/07 con i ruoli invertiti: là la pagina taceva un
+    BOCCIA, qui affermerebbe un APPROVA che non è stato pubblicato. In entrambi
+    i casi chi guarda la PR legge qualcosa di diverso dalla verità.
+    """
+    finto = FintoGitHub(
+        esiti={
+            ("POST", STATUSES): [
+                httpx.Response(403, json={"message": "Resource not accessible"})
+            ]
+        }
+    )
+    with _client(finto) as http, pytest.raises(ErroreVerdetto):
+        pubblica_verdetto(http, REPO, PR, SHA, Verdetto.APPROVA, URL)
+
+    review = [c for c in finto.scritture if c[1] == REVIEWS]
+    assert len(review) == 2, "manca il ritiro dell'approvazione"
+    assert review[-1][2] is not None
+    assert "NON è pubblicato" in review[-1][2]["body"]
+    assert review[-1][2]["event"] == "COMMENT"
+
+
+def test_il_ritiro_fallito_non_maschera_l_errore_originale() -> None:
+    """Il ritiro è a sforzo migliore: se cade, resta l'errore che conta."""
+    finto = FintoGitHub(
+        esiti={
+            ("POST", STATUSES): [httpx.Response(403, json={"message": "no"})],
+            ("POST", REVIEWS): [
+                httpx.Response(200, json={}),
+                httpx.Response(500, json={"message": "anche il ritiro cade"}),
+            ],
+        }
+    )
+    with _client(finto) as http, pytest.raises(ErroreVerdetto, match="NON pubblicato"):
+        pubblica_verdetto(http, REPO, PR, SHA, Verdetto.APPROVA, URL)
+
+
+def test_la_head_in_ritardo_non_apre_il_cancello_sulla_head_vera() -> None:
+    """Il controllo sulla head è cortesia; la garanzia è che lo stato è per SHA.
+
+    Misurato il 30/07 sul banco di prova (PR #55): subito dopo un `git push`
+    riuscito, GET /pulls/{n} ha riportato la head PRECEDENTE per qualche
+    secondo. In quella finestra il verdetto viene pubblicato — ma sul commit
+    vecchio, e la head vera resta senza stato. Se il presidio fosse il
+    controllo sulla head invece dello stato legato allo SHA, quella finestra
+    sarebbe un buco.
+    """
+    finto = FintoGitHub(head=SHA)  # l'API è in ritardo: la head vera è SHA_NUOVO
+    with _client(finto) as http:
+        pubblica_verdetto(http, REPO, PR, SHA, Verdetto.APPROVA, URL)
+        assert leggi_cancello(http, REPO, SHA_NUOVO) == "assente"
+
+
 def test_rete_caduta_su_approva_non_risulta_approvato(token: str) -> None:
     """La rete cade a metà: uscita non zero, e nessuno stato pubblicato."""
 
@@ -436,6 +491,19 @@ def test_il_token_non_compare_mai_nelle_uscite(
     catturato = capsys.readouterr()
     assert segreto not in catturato.out + catturato.err
     assert "***" in catturato.err
+
+
+def test_il_contesto_del_cancello_e_pinnato() -> None:
+    """Il nome del check non si cambia per distrazione.
+
+    Il giorno in cui `verdetto-murat` sarà un check obbligatorio in branch
+    protection, rinominare questa costante non romperebbe niente di visibile:
+    la protezione continuerebbe ad aspettare un contesto che nessuno pubblica
+    più, e la PR resterebbe bloccata — oppure, se la protezione venisse
+    allentata «perché tanto quel check non arriva più», il cancello sparirebbe
+    in silenzio. Cambiarlo si può; farlo senza accorgersene no.
+    """
+    assert CONTESTO == "verdetto-murat"
 
 
 def test_maschera_sostituisce_ogni_occorrenza() -> None:
