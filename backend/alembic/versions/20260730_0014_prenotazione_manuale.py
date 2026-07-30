@@ -1,7 +1,7 @@
 """calendario: Canale `manuale` e coerenza di `(feed_id, ical_uid)` (MYL-61)
 
-Revision ID: 0013
-Revises: 0012
+Revision ID: 0014
+Revises: 0013
 Create Date: 2026-07-30
 
 Due modifiche, entrambe **additive**: nessuna riga viene toccata, nessuna
@@ -37,8 +37,8 @@ manuale» sarebbe pure vera, ma esprimerla qui richiederebbe il letterale
 
 from alembic import op
 
-revision = "0013"
-down_revision = "0012"
+revision = "0014"
+down_revision = "0013"
 branch_labels = None
 depends_on = None
 
