@@ -83,9 +83,11 @@ class TestCatenaLineare:
             trovato = NOME_MIGRAZIONE.match(percorso.name)
             assert trovato is not None
             revisione = re.search(
-                r'^revision = "(?P<id>[^"]+)"', percorso.read_text(encoding="utf-8"), re.M
+                r'^revision = "(?P<id>[^"]+)"',
+                percorso.read_text(encoding="utf-8"),
+                re.M,
             )
-            assert revisione is not None, f"{percorso.name}: manca `revision = \"…\"`"
+            assert revisione is not None, f'{percorso.name}: manca `revision = "…"`'
             if revisione["id"] != trovato["ordinale"]:
                 disallineati[percorso.name] = revisione["id"]
         assert disallineati == {}
