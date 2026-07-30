@@ -26,6 +26,19 @@
 # qui: le servono i tipi di evento `edited` per vedere un cambio di base, e
 # applicarli a questo workflow farebbe ripartire backend, frontend ed e2e a
 # ogni correzione della descrizione.
+#
+# Copertura (MYL-59). Fino al 30/07 questa pipeline non produceva alcun report
+# di copertura: il `0.0% Coverage on New Code` che il Quality Gate SonarCloud
+# mostrava su ogni PR non era un esito, era l'assenza del dato — e la copertura
+# non è nemmeno fra le condizioni che quel gate valuta (misurato via API:
+# `new_reliability_rating`, `new_security_rating`, `new_maintainability_rating`,
+# `new_duplicated_lines_density`, `new_security_hotspots_reviewed`, e nulla
+# sulla copertura). Il numero adesso lo produce la CI e a farlo mordere è il job
+# `copertura`, che non dipende da alcun servizio esterno né da alcun segreto.
+# Che questi step restino al loro posto lo impone
+# `backend/tests/test_copertura_convention.py`: senza quella guardia la
+# configurazione sarebbe rimovibile in silenzio, cioè avrebbe esattamente la
+# forma del difetto da cui nasce.
 name: CI
 
 on:
@@ -80,8 +93,17 @@ jobs:
         run: uv run --no-sync --no-build ruff format --check .
       - name: Typecheck
         run: uv run --no-sync --no-build mypy
-      - name: Test
-        run: uv run --no-sync --no-build pytest
+      # `--cov` senza valore usa `[tool.coverage.run] source` di
+      # `pyproject.toml`: la configurazione della misura sta versionata nel
+      # repository, dove si rivede in una PR, non in questa riga.
+      - name: Test (con copertura)
+        run: uv run --no-sync --no-build pytest --cov --cov-report=xml --cov-report=term:skip-covered
+      - name: Copertura backend come artefatto
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: copertura-backend
+          path: backend/coverage.xml
+          if-no-files-found: error
       # Lo schema del database corrisponde ai modelli (MYL-44). È il cancello
       # che avrebbe intercettato il modulo `calendario` non registrato in
       # `alembic/env.py`: una migrazione dimenticata non rompe nessun test —
@@ -121,8 +143,14 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
-      - name: Test
-        run: npm test
+      - name: Test (con copertura)
+        run: npm run test:coverage
+      - name: Copertura frontend come artefatto
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: copertura-frontend
+          path: frontend/coverage/lcov.info
+          if-no-files-found: error
       - name: Build
         run: npm run build
 
@@ -201,3 +229,124 @@ jobs:
         working-directory: frontend
       - name: Contratto e client committati allineati al codice
         run: git diff --exit-code -- backend/openapi.json frontend/lib/api/schema.d.ts
+
+  # Copertura delle righe TOCCATE dalla PR (MYL-59). È questo il cancello; i
+  # pavimenti globali in `pyproject.toml` e `vitest.config.ts` sono un backstop.
+  #
+  # Perché il pavimento globale non basta, misurato e non supposto: togliendo
+  # `backend/tests/test_calendario_sync.py` intero — 81 test, il file che copre
+  # il modulo più rischioso del progetto — il totale scende da 96.44% a 95.16%,
+  # e un pavimento a 93 non se ne accorge. Un totale globale è tenuto su dai
+  # test che attraversano le stesse righe per altri motivi, e si diluisce sul
+  # codice che cresce. Le righe NUOVE non le copre nessuno per sbaglio.
+  #
+  # Gira solo sulle PR: su un push a `main` non esiste un diff da sorvegliare, e
+  # un cancello che passa a vuoto è indistinguibile da uno che ha misurato.
+  copertura:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.event_name == 'pull_request'
+    # Legge il repository (gli serve la storia per il merge-base) e scarica gli
+    # artefatti prodotti dai due job di test. Non scrive nulla.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # `diff-cover` confronta `origin/<base>...HEAD`: senza la storia
+          # completa il merge-base non esiste, non c'è un diff da misurare, e lo
+          # strumento passerebbe a vuoto.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      # `diff-cover` arriva dal lockfile del backend, come ogni altro strumento
+      # di questa pipeline: nessuna installazione on-demand.
+      - name: Install
+        run: uv sync --locked --no-build --no-install-project --group dev
+        working-directory: backend
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: copertura-backend
+          path: artefatti/backend
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: copertura-frontend
+          path: artefatti/frontend
+      # `SF:` di lcov è relativo a `frontend/`, mentre `git diff` parla in
+      # percorsi relativi alla radice del repository. Senza questa
+      # normalizzazione i due insiemi non si intersecano, `diff-cover` stampa
+      # «No lines with coverage information in this diff» ed esce 0: un cancello
+      # che passa a vuoto. Riprodotto il 30/07 su un file TS nuovo e interamente
+      # scoperto — passava. Se questo step sparisce,
+      # `backend/tests/test_copertura_convention.py` fa cadere la suite.
+      - name: Normalizza i percorsi del report lcov
+        run: sed -i 's|^SF:|SF:frontend/|' artefatti/frontend/lcov.info
+      - name: Copertura del diff
+        env:
+          # Il ramo di base lo scegli chi apre la PR: passa da `env`, mai
+          # interpolato dentro `run` (postura in testa al file).
+          BASE_REF: ${{ github.base_ref }}
+          # Backend a 90: la misura reale è 96.44%, il margine copre qualche
+          # ramo legittimamente non esercitato.
+          SOGLIA_BACKEND: "90"
+          # Frontend a 75, più bassa NON per disciplina: `page.tsx` e
+          # `lib/api/hooks.ts` sono esercitate dagli e2e Playwright, la cui
+          # copertura non viene raccolta. Chiedere 90 qui produrrebbe rossi su
+          # codice che È coperto — il cancello rumoroso che si impara a
+          # ignorare, che è un modo più lento di non avere un cancello. Alzarla
+          # è la conseguenza naturale del giorno in cui si raccoglie anche la
+          # copertura degli e2e.
+          SOGLIA_FRONTEND: "75"
+        run: |
+          set -o pipefail
+          esito=0
+          for lato in backend frontend; do
+            case "$lato" in
+              backend)  report=artefatti/backend/coverage.xml
+                        soglia="$SOGLIA_BACKEND"
+                        sorgenti=(':(glob)backend/app/**/*.py') ;;
+              # Le graffe sono espanse a mano di proposito: il pathspec
+              # `:(glob)` di git usa wildmatch, che NON conosce
+              # `{app,components,lib}`. La forma compatta non dà errore, torna
+              # zero file, e la guardia contro il passaggio a vuoto qui sotto si
+              # disattiverebbe da sola. Verificato il 30/07.
+              frontend) report=artefatti/frontend/lcov.info
+                        soglia="$SOGLIA_FRONTEND"
+                        sorgenti=(':(glob)frontend/app/**/*.ts'
+                                  ':(glob)frontend/app/**/*.tsx'
+                                  ':(glob)frontend/components/**/*.ts'
+                                  ':(glob)frontend/components/**/*.tsx'
+                                  ':(glob)frontend/lib/**/*.ts'
+                                  ':(glob)frontend/lib/**/*.tsx'
+                                  ':(exclude,glob)frontend/**/*.test.ts'
+                                  ':(exclude,glob)frontend/**/*.test.tsx'
+                                  ':(exclude)frontend/lib/api/schema.d.ts') ;;
+            esac
+
+            echo "::group::copertura del diff — $lato (soglia ${soglia}%)"
+            uv run --project backend --no-sync --no-build \
+              diff-cover "$report" \
+                --compare-branch "origin/$BASE_REF" \
+                --fail-under "$soglia" \
+                --show-uncovered | tee "uscita-$lato.txt" || esito=1
+            echo "::endgroup::"
+
+            # Guardia contro il passaggio A VUOTO. `diff-cover` esce 0 quando
+            # non trova righe misurabili nel diff: giusto per una PR di soli
+            # documenti, sbagliatissimo per una che tocca il codice. Se il diff
+            # contiene sorgenti misurate e il report non ne conosce nemmeno una
+            # riga, il guasto è nella misura, non nella PR.
+            toccati=$(git diff --name-only "origin/$BASE_REF...HEAD" -- "${sorgenti[@]}" | wc -l)
+            if [ "$toccati" -gt 0 ] && grep -q 'No lines with coverage information' "uscita-$lato.txt"; then
+              echo "::error::$lato: il diff tocca $toccati sorgenti misurate ma il report non ne conosce nessuna riga. Il cancello sta passando a vuoto: controlla i percorsi del report, non la PR."
+              esito=1
+            fi
+
+            {
+              echo "### Copertura del diff — $lato (soglia ${soglia}%)"
+              echo ""
+              echo '```'
+              grep -E '^(Total|Missing|Coverage|No lines):?' "uscita-$lato.txt" || echo "(nessun dato)"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$esito"

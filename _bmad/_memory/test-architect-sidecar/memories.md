@@ -26,6 +26,33 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   `HOSTPILOT_TEST_DB_REQUIRED=1` rende errore lo skip dei test su Postgres reale e
   `api-contract` fallisce sul `git diff` se OpenAPI/client TS divergono dal codice. È questo
   che rende «CI verde» un'evidenza citabile in una dichiarazione di chiusura.
+  **CORREZIONE del 2026-07-30 (MYL-59):** l'ultima frase era falsa per il quinto check. Il
+  Quality Gate SonarCloud valuta cinque condizioni — affidabilità, sicurezza,
+  manutenibilità, duplicazione, hotspot — e **nessuna sulla copertura**; le metriche
+  `coverage`/`new_coverage` non esistono nemmeno sul progetto, perché la Automatic Analysis
+  non importa report. Il `0.0% Coverage on New Code` citato per settimane era l'assenza del
+  dato, non un esito. Dal 30/07 la copertura la misura e la fa mordere la nostra CI (job
+  `copertura`, `diff-cover` sulle righe toccate): vedi `docs/qa/copertura-e-cancelli.md`.
+  Lezione generale: **avevo dedotto la solidità di un check dalla solidità degli altri
+  quattro**, invece di interrogarlo. Un cancello si verifica uno per uno, e si verifica
+  rompendo ciò che difende.
+- 2026-07-30 — **Un pavimento di copertura globale non è un cancello**, misurato su questo
+  repo: togliendo `backend/tests/test_calendario_sync.py` intero (81 test, il file che copre
+  il modulo più rischioso) il totale scende da 96.44% a 95.16% — un `fail_under` a 93 non se
+  ne accorge, perché altri test attraversano incidentalmente le stesse righe e il totale si
+  diluisce sul codice che cresce. Il cancello che morde è la copertura del **diff**
+  (`diff-cover` sulle righe toccate dalla PR): su una riga nuova nessun altro test la copre
+  per sbaglio. Il pavimento globale resta come backstop del crollo, non come garanzia.
+- 2026-07-30 — **Un cancello che passa a vuoto è peggio di un cancello assente**, perché
+  viene citato come evidenza. Due modi in cui è capitato mentre costruivo il job `copertura`,
+  entrambi silenziosi e trovati solo provandoli: (1) i percorsi `SF:` di lcov sono relativi a
+  `frontend/` mentre `git diff` parla dalla radice — senza normalizzazione `diff-cover`
+  stampa «No lines with coverage information» ed **esce 0** su un file TS nuovo e interamente
+  scoperto; (2) il pathspec `:(glob)` di git usa wildmatch, che **non** conosce
+  `{app,components,lib}` — la forma compatta non dà errore, torna zero file, e disattiva da
+  sola la guardia che dipendeva da quel conteggio. Regola operativa: ogni cancello nuovo va
+  consegnato con la prova che **cade** su un caso costruito per farlo cadere, non solo con la
+  prova che passa.
 - 2026-07-25 — La regola «verdetto del Test Architect prima del merge umano» è entrata in
   vigore dalla Story 1.3. Le PR mergiate prima (#12, #18) sono state verificate
   **retroattivamente** e l'esito è registrato nella matrice. Se una regola di gate arriva a
