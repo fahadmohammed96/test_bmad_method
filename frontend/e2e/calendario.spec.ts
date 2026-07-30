@@ -44,13 +44,13 @@ import { violazioniGravi } from "./axe-utils";
  *    ferma su un orario vecchio è la falsa sincronia che NFR-2 vieta, e questa
  *    è la sola asserzione che la vede.
  *
- * Perché quell'orario venga sostituito nella risposta e non prodotto da un sync
- * vero è spiegato sul route handler del test: è la parte che l'ambiente non può
- * far avanzare da sé, e sostituire un campo è meno di quanto costerebbe non
- * asserire nulla.
+ * Perché i campi della freschezza vengano sostituiti nella risposta invece di
+ * essere prodotti da un sync vero è spiegato sul route handler del test — ed è
+ * anche ciò che rende il test capace di fallire, non solo capace di vedere
+ * l'etichetta.
  *
  * Resta asserito anche il rovescio: inserire una Prenotazione a mano **non**
- * deve far comparire un orario di aggiornamento dei portali. Un dato scritto
+ * deve far avanzare l'orario di aggiornamento dei portali. Un dato scritto
  * dall'Host non rende più freschi quelli delle OTA (NFR-2).
  *
  * Con quelle Prenotazioni la baseline axe smette di misurare un chip finto
@@ -328,30 +328,34 @@ const SYNC_DOPO = { iso: "2026-08-17T16:05:00Z", orario: "18:05" };
  * Il test ha **due atti**, e la ragione per cui sono due è che l'AC 6 afferma
  * due cose diverse sull'etichetta.
  *
- * **Atto 1 — la griglia si muove, l'etichetta non inventa.** Tutto vero, niente
- * intercettato. Inserire una Prenotazione a mano NON deve far comparire un
- * orario di aggiornamento: un dato scritto dall'Host non rende più freschi
- * quelli dei portali, e un'etichetta che dicesse «dati aggiornati alle 14:32»
- * perché è stata inserita una manuale sarebbe falsa sincronia prodotta dal
- * prodotto stesso (NFR-2).
+ * **Atto 1 — l'inserimento muove la griglia e NON muove l'etichetta.** Il chip
+ * nuovo compare senza reload; l'etichetta è **ancora** sull'orario di prima,
+ * perché un dato scritto dall'Host non rende più freschi quelli dei portali e
+ * un'etichetta che avanzasse per un inserimento manuale sarebbe falsa sincronia
+ * prodotta dal prodotto stesso (NFR-2).
  *
- * **Atto 2 — l'etichetta segue la sorgente.** Qui l'atto 1 non arriva, e vale
- * la pena dire perché invece di lasciarlo credere: in questo ambiente
- * `ultimo_sync_riuscito_il` è `null` per tutta la durata della suite — nessun
- * worker, nessun import concluso — quindi la pagina rende sempre il ramo «mai
- * sincronizzato» e la stringa `HH:MM` **non è raggiungibile**. Un'asserzione
- * sull'etichetta scritta nell'atto 1 è vera anche a etichetta ferma dal
- * caricamento, cioè non vede il difetto per cui esiste.
+ * **Atto 2 — la cancellazione muove entrambe.** L'orario della sorgente avanza
+ * mentre l'Host guarda la pagina, e dopo la cancellazione — un `POST` che
+ * scrive davvero — l'etichetta porta il valore **nuovo** e quello vecchio non è
+ * più in pagina.
  *
- * L'atto 2 fa avanzare quell'orario — l'unico campo che l'ambiente non può
- * produrre — e osserva che dopo una mutazione **reale** (la cancellazione, un
- * `POST` che scrive davvero) l'etichetta porta il valore **nuovo**. Il difetto
- * che solo questa asserzione vede: un'etichetta che congeli la freschezza al
- * primo render — un `useState` iniziale invece del valore della query — mentre
- * la griglia continua ad aggiornarsi. Oggi griglia ed etichetta vengono dalla
- * stessa query (`useCalendario`, una sola chiave invalidata): questa asserzione
- * è ciò che rende **rosso** il giorno in cui le si separa senza invalidare
- * entrambe, che è la classe di difetto della Story 1.6.
+ * **Perché la freschezza si sostituisce nella risposta, e perché sono tre campi
+ * e non uno.** In questo ambiente `ultimo_sync_riuscito_il` è `null` per tutta
+ * la suite (nessun worker, nessun import concluso), quindi la stringa `HH:MM`
+ * non si renderizzerebbe mai; e `stato_sync` è `in_corso` per tutta la durata
+ * del test, il che accende `refetchInterval: 3000` su `useCalendario`. Con il
+ * timeout di `expect` a 5000ms quel poll soddisfa **qualunque** asserzione
+ * post-mutazione: il test resterebbe verde anche cancellando l'invalidazione
+ * della cache, cioè il meccanismo che l'AC 6 descrive. È il difetto trovato da
+ * Murat sulla prima stesura di questo test, misurato: verde in 10.1s invece di
+ * 4.4s, e i secondi in più erano il poll che consegnava l'aggiornamento al
+ * posto della mutazione.
+ *
+ * **La proprietà che questo test deve avere, e che è stata misurata**: diventa
+ * rosso se si toglie `onSuccess` da **uno** dei due hook di mutazione in
+ * `lib/api/hooks.ts` — sulla creazione cade `Ospite Inventato`, sulla
+ * cancellazione cade `Cancellata`. Chi lo modifica rimisuri quello, non che sia
+ * verde: un e2e verde che non può fallire è peggio di un residuo a registro.
  */
 
 /** Il primo giorno mostrato dalla griglia, letto DALLA PAGINA.
@@ -380,6 +384,57 @@ test("una mutazione della sorgente muove la griglia e l'etichetta, senza reload"
   await registra(page, `manuale-${testInfo.project.name}`);
   await registraStruttura(page, "Bologna Centro");
 
+  // L'orologio della sorgente, che questo ambiente non sa far avanzare.
+  let sincronizzatoIl: string | null = SYNC_PRIMA.iso;
+
+  // Installata PRIMA di tutto, e non a metà test: è ciò che spegne il polling
+  // (vedi il commento sotto), e un solo `GET` servito con `stato_sync:
+  // "in_corso"` basta a riaccenderlo per il resto del test.
+  await page.route("**/api/v1/calendario**", async (rotta) => {
+    const richiesta = rotta.request();
+    // SOLO la lettura della griglia. I `POST` di inserimento e cancellazione
+    // devono arrivare al server e scrivere davvero, altrimenti non ci sarebbe
+    // alcuna mutazione da osservare e questo test misurerebbe se stesso.
+    if (
+      richiesta.method() !== "GET" ||
+      new URL(richiesta.url()).pathname !== "/api/v1/calendario"
+    ) {
+      await rotta.continue();
+      return;
+    }
+    // `fetch` + `fulfill({response})`: la risposta è quella VERA del server —
+    // le voci, le Strutture, il conteggio dei Feed, le intestazioni CORS — e si
+    // sostituiscono TRE campi, tutti sulla freschezza. Costruire il corpo da
+    // zero rimetterebbe la griglia in mano al test, cioè perderebbe la
+    // mutazione reale che è il punto dell'AC.
+    const risposta = await rotta.fetch();
+    await rotta.fulfill({
+      response: risposta,
+      json: {
+        ...(await risposta.json()),
+        ultimo_sync_riuscito_il: sincronizzatoIl,
+        // **I due campi che rendono il test capace di fallire.** Con
+        // `stato_sync: "in_corso"` — lo stato reale di questo ambiente, dove il
+        // Feed accoda il job e nessun worker lo drena — `useCalendario` accende
+        // `refetchInterval: 3000`, e con il timeout di `expect` a 5000ms
+        // QUALUNQUE asserzione post-mutazione viene soddisfatta dal poll: il
+        // test resta verde anche cancellando l'invalidazione della cache, cioè
+        // il meccanismo che l'AC 6 descrive. Misurato: verde in 10.1s invece di
+        // 4.4s, e i secondi in più sono la firma del poll.
+        //
+        // C'è un'ironia da non perdere: il Feed lo si collega DELIBERATAMENTE
+        // perché l'etichetta abbia qualcosa da dire, ed è quel collegamento ad
+        // accendere il polling che maschera ciò che si voleva osservare.
+        //
+        // A `false` il `refetchInterval`, l'unica sorgente di refetch resta la
+        // mutazione. `feed_mai_sincronizzati` segue per coerenza: un payload
+        // «riuscito» con Feed mai sincronizzati affermerebbe due cose opposte.
+        stato_sync: "riuscito",
+        feed_mai_sincronizzati: 0,
+      },
+    });
+  });
+
   // Si collega un Feed perché l'etichetta parli di dati da Feed: senza, direbbe
   // «nessun calendario collegato» e la metà «etichetta» dell'AC non avrebbe
   // niente da affermare.
@@ -398,7 +453,9 @@ test("una mutazione della sorgente muove la griglia e l'etichetta, senza reload"
   // progetto `mobile`, un click su una barra `fixed` che il pannello dei Feed —
   // che cresce mentre carica — intercetta.
   await page.goto("/calendario");
-  await expect(page.getByText(/potrebbe essere incompleta/)).toBeVisible();
+  await expect(
+    page.getByText(`Dati aggiornati alle ${SYNC_PRIMA.orario}`),
+  ).toBeVisible();
 
   const primo = await primoGiornoVisibile(page);
   const arrivo = giornoPiu(primo, 9);
@@ -427,10 +484,14 @@ test("una mutazione della sorgente muove la griglia e l'etichetta, senza reload"
   await expect(griglia.getByText("Ospite Inventato")).toBeVisible();
   await expect(griglia.getByText("Inserita a mano")).toBeVisible();
 
-  // E l'etichetta non ha inventato niente: la freschezza dei dati da Feed è
-  // quella di prima, perché nessun portale è stato interrogato (NFR-2).
-  await expect(page.getByText(/potrebbe essere incompleta/)).toBeVisible();
-  await expect(page.getByText(/Dati aggiornati alle/)).toHaveCount(0);
+  // E l'etichetta non ha inventato niente: è **ancora** alle 14:35. La forma
+  // positiva dice più di un'assenza — asserisce che una Prenotazione scritta
+  // dall'Host non fa AVANZARE la freschezza dei dati dei portali, che è ciò che
+  // NFR-2 vieta, invece di asserire che un orario non c'è (vero comunque, in un
+  // ambiente in cui quell'orario non si renderizzava mai).
+  await expect(
+    page.getByText(`Dati aggiornati alle ${SYNC_PRIMA.orario}`),
+  ).toBeVisible();
 
   // Baseline axe su un chip VERO, non su un payload intercettato: chiude il
   // residuo dell'AC 8 della Story 2.3.
@@ -445,47 +506,9 @@ test("una mutazione della sorgente muove la griglia e l'etichetta, senza reload"
 
   // ------------------------------------------------------- Atto 2 (vedi sopra)
 
-  // L'orologio della sorgente, che questo ambiente non sa far avanzare: senza
-  // worker `ultimo_sync_riuscito_il` resta `null` per tutta la suite, e la
-  // stringa `HH:MM` dell'etichetta non viene mai renderizzata.
-  let sincronizzatoIl: string | null = SYNC_PRIMA.iso;
-
-  await page.route("**/api/v1/calendario**", async (rotta) => {
-    const richiesta = rotta.request();
-    // SOLO la lettura della griglia. Il `POST` della cancellazione deve
-    // arrivare al server e scrivere davvero, altrimenti non ci sarebbe alcuna
-    // mutazione da osservare e questo test misurerebbe se stesso.
-    if (
-      richiesta.method() !== "GET" ||
-      new URL(richiesta.url()).pathname !== "/api/v1/calendario"
-    ) {
-      await rotta.continue();
-      return;
-    }
-    // `fetch` + `fulfill(response)`: la risposta è quella VERA del server —
-    // le voci, le Strutture, il conteggio dei Feed, le intestazioni CORS — e
-    // si sostituisce **un solo campo**. Costruire il corpo da zero
-    // rimetterebbe la griglia in mano al test, cioè perderebbe la mutazione
-    // reale che è il punto dell'AC.
-    const risposta = await rotta.fetch();
-    await rotta.fulfill({
-      response: risposta,
-      json: {
-        ...(await risposta.json()),
-        ultimo_sync_riuscito_il: sincronizzatoIl,
-      },
-    });
-  });
-
-  // `goto` per portare in pagina l'orario «prima»: è il caricamento la cui
-  // cache deve poi restare coerente, e ciò che non deve esserci in mezzo è un
-  // reload fra la mutazione e le asserzioni.
-  await page.goto("/calendario");
-  await expect(
-    page.getByText(`Dati aggiornati alle ${SYNC_PRIMA.orario}`),
-  ).toBeVisible();
-
-  // La sorgente si è sincronizzata mentre l'Host guardava la pagina.
+  // La sorgente si è sincronizzata mentre l'Host guardava la pagina. Nessun
+  // reload da qui alla fine del test: l'unico modo per cui il nuovo orario
+  // arriva in pagina è che la mutazione invalidi la cache.
   sincronizzatoIl = SYNC_DOPO.iso;
 
   // Cancellazione: transizione, non sparizione (AD-19, AD-20). Anche questa

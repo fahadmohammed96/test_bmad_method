@@ -4,7 +4,7 @@ epic: 'Epic 2: Calendario unificato e anti double-booking'
 status: in_review
 created: 2026-07-30
 updated: 2026-07-30
-review: 'in attesa del verdetto di Murat (cross-review pre-merge)'
+review: 'fix-forward del P1 di Murat (AC 6, testimone che non cadeva) applicato — in attesa del secondo verdetto'
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - docs/epics.md (Story 2.4, AC completi)
@@ -54,51 +54,84 @@ tracciate, 5 P0). I test backend citati senza percorso stanno in
 
 ### AC 6 — «una mutazione della sorgente aggiorna sia la griglia sia l'etichetta» (P0)
 
-Chiuso, ma **non dalla prima stesura**, e la differenza vale più della
-conclusione. La prima versione del test asserviva sull'etichetta due cose:
+Chiuso alla **terza** stesura, e le due che non hanno tenuto valgono più della
+conclusione: entrambe erano verdi, ed entrambe restavano verdi con il difetto in
+pagina.
 
-```ts
-await expect(page.getByText(/potrebbe essere incompleta/)).toBeVisible();
-await expect(page.getByText(/Dati aggiornati alle/)).toHaveCount(0);
-```
+**Prima stesura — l'etichetta asserita per assenza.** Le due asserzioni erano
+`potrebbe essere incompleta` visibile e `Dati aggiornati alle` assente: **vere
+anche prima** della mutazione. Cancellando `onSuccess` il test restava verde
+sulla metà «etichetta». Causa: in questo ambiente `ultimo_sync_riuscito_il` è
+`null` per tutta la suite (nessun worker, nessun import concluso), quindi la
+stringa `HH:MM` non si renderizza mai e qualunque asserzione scritta lì è vera a
+etichetta ferma.
 
-Entrambe **vere anche prima** della mutazione — la prima è già asserita al
-caricamento, la seconda descrive un'assenza che c'è in ogni caso. Cancellando la
-riga che invalida la cache (`onSuccess` in `useCancellaPrenotazione`) il test
-restava verde sulla metà «etichetta»: quella metà non aveva testimone.
+**Seconda stesura — il polling consegnava l'aggiornamento al posto della
+mutazione.** Trovata da Murat in cross-review (PR #52), riprodotta e confermata.
+`useCalendario` accende `refetchInterval: 3000` quando `stato_sync ===
+"in_corso"`, ed è esattamente lo stato di questo ambiente: `collega_feed` accoda
+il job, nessun worker lo drena, `sync_in_coda` resta vero. Con il timeout di
+`expect` a 5000ms e il poll a 3000ms, **qualunque** asserzione post-mutazione
+viene soddisfatta entro la finestra di retry, con o senza invalidazione:
 
-La causa non era distrazione. In questo ambiente `ultimo_sync_riuscito_il` è
-`null` per tutta la suite — nessun worker, nessun import concluso — quindi
-`VeritaTemporale` rende sempre il ramo «mai sincronizzato» e la stringa `HH:MM`
-**non è raggiungibile**: qualunque asserzione scritta lì è vera a etichetta
-ferma.
+| # | codice | esito |
+| :---: | --- | :---: |
+| 1 | seconda stesura intatta | ✅ verde (4.4s) |
+| 2 | seconda stesura, `onSuccess` rimosso da **entrambi** gli hook | ✅ **verde (10.1s)** ← il difetto |
 
-Il test ha ora **due atti** (`frontend/e2e/calendario.spec.ts`, `una mutazione
-della sorgente muove la griglia e l'etichetta, senza reload`):
+I secondi in più sono la firma: non era l'invalidazione a consegnare
+l'aggiornamento, era l'attesa del poll. E c'è un'ironia strutturale che vale
+ricordare: il Feed si collega **deliberatamente** perché l'etichetta abbia
+qualcosa da dire, ed è quel collegamento ad accendere il polling che maschera il
+meccanismo che si voleva osservare. Il test si era tolto il testimone da sé.
 
-1. tutto vero, niente intercettato — la griglia si muove e l'etichetta **non
-   inventa**: inserire una manuale non fa comparire un orario di aggiornamento
-   dei portali (l'asserzione NFR-2, conservata);
-2. l'orario della sorgente **avanza** — l'unico campo che l'ambiente non sa
-   produrre, sostituito su una risposta altrimenti vera via `route.fetch()` — e
-   dopo una mutazione reale (la cancellazione, un `POST` che scrive davvero)
-   l'etichetta porta il valore **nuovo**, e quello vecchio non è più in pagina.
+La prova del rosso che avevo usato — congelare la freschezza al primo render —
+era valida per **quel** difetto (rompe la sorgente dati dell'etichetta, e nessun
+refetch la salva), ma non per il meccanismo che l'AC 6 nomina. L'AC 6 parla di
+**coerenza fra cache**: la mutazione che la prova è cancellare `onSuccess`, ed è
+la stessa che avevo usato per scoprire la debolezza della prima stesura. Non
+l'ho rieseguita dopo la correzione. È la lezione di questa Story.
 
-**Prova del rosso**: congelando la freschezza al primo render — un `useState`
-iniziale invece del valore della query, che è il difetto plausibile — la griglia
-continua ad aggiornarsi e `Dati aggiornati alle 18:05` non compare. Il test
-cade. Output in «Prova del rosso» sotto.
+**Terza stesura — l'intercettazione spostata all'inizio, e tre campi invece di
+uno.** L'unica differenza sostanziale è `stato_sync: "riuscito"`, che riporta
+`refetchInterval` a `false`: da lì l'unica sorgente di refetch è la mutazione.
+`feed_mai_sincronizzati: 0` segue per coerenza — un payload «riuscito» con Feed
+mai sincronizzati affermerebbe due cose opposte. Installata dal primo `goto`, la
+pagina rende il ramo `HH:MM` da subito, e ne segue un guadagno: l'asserzione
+NFR-2 dell'atto 1 passa da «`Dati aggiornati alle` è assente» a «l'etichetta è
+**ancora** alle 14:35 dopo l'inserimento» — asserisce che una manuale non fa
+*avanzare* la freschezza dei portali, invece di asserire un'assenza che c'era
+comunque.
 
-Oggi griglia ed etichetta vengono dalla **stessa** query (`useCalendario`, una
-sola chiave invalidata), quindi divergere è strutturalmente impossibile: questa
-asserzione è ciò che diventa rossa il giorno in cui le si separa senza
+I due atti sono ora (`frontend/e2e/calendario.spec.ts`, `una mutazione della
+sorgente muove la griglia e l'etichetta, senza reload`):
+
+1. l'inserimento muove la **griglia** e non muove l'**etichetta** (NFR-2);
+2. l'orario della sorgente avanza, e la cancellazione muove **entrambe**.
+
+**Prova del rosso — quella giusta**, misurata su `chromium`:
+
+| # | codice | esito |
+| :---: | --- | :---: |
+| 4 | terza stesura intatta | ✅ verde (5.2s / mobile 4.7s) |
+| 5 | `onSuccess` rimosso dalla **cancellazione** | ❌ rosso su `Cancellata` (9.5s) |
+| 6 | `onSuccess` rimosso dalla **creazione** | ❌ rosso su `Ospite Inventato` (8.3s) |
+
+La proprietà che questo test deve conservare, ed è scritta nel suo docstring:
+**diventa rosso se si toglie `onSuccess` da uno dei due hook**, con il polling
+nello stato in cui l'ambiente lo mette davvero. Chi lo modifica rimisuri quello,
+non che sia verde.
+
+Oggi griglia ed etichetta vengono dalla **stessa** query (una sola chiave
+invalidata), quindi divergere è strutturalmente impossibile: l'asserzione
+sull'etichetta è ciò che diventa rossa il giorno in cui le si separa senza
 invalidare entrambe — la classe di difetto della Story 1.6.
 
 Resta **fuori portata in questo ambiente** un import che si conclude davvero: il
 `webServer` avvia l'API ma non il worker, e la politica di uscita di rete
 rifiuta il loopback (NFR-17). Non è il perimetro della Story: è l'ambiente. Ciò
-che l'AC 6 chiede — che l'etichetta segua la sorgente invece di restare ferma —
-è però asserito, con un orario che avanza.
+che l'AC 6 chiede — che una mutazione della sorgente aggiorni griglia **e**
+etichetta — è però asserito, e cade quando il meccanismo non c'è.
 
 ### AC 8 — axe sui chip su dati veri
 
@@ -321,20 +354,28 @@ $ npm run test:e2e
 fuori dalla `UPDATE`, otto contendenti in barriera producono **cinque**
 `prenotazione.cessata` invece di uno. Con la condizione dentro l'istruzione, uno.
 
-**L'etichetta del timestamp (AC 6 della 2.3).** Congelando la freschezza al
-primo render di `VeritaTemporale` — `useState` iniziale invece del valore della
-query — la griglia continua ad aggiornarsi e l'atto 2 cade:
+**L'anello di invalidazione (AC 6 della 2.3).** Togliendo `onSuccess` da uno dei
+due hook di mutazione in `lib/api/hooks.ts`:
 
 ```
-  x  1 [chromium] › calendario.spec.ts:377 › una mutazione della sorgente muove
-       la griglia e l'etichetta, senza reload (9.7s)
+$ # onSuccess rimosso dalla CANCELLAZIONE
+  x  1 [chromium] › calendario.spec.ts:381 › una mutazione della sorgente muove
+       la griglia e l'etichetta, senza reload (9.5s)
     Error: expect(locator).toBeVisible() failed
-    Locator: getByText('Dati aggiornati alle 18:05')
+    Locator: getByRole('table').getByText('Cancellata')
+  1 failed
+
+$ # onSuccess rimosso dalla CREAZIONE
+  x  1 [chromium] › calendario.spec.ts:381 › una mutazione della sorgente muove
+       la griglia e l'etichetta, senza reload (8.3s)
+    Error: expect(locator).toBeVisible() failed
+    Locator: getByRole('table').getByText('Ospite Inventato')
   1 failed
 ```
 
-Ripristinato il componente, verde. È la ragione per cui quell'atto esiste: la
-stesura precedente restava verde con lo stesso difetto in pagina.
+Ripristinati entrambi, verde in 5.2s. Prima del rimedio la stessa mutazione —
+`onSuccess` rimosso da **entrambi** — lasciava il test **verde** in 10.1s: era il
+poll da 3s a consegnare l'aggiornamento, non l'invalidazione.
 
 ### Note di consegna
 
@@ -350,3 +391,4 @@ vero — è ora la prima cosa che faccio.
 | --- | --- | --- |
 | 2026-07-30 | `a04f77e` — inserimento manuale, cancellazione come transizione, migrazione `0013`, form e chip | Story 2.4 |
 | 2026-07-30 | `77a828c` — l'atto 2 dell'e2e (l'etichetta segue la sorgente); log della creazione sotto NFR-11; 422 sulle date invertite a livello HTTP; `PrenotazioneManualeOutput` sotto la guardia AD-14 | Quattro asserzioni che mancavano, una delle quali lasciava senza testimone la metà P0 dell'AC 6 della Story 2.3 |
+| 2026-07-30 | fix-forward P1 — l'intercettazione della freschezza spostata all'inizio del test, con `stato_sync: "riuscito"` che spegne il `refetchInterval` da 3s | Finding di Murat in cross-review della PR #52, riprodotto: il testimone dell'AC 6 restava **verde** cancellando l'invalidazione della cache, perché il poll consegnava l'aggiornamento al posto della mutazione. Ora cade su entrambi gli hook |
