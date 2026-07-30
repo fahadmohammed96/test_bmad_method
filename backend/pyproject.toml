@@ -27,6 +27,21 @@ dev = [
     # questo `ThreadPoolExecutor.__exit__` attenderebbe all'infinito e la
     # pipeline morirebbe per timeout del runner, che non dice niente.
     "pytest-timeout>=2.3",
+    # Copertura MISURATA, non dichiarata (MYL-59). Fino al 30/07 il Quality
+    # Gate SonarCloud riportava `0.0% Coverage on New Code` e passava: a
+    # SonarCloud non arriva alcun report di copertura, e la condizione sulla
+    # copertura non e' nemmeno fra quelle che il gate valuta. Il numero adesso
+    # lo produce la CI e `fail_under` lo fa mordere qui, senza dipendere da un
+    # servizio terzo di cui non controlliamo la configurazione.
+    "pytest-cov>=6.0",
+    # Copertura sul DIFF, che e' il cancello che morde davvero. Misurato:
+    # togliere `tests/test_calendario_sync.py` intero (81 test) fa scendere il
+    # totale da 96.44% a 95.16% — cioe' il pavimento globale non se ne
+    # accorge, perche' altri test attraversano incidentalmente le stesse
+    # righe. Un pavimento globale e' un backstop, non un gate. `diff-cover`
+    # misura le righe TOCCATE dalla PR, dove una riga nuova senza test non ha
+    # nessun altro che la copre per sbaglio.
+    "diff-cover>=10.4",
     "ruff>=0.8",
     "mypy>=1.14",
 ]
@@ -56,6 +71,46 @@ timeout = 120
 # deadlock del test di gara svanirebbe in silenzio. Cosi' invece la suite non
 # parte.
 addopts = "--strict-markers"
+
+# `--cov` NON sta in `addopts` di proposito: un `pytest -k qualcosa` locale
+# misurerebbe la copertura di un sottoinsieme e fallirebbe sotto la soglia,
+# cioe' il gate punirebbe chi lavora su un singolo caso. La misura la chiede
+# la CI, e che la CI continui a chiederla lo impone
+# `tests/test_copertura_convention.py`: se lo step perde `--cov`, la suite
+# cade. Senza quel test questa configurazione sarebbe disattivabile in
+# silenzio, che e' esattamente il difetto da cui nasce (MYL-59).
+[tool.coverage.run]
+source = ["app"]
+branch = true
+# `omit` VUOTO, e resta vuoto per scelta: togliere un modulo dalla misura e' il
+# modo piu' rapido di rendere il numero falso senza che nessuna riga rossa lo
+# dica. Il ciclo del worker non ha unit test ma e' esercitato dai test di job
+# su Postgres reale, quindi il suo numero e' informativo, non un alibi.
+omit = []
+
+[tool.coverage.report]
+show_missing = true
+# Questo e' un BACKSTOP, non il cancello. Misura reale al 30/07 su `main`
+# (7d4eb7c), 658 test verdi: **96.44%** di riga+ramo.
+#
+# Che sia debole non e' un'opinione, e' misurato: togliendo
+# `tests/test_calendario_sync.py` intero — 81 test, il file che copre il modulo
+# piu' rischioso del progetto — il totale scende solo a 95.16% e un pavimento
+# a 93 NON se ne accorge. Un pavimento globale si diluisce sul codice che
+# cresce e viene tenuto su da test che attraversano le stesse righe per altri
+# motivi. Serve comunque: intercetta il crollo (una suite che smette di girare,
+# un intero strato consegnato senza test), che e' esattamente cio' che nessuno
+# misurava prima di MYL-59.
+#
+# Il cancello che morde e' `diff-cover` sulle righe toccate dalla PR, nel job
+# `backend` della CI. Il pavimento sta a 93 e non a 96 di proposito: alzarlo a
+# filo della misura reale produrrebbe rossi su variazioni legittime di pochi
+# rami, cioe' il cancello rumoroso che si impara a ignorare.
+fail_under = 93
+exclude_also = [
+    # Non gira mai a runtime: escluderlo non nasconde codice non testato.
+    "if TYPE_CHECKING:",
+]
 
 [tool.mypy]
 python_version = "3.14"
