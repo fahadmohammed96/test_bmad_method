@@ -36,10 +36,16 @@ class Settings(BaseSettings):
     # mira) e per origine (spraying su molti account).
     login_max_tentativi_account: int = 5
     login_max_tentativi_origine: int = 20
-    login_finestra_minuti: int = 15
+    # `gt=0` come sui parametri di retention: una finestra di 0 minuti
+    # scioglie il freno (nessun tentativo cade mai dentro l'intervallo) e,
+    # moltiplicata in `identity/jobs.py`, taglierebbe le tracce nell'istante
+    # in cui nascono. Un parametro assurdo deve fermare l'avvio.
+    login_finestra_minuti: int = Field(default=15, gt=0)
 
     # Ogni quanto gira il purge delle sessioni scadute (job durevole).
-    purge_sessioni_intervallo_minuti: int = 60
+    # `gt=0`: un intervallo di 0 minuti riaccoda il purge già scaduto e il
+    # worker gira in ciclo stretto, consumando la coda di tutti i tenant.
+    purge_sessioni_intervallo_minuti: int = Field(default=60, gt=0)
 
     # Retention della coda `job` (MYL-51). Dalla Story 2.2 `job` è una tabella
     # a crescita ILLIMITATA e a ritmo noto — ~96 righe per Feed al giorno col
