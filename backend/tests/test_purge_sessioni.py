@@ -6,9 +6,12 @@ in memoria, handler idempotente, riprogrammazione dopo ogni esecuzione.
 
 from datetime import timedelta
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings
 from app.core.date_range import utcnow
 from app.core.jobs import Job, JobStatus
 from app.identity.jobs import (
@@ -122,3 +125,24 @@ class TestPeriodicita:
         from app.core.events import catalog
 
         assert TIPO_JOB_PURGE_SESSIONI in catalog.job_names()
+
+
+class TestIParametriDiConfigurazione:
+    """I due parametri che governano il purge sono validati all'avvio (AD-9).
+
+    Entrambi entrano in `identity/jobs.py`: l'intervallo riprogramma il ciclo,
+    la finestra del freno moltiplicata per `FINESTRE_DA_CONSERVARE` decide il
+    taglio delle tracce. Un valore non positivo su `Settings` deve fermare
+    l'avvio, non passare silenziosamente e manifestarsi a regime.
+    """
+
+    @pytest.mark.parametrize(
+        "parametro",
+        ["purge_sessioni_intervallo_minuti", "login_finestra_minuti"],
+    )
+    @pytest.mark.parametrize("valore", [0, -1])
+    def test_un_valore_non_positivo_non_costruisce_la_configurazione(
+        self, parametro: str, valore: int
+    ) -> None:
+        with pytest.raises(ValidationError):
+            Settings(**{parametro: valore})
