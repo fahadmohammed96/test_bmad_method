@@ -74,25 +74,50 @@ class RegimeLetturaRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def _lettura(self, host_id: uuid.UUID) -> RegimeLettura | None:
+    def _conferma_valida(self, host_id: uuid.UUID) -> RegimeLettura | None:
+        """La conferma che vale ORA, se c'è.
+
+        La tabella è un registro: porta anche le conferme revocate dei giri
+        precedenti. «Esiste una riga» non è più la domanda giusta, e
+        `one_or_none()` resta legittimo perché l'indice unico parziale ammette
+        al più una conferma non revocata per Host.
+        """
         return self._db.scalars(
-            select(RegimeLettura).where(RegimeLettura.host_id == host_id)
+            select(RegimeLettura).where(
+                RegimeLettura.host_id == host_id,
+                RegimeLettura.revocata_il.is_(None),
+            )
         ).one_or_none()
 
     def confermata(self, host_id: uuid.UUID) -> bool:
-        return self._lettura(host_id) is not None
+        return self._conferma_valida(host_id) is not None
 
-    def azzera(self, host_id: uuid.UUID) -> None:
-        """Il rientro sotto soglia cancella la conferma: se l'Host risale,
-        il pannello a schermo intero è di nuovo dovuto (UJ-4 edge)."""
-        lettura = self._lettura(host_id)
-        if lettura is not None:
-            self._db.delete(lettura)
+    def revoca(self, host_id: uuid.UUID) -> None:
+        """Il rientro sotto soglia REVOCA la conferma: se l'Host risale, il
+        pannello a schermo intero è di nuovo dovuto (UJ-4 edge).
+
+        La riga resta con la sua evidenza datata — `conteggio_confermato` e
+        `confermato_il` attestano che l'Host è stato informato della soglia
+        fiscale — e la revoca aggiunge quando ha smesso di valere: transizione
+        tracciata, mai `delete` (AD-19, AD-20; decisione MYL-68).
+
+        Idempotente perché agisce sulla sola conferma valida: la data di una
+        revoca già avvenuta non si riscrive.
+        """
+        conferma = self._conferma_valida(host_id)
+        if conferma is not None:
+            conferma.revocata_il = utcnow()
 
     def conferma(self, host_id: uuid.UUID, conteggio: int) -> None:
-        lettura = self._lettura(host_id)
-        if lettura is None:
+        """Dopo una revoca la conferma è una riga NUOVA: la storia resta.
+
+        Riconfermare mentre la conferma vale aggiorna invece il conteggio a cui
+        si riferisce, sulla stessa riga: il registro cresce di un giro di
+        soglia, non di un click sull'endpoint.
+        """
+        conferma = self._conferma_valida(host_id)
+        if conferma is None:
             self._db.add(RegimeLettura(host_id=host_id, conteggio_confermato=conteggio))
         else:
-            lettura.conteggio_confermato = conteggio
-            lettura.confermato_il = utcnow()
+            conferma.conteggio_confermato = conteggio
+            conferma.confermato_il = utcnow()

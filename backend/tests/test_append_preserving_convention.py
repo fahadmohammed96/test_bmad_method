@@ -17,10 +17,11 @@ Due difese indipendenti:
 1. sul **modello** — nessuna FK verso una tabella protetta dichiara `ondelete`,
    quindi il database non può cancellare a cascata;
 2. sul **sorgente** — nessun modulo di dominio scrive un `delete()` su una
-   tabella protetta, e il modulo proprietario non chiama `.delete()` affatto.
+   tabella protetta, e i moduli proprietari non chiamano `.delete()` affatto.
 """
 
 import ast
+import importlib
 import pathlib
 
 import pytest
@@ -38,13 +39,38 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 # fuori dalla lista esaustiva di AD-20. `conflitto` arriva con la 2.5: entra
 # quando esiste, e `test_le_tabelle_protette_esistono` impedisce che la lista
 # contenga nomi morti che la svuoterebbero in silenzio.
-TABELLE_PROTETTE = frozenset({"prenotazione", "sync_run", "feed_ical", "ospite"})
+#
+# `regime_lettura` entra con la decisione MYL-68: porta l'evidenza datata che
+# l'Host è stato informato della soglia fiscale, e il suo rientro sotto soglia
+# è ora una revoca tracciata. È la prima tabella protetta fuori da
+# `calendario`, ed è la ragione per cui i modelli protetti sono raggruppati
+# per modulo proprietario qui sotto.
+TABELLE_PROTETTE = frozenset(
+    {"prenotazione", "sync_run", "feed_ical", "ospite", "regime_lettura"}
+)
 
-MODELLI_PROTETTI = frozenset({"Prenotazione", "SyncRun", "FeedIcal", "Ospite"})
+# Modelli protetti per modulo PROPRIETARIO (AD-18): il modulo serve a ritrovare
+# il modello, e un raggruppamento per stringa fissa terrebbe insieme cose che
+# vivono in file diversi senza dire dove cercarle.
+MODELLI_PROTETTI_PER_MODULO = {
+    "calendario": frozenset({"Prenotazione", "SyncRun", "FeedIcal", "Ospite"}),
+    "strutture": frozenset({"RegimeLettura"}),
+}
 
-# Moduli il cui sorgente non può contenere alcuna cancellazione: `calendario`
-# è il proprietario unico scrittore delle tabelle protette (AD-18).
-MODULI_SENZA_CANCELLAZIONI = ("calendario",)
+MODELLI_PROTETTI = frozenset(
+    nome for modelli in MODELLI_PROTETTI_PER_MODULO.values() for nome in modelli
+)
+
+# Moduli il cui sorgente non può contenere alcuna cancellazione: sono i
+# proprietari unici scrittori delle tabelle protette (AD-18).
+#
+# `strutture` entra con MYL-68, e non è un contorno: il difetto trovato lì era
+# `self._db.delete(lettura)`, cioè una cancellazione di ISTANZA, che il
+# controllo per tabella qui sotto non può attribuire a `regime_lettura` — solo
+# la regola più stretta sul modulo proprietario la vede. Aggiungere la tabella
+# all'elenco senza aggiungere il modulo qui avrebbe lasciato la guardia verde
+# proprio sulla forma del difetto che ha motivato la decisione.
+MODULI_SENZA_CANCELLAZIONI = ("calendario", "strutture")
 
 
 def test_le_tabelle_protette_esistono() -> None:
@@ -75,13 +101,14 @@ def test_nessuna_fk_verso_una_tabella_protetta_cancella_a_cascata() -> None:
 def test_i_modelli_protetti_corrispondono_alle_tabelle_protette() -> None:
     # Se un modello venisse rinominato, `MODELLI_PROTETTI` conterrebbe un nome
     # morto e la guardia sul sorgente non troverebbe più nulla da controllare.
-    from app.calendario import models
-
-    tabelle = {
-        getattr(models, nome).__tablename__
-        for nome in MODELLI_PROTETTI
-        if hasattr(models, nome)
-    }
+    tabelle = set()
+    for modulo, modelli in MODELLI_PROTETTI_PER_MODULO.items():
+        models = importlib.import_module(f"app.{modulo}.models")
+        tabelle |= {
+            getattr(models, nome).__tablename__
+            for nome in modelli
+            if hasattr(models, nome)
+        }
     assert tabelle == set(TABELLE_PROTETTE), (
         f"modelli protetti disallineati dalle tabelle protette: {tabelle}"
     )
@@ -126,9 +153,9 @@ def test_nessun_modulo_cancella_una_tabella_protetta() -> None:
 
 
 def test_il_modulo_proprietario_non_cancella_nulla() -> None:
-    # Su `calendario` la regola è più stretta: `session.delete(istanza)` non
-    # dice staticamente su quale tabella agisca, quindi nel modulo che
-    # possiede le tabelle protette non è ammesso affatto.
+    # Sui moduli proprietari la regola è più stretta: `session.delete(istanza)`
+    # non dice staticamente su quale tabella agisca, quindi in un modulo che
+    # possiede tabelle protette non è ammesso affatto.
     fuori_norma = []
     for modulo in MODULI_SENZA_CANCELLAZIONI:
         cartella = BACKEND / "app" / modulo
