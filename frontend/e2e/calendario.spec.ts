@@ -27,9 +27,15 @@ import { violazioniGravi } from "./axe-utils";
  * «sync concluso» dell'AC 6 non è esercitabile in questo ambiente: il
  * `webServer` di Playwright avvia l'API ma non il worker, e la politica di
  * uscita di rete rifiuta il loopback (NFR-17), quindi nessun import può
- * concludersi qui. La prima Prenotazione scrivibile dall'Host arriva con la
- * Story 2.4. Fino ad allora la mutazione osservabile è il collegamento di un
- * Feed, e quella è la metà coperta sotto.
+ * concludersi qui. Resta **non chiudibile** anche dopo la Story 2.4, e la
+ * ragione non è il perimetro della Story: è l'ambiente.
+ *
+ * Quello che la Story 2.4 chiude è l'altra metà dello stesso AC — la
+ * **mutazione reale della sorgente** —, e la chiude per davvero: l'ultimo test
+ * di questo file inserisce una Prenotazione dal form, non da un payload
+ * intercettato, e osserva che griglia ed etichetta si muovono **insieme** senza
+ * ricaricare la pagina. Con quella Prenotazione la baseline axe smette di
+ * misurare un chip finto (AC 8).
  */
 
 const CREDENZIALI = { password: "una-password-lunga" };
@@ -272,6 +278,132 @@ test("la griglia CON Prenotazioni non ha violazioni a11y gravi", async ({
   await expect(page.getByText("Non più nel portale")).toBeVisible();
   await expect(page.getByText("e altri 2 Ospiti")).toBeVisible();
 
+  expect(await violazioniGravi(page)).toEqual([]);
+});
+
+/**
+ * La mutazione REALE della sorgente (AC 6 della Story 2.3, metà «Prenotazione
+ * manuale») e la baseline axe su un chip **vero** (AC 8).
+ *
+ * Erano i due residui QA lasciati aperti dalla Story 2.3, e la ragione era la
+ * stessa per entrambi: fino alla 2.4 in questo ambiente non esisteva **nessun
+ * modo di scrivere** nel calendario. Il collegamento di un Feed cambia il
+ * perimetro (quanti calendari ci sono) ma non le Prenotazioni; l'import non può
+ * concludersi perché il worker non gira; e i chip si potevano solo intercettare,
+ * cioè axe misurava un payload finto in un DOM vero.
+ *
+ * Qui la Prenotazione la scrive l'Host, dal form, e tutto il resto è vero: la
+ * griglia si aggiorna **senza ricaricare la pagina** — è l'unico posto in cui la
+ * cache esiste, nei test di componente gli hook sono mockati — e l'etichetta
+ * «dati aggiornati alle HH:MM» viene interrogata sullo stesso istante.
+ *
+ * L'asserzione che porta più valore è quella **negativa**: inserire una
+ * Prenotazione a mano NON deve far comparire un orario di aggiornamento. Un
+ * dato scritto dall'Host non rende più freschi quelli dei portali, e un'etichetta
+ * che dicesse «dati aggiornati alle 14:32» perché è stata inserita una manuale
+ * sarebbe falsa sincronia prodotta dal prodotto stesso (NFR-2).
+ */
+
+/** Il primo giorno mostrato dalla griglia, letto DALLA PAGINA.
+ *
+ * Non si calcola dall'orologio del runner: la pagina apre il mese corrente in
+ * Europe/Rome, e a cavallo della mezzanotte di fine mese i due potrebbero non
+ * essere lo stesso mese — cioè le date inserite cadrebbero fuori dal periodo
+ * visibile e il test tornerebbe a misurare una griglia vuota, verde per il
+ * motivo sbagliato. Si legge `textContent` via `evaluate` perché il testo è
+ * `sr-only`.
+ */
+async function primoGiornoVisibile(
+  page: import("@playwright/test").Page,
+): Promise<string> {
+  const testo = await page
+    .getByRole("columnheader")
+    .nth(1)
+    .evaluate((elemento) => elemento.querySelector("span.sr-only")?.textContent ?? "");
+  const [giorno, mese, anno] = testo.trim().split("/");
+  return `${anno}-${mese}-${giorno}`;
+}
+
+test("una Prenotazione inserita a mano aggiorna griglia ed etichetta senza reload", async ({
+  page,
+}, testInfo) => {
+  await registra(page, `manuale-${testInfo.project.name}`);
+  await registraStruttura(page, "Bologna Centro");
+
+  // Si collega un Feed perché l'etichetta parli di dati da Feed: senza, direbbe
+  // «nessun calendario collegato» e la metà «etichetta» dell'AC non avrebbe
+  // niente da affermare.
+  await page.getByRole("link", { name: "Modifica" }).first().click();
+  const campoUrl = page.getByLabel("Indirizzo del calendario (iCal)");
+  await campoUrl.fill("https://feed.example.com/manuale.ics");
+  await campoUrl.press("Enter");
+  await expect(
+    page.getByText(/Importazione in corso|Mai sincronizzato/),
+  ).toBeVisible();
+
+  // `goto` QUI è deliberato, e non indebolisce il test: la cache che deve
+  // restare coerente è quella che **questo** caricamento popola, e ciò che non
+  // deve esserci in mezzo è un reload fra il salvataggio della Prenotazione e
+  // le asserzioni. Arrivare invece cliccando la navigazione costerebbe, sul
+  // progetto `mobile`, un click su una barra `fixed` che il pannello dei Feed —
+  // che cresce mentre carica — intercetta.
+  await page.goto("/calendario");
+  await expect(page.getByText(/potrebbe essere incompleta/)).toBeVisible();
+
+  const primo = await primoGiornoVisibile(page);
+  const arrivo = giornoPiu(primo, 9);
+  const partenza = giornoPiu(primo, 13);
+
+  await page
+    .getByRole("button", { name: "Inserisci una prenotazione" })
+    .click();
+  // Il form è una superficie nuova: la baseline axe la copre da aperto, dove
+  // esistono i suoi campi e le sue etichette.
+  expect(await violazioniGravi(page)).toEqual([]);
+
+  await page.getByLabel("Arrivo").fill(arrivo);
+  await page.getByLabel("Partenza").fill(partenza);
+  const campoNome = page.getByLabel(/Nome dell'Ospite/);
+  await campoNome.fill("Ospite Inventato");
+  // Invio da tastiera: è il gesto reale di chi ha appena finito di scrivere, e
+  // non dipende dalla posizione del bottone su viewport mobile.
+  await campoNome.press("Enter");
+
+  await expect(page.getByText(/Prenotazione inserita/)).toBeVisible();
+
+  // La griglia si è mossa, e SENZA reload: nessun `goto` fra il salvataggio e
+  // questa asserzione.
+  const griglia = page.getByRole("table");
+  await expect(griglia.getByText("Ospite Inventato")).toBeVisible();
+  await expect(griglia.getByText("Inserita a mano")).toBeVisible();
+
+  // E l'etichetta non ha inventato niente: la freschezza dei dati da Feed è
+  // quella di prima, perché nessun portale è stato interrogato (NFR-2).
+  await expect(page.getByText(/potrebbe essere incompleta/)).toBeVisible();
+  await expect(page.getByText(/Dati aggiornati alle/)).toHaveCount(0);
+
+  // Baseline axe su un chip VERO, non su un payload intercettato: chiude il
+  // residuo dell'AC 8 della Story 2.3.
+  expect(await violazioniGravi(page)).toEqual([]);
+
+  // Si chiude il pannello prima di agire sulla griglia: è il gesto reale
+  // dell'Host che ha finito di inserire, e su viewport mobile è anche ciò che
+  // evita di cliccare un chip mentre un pannello alto mezza pagina sta ancora
+  // sopra di lui.
+  await page.getByRole("button", { name: "Chiudi" }).click();
+  await expect(page.getByLabel("Arrivo")).toHaveCount(0);
+
+  // Cancellazione: transizione, non sparizione (AD-19, AD-20). Anche questa
+  // senza reload.
+  await page
+    .getByRole("button", { name: /Cancella la prenotazione del/ })
+    .click();
+  await page.getByRole("button", { name: "Sì, cancella" }).click();
+
+  await expect(griglia.getByText("Cancellata")).toBeVisible();
+  // Resta lì, con la sua etichetta: è «archiviare, mai distruggere» visto dagli
+  // occhi dell'Host, che quella prenotazione l'ha appena inserita.
+  await expect(griglia.getByText("Ospite Inventato")).toBeVisible();
   expect(await violazioniGravi(page)).toEqual([]);
 });
 

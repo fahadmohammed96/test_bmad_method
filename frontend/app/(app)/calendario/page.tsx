@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { CalendarioGriglia } from "@/components/CalendarioGriglia";
+import { FormPrenotazioneManuale } from "@/components/FormPrenotazioneManuale";
 import {
   strutturaFiltrata,
   useSelezioneStruttura,
 } from "@/components/SelezioneStruttura";
-import { useCalendario } from "@/lib/api/hooks";
+import { useCalendario, useCancellaPrenotazione } from "@/lib/api/hooks";
 import {
   giorniDelPeriodo,
   meseSpostato,
@@ -50,6 +51,7 @@ export default function CalendarioPage() {
     a: periodo.a,
     struttura_id: strutturaFiltrata(selezione),
   });
+  const cancella = useCancellaPrenotazione();
 
   const sposta = (quanti: number) =>
     setRiferimento((corrente) =>
@@ -119,6 +121,10 @@ export default function CalendarioPage() {
         </button>
       </div>
 
+      {/* La prima scrittura volontaria dell'Host nel calendario (FR-7): sopra
+          la griglia, perché la griglia è dove l'esito si vede. */}
+      <FormPrenotazioneManuale />
+
       {/* UX-DR6 / NFR-2: la verità temporale è un'etichetta PERSISTENTE
           accanto ai dati, non un tooltip da scoprire. E quando non si sa,
           si dice che non si sa: mai un orario inventato. */}
@@ -141,7 +147,18 @@ export default function CalendarioPage() {
             giorni={giorni}
             strutture={data.strutture}
             voci={data.voci}
+            onCancella={(prenotazione_id) => cancella.mutate(prenotazione_id)}
+            idInCancellazione={cancella.isPending ? cancella.variables : null}
           />
+          {cancella.isError && (
+            // L'errore vive fuori dal chip, che è largo pochi millimetri: un
+            // messaggio dentro una cella della griglia sarebbe illeggibile e
+            // sparirebbe al primo refetch. E dice cosa è successo al dato —
+            // «non è stata modificata» — perché è la domanda dell'Host.
+            <output className="text-sm text-danger">
+              {cancella.error.message}
+            </output>
+          )}
           {data.voci.length === 0 && (
             <p className="text-sm text-muted">
               {grigliaCopy.nessunaPrenotazione}

@@ -75,6 +75,25 @@ describe("aggregazione e distinzione per Canale (AC 1)", () => {
     expect(screen.getByText("Booking")).toBeInTheDocument();
   });
 
+  it("una manuale si distingue da una da portale, e da «Altro»", () => {
+    // Il Glossario mette l'inserimento manuale fra i Canali (PRD §4). Se
+    // portasse la stessa etichetta di «Altro» — un terzo portale — l'Host non
+    // distinguerebbe più ciò che ha scritto da ciò che è arrivato da fuori, che
+    // è il confronto che gli interessa di più.
+    griglia([
+      voce({ id: "p1", canale: "manuale" }),
+      voce({
+        id: "p2",
+        canale: "altro",
+        check_in: "2026-08-20",
+        check_out: "2026-08-22",
+      }),
+    ]);
+
+    expect(screen.getByText("Inserita a mano")).toBeInTheDocument();
+    expect(screen.getByText("Altro")).toBeInTheDocument();
+  });
+
   it("una Struttura senza Prenotazioni resta una riga della griglia", () => {
     // Farla sparire darebbe una griglia in cui «non ho prenotazioni» e «non
     // ho quella Struttura» hanno lo stesso aspetto.
@@ -171,6 +190,50 @@ describe("Prenotazioni non più attive (AC 12)", () => {
     }
     const conOpacita = antenati.filter((classi) => /\bopacity-\d/.test(classi));
     expect(conOpacita).toEqual([]);
+  });
+});
+
+describe("cancellazione di una manuale (Story 2.4, AC 3)", () => {
+  it("senza `onCancella` la griglia è in sola lettura", () => {
+    // La griglia è usata anche dove non c'è nulla da cancellare: l'azione è
+    // opzionale, e la sua assenza non deve dipendere dal caso.
+    griglia([voce({ canale: "manuale" })]);
+
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("il nome accessibile del bottone porta la data", () => {
+    // In una griglia mensile ci sono decine di bottoni «Cancella»: chi naviga
+    // per elementi interattivi li sentirebbe tutti uguali.
+    render(
+      <CalendarioGriglia
+        giorni={AGOSTO}
+        strutture={STRUTTURE}
+        voci={[voce({ canale: "manuale" })]}
+        onCancella={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Cancella la prenotazione del 10/08/2026",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("mentre la cancellazione è in corso lo dice e non si riclicca", () => {
+    render(
+      <CalendarioGriglia
+        giorni={AGOSTO}
+        strutture={STRUTTURE}
+        voci={[voce({ id: "p1", canale: "manuale" })]}
+        onCancella={() => {}}
+        idInCancellazione="p1"
+      />,
+    );
+
+    expect(screen.getByText("Cancellazione in corso…")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 

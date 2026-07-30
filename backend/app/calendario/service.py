@@ -71,11 +71,18 @@ from app.calendario.uscita_rete import (
     valida_formato,
 )
 from app.core.config import get_settings
-from app.core.date_range import today_rome, utcnow
+from app.core.date_range import DateRange, today_rome, utcnow
+from app.core.outbox import emit
 from app.identity import service as identity_service
 from app.strutture import service as strutture_service
 
 logger = logging.getLogger(__name__)
+
+# AD-17: il nome è a catalogo in `core/events.py`, che ne valida anche il
+# payload. La costante vive qui perché `calendario` è il modulo che emette
+# l'evento, e un letterale ripetuto nel codice e nei test è un letterale che
+# prima o poi diverge.
+EVENTO_PRENOTAZIONE_CESSATA = "prenotazione.cessata"
 
 
 class FeedNonTrovatoError(Exception):
@@ -129,9 +136,12 @@ def collega_feed(db: Session, host_id: uuid.UUID, dati: DatiFeed) -> FeedIcal:
     """Collega il Feed e accoda subito il sync. Solleva `UrlFeedNonValidoError`.
 
     La Struttura si legge dal service di `strutture`, mai dal suo repository:
-    `calendario` non conosce le tabelle di un altro modulo (AD-1, AD-18).
+    `calendario` non conosce le tabelle di un altro modulo (AD-1, AD-18). E si
+    legge **attiva**: collegare un Feed a una Struttura archiviata la
+    riporterebbe a sincronizzare, che è l'opposto di ciò che archiviare vuol
+    dire (AD-20).
     """
-    strutture_service.leggi_struttura(db, host_id, dati.struttura_id)
+    strutture_service.leggi_struttura_attiva(db, host_id, dati.struttura_id)
     url = dati.url.strip()
     # Validazione SINCRONA di solo formato: nessun DNS, nessuna connessione.
     # L'errore inline immediato non può dipendere dalla rete.
@@ -332,6 +342,25 @@ def registra_ospite(
     )
 
 
+def _ospite_da_registrare(dati: DatiOspite | None) -> DatiOspite | None:
+    """L'Ospite da scrivere, oppure `None` perché non ce n'è uno.
+
+    Tre campi vuoti **non** sono un Ospite. Una riga `ospite` con `nome`,
+    `email` e `telefono` a `NULL` sarebbe indistinguibile da un'anagrafica
+    azzerata dalla retention (AD-21) — l'evidenza `anonimizzato_il` esiste
+    proprio per separare «non ha mai avuto contatti» da «i contatti sono stati
+    cancellati», e scrivere righe vuote la renderebbe ambigua.
+
+    È anche il caso reale: un form HTML invia **sempre** i suoi campi, e li
+    invia come stringa vuota. Se questa funzione non esistesse, «l'Host non ha
+    indicato nessun Ospite» arriverebbe come un Ospite con tre stringhe vuote —
+    valori che non sono valori.
+    """
+    if dati is None:
+        return None
+    return dati if any((dati.nome, dati.email, dati.telefono)) else None
+
+
 def ospiti_della_prenotazione(
     db: Session, host_id: uuid.UUID, prenotazione_id: uuid.UUID
 ) -> list[Ospite]:
@@ -342,6 +371,168 @@ def ospiti_della_prenotazione(
     verificabile invece di essere una raccomandazione.
     """
     return OspiteRepository(db).della_prenotazione(host_id, prenotazione_id)
+
+
+# --------------------------------------- Prenotazioni manuali (FR-7, Story 2.4)
+
+
+class PrenotazioneNonManualeError(Exception):
+    """Lo stato di una Prenotazione da Feed lo decide il portale (AD-4)."""
+
+
+@dataclass(frozen=True, slots=True)
+class DatiPrenotazioneManuale:
+    """Ciò che l'Host scrive di suo pugno (FR-7).
+
+    `sommario` e `ospite` sono facoltativi e restano separati: il `sommario` è
+    la nota della Prenotazione — testo **opaco**, per riconoscerla — e non è
+    mai la sorgente di un nome di Ospite, nemmeno come suggerimento
+    (NFR-11, `[DECISIONE MYL-40]` → PRD §14.2). Sono due campi perché sono due
+    cose: «blocco per manutenzione» non è l'identità di nessuno.
+
+    Il Canale non è un parametro: una Prenotazione scritta qui è `manuale` per
+    definizione (Glossario PRD §4), e lasciarlo scegliere al client permetterebbe
+    di dichiarare una prenotazione «da Airbnb» che Airbnb non conosce.
+    """
+
+    struttura_id: uuid.UUID
+    check_in: date
+    check_out: date
+    sommario: str | None = None
+    ospite: DatiOspite | None = None
+
+
+def crea_prenotazione_manuale(
+    db: Session, host_id: uuid.UUID, dati: DatiPrenotazioneManuale
+) -> Prenotazione:
+    """Crea una Prenotazione manuale in stato `attiva` (FR-7, AD-19).
+
+    Solleva `EmptyDateRangeError` (intervallo vuoto),
+    `StrutturaNonTrovataError` e `StrutturaArchiviataError`.
+
+    **L'ordine dei tre passi è parte del comportamento.** Prima l'intervallo,
+    che è puro e non tocca niente; poi la Struttura, letta dal service di
+    `strutture` (AD-18) e letta ATTIVA (AD-20); solo dopo la scrittura. Così
+    nessun percorso d'errore lascia una riga a metà, e la validazione più
+    economica è anche la prima.
+
+    La Prenotazione nasce `attiva` e con la stessa forma di una da Feed: è ciò
+    che la rende indistinguibile agli occhi della rilevazione dei Conflitti
+    (Story 2.5), che non esiste ancora e che non deve dover conoscere due
+    sorgenti.
+    """
+    # `DateRange` è l'unica semantica temporale del prodotto (AD-3): il
+    # confine `[check_in, check_out)` non si reimplementa qui, altrimenti il
+    # turnover dello stesso giorno diventerebbe una sovrapposizione in un punto
+    # e non nell'altro.
+    soggiorno = DateRange(check_in=dati.check_in, check_out=dati.check_out)
+    strutture_service.leggi_struttura_attiva(db, host_id, dati.struttura_id)
+
+    prenotazione = PrenotazioneRepository(db).crea_manuale(
+        host_id,
+        struttura_id=dati.struttura_id,
+        check_in=soggiorno.check_in,
+        check_out=soggiorno.check_out,
+        sommario=dati.sommario,
+    )
+    db.flush()
+
+    ospite = _ospite_da_registrare(dati.ospite)
+    if ospite is not None:
+        OspiteRepository(db).add(
+            host_id,
+            Ospite(
+                prenotazione_id=prenotazione.id,
+                nome=ospite.nome,
+                email=ospite.email,
+                telefono=ospite.telefono,
+                # `principale` è un'IDENTITÀ, non un ordine: l'Host ha indicato
+                # QUESTO Ospite. Senza il flag `_principale` sceglierebbe
+                # l'unico noto — comportamento identico oggi e diverso al primo
+                # secondo Ospite, che è il modo in cui una scelta implicita
+                # diventa un difetto molto dopo.
+                principale=True,
+            ),
+        )
+    db.commit()
+    # Soli identificatori: un nome di Ospite scritto qui sopravviverebbe alla
+    # retention che AD-21 gli impone (AD-16, NFR-11).
+    logger.info(
+        "prenotazione manuale creata",
+        extra={
+            "prenotazione_id": str(prenotazione.id),
+            "host_id": str(host_id),
+            "struttura_id": str(dati.struttura_id),
+            "notti": soggiorno.nights,
+            "con_ospite": ospite is not None,
+        },
+    )
+    return prenotazione
+
+
+def cancella_prenotazione(
+    db: Session, host_id: uuid.UUID, prenotazione_id: uuid.UUID
+) -> Prenotazione:
+    """Porta una manuale a `cancellata` ed emette `prenotazione.cessata`.
+
+    Solleva `PrenotazioneNonTrovataError` e `PrenotazioneNonManualeError`.
+
+    **Non è una `DELETE`** (AD-19, AD-20): la riga resta, con la sua storia, e
+    continua a comparire in griglia con la sua etichetta — farla sparire senza
+    traccia contraddirebbe «archiviare, mai distruggere» agli occhi dell'Host,
+    che quella prenotazione l'ha vista ieri. Che nessun percorso possa
+    cancellarla è l'assenza che GS-6 impone su tutta la superficie.
+
+    **Idempotente, e per costruzione.** La transizione è una `UPDATE`
+    condizionata allo stato (`WHERE stato = 'attiva'`): l'evento si emette solo
+    se quella `UPDATE` ha toccato una riga. Un doppio click non produce un
+    secondo `prenotazione.cessata` — che nella 2.5 farebbe `decadere` due volte
+    lo stesso Conflitto — né riscrive `cessata_il`, che è la decorrenza della
+    retention (AD-21) e spostarla in avanti significherebbe conservare un dato
+    personale più a lungo, un click alla volta.
+
+    L'evento si scrive nella STESSA transazione della transizione (AD-1): non
+    esiste uno stato `cancellata` senza il suo evento, né viceversa.
+    """
+    prenotazioni = PrenotazioneRepository(db)
+    prenotazione = prenotazioni.by_id(host_id, prenotazione_id)
+    if prenotazione is None:
+        raise PrenotazioneNonTrovataError()
+    if prenotazione.feed_id is not None:
+        # Il sistema non scrive mai verso le OTA (AD-5, Non-Goal §8): una
+        # Prenotazione da Feed «cancellata qui» divergerebbe dal portale, e il
+        # primo sync riporterebbe indietro lo stato senza dire niente.
+        raise PrenotazioneNonManualeError()
+    struttura_id = prenotazione.struttura_id
+
+    transizionate = prenotazioni.marca_cancellata(
+        host_id, prenotazione_id=prenotazione_id, adesso=utcnow()
+    )
+    if transizionate == 0:
+        # Era già cessata — dal click precedente, o da un'altra scheda. Nessun
+        # evento, nessuna riscrittura: si risponde con lo stato corrente.
+        db.commit()
+        return prenotazione
+
+    emit(
+        db,
+        EVENTO_PRENOTAZIONE_CESSATA,
+        {
+            "prenotazione_id": str(prenotazione_id),
+            "host_id": str(host_id),
+            "struttura_id": str(struttura_id),
+        },
+    )
+    db.commit()
+    logger.info(
+        "prenotazione manuale cessata",
+        extra={
+            "prenotazione_id": str(prenotazione_id),
+            "host_id": str(host_id),
+            "struttura_id": str(struttura_id),
+        },
+    )
+    return prenotazione
 
 
 # ------------------------- azzeramento su richiesta (NFR-15, AD-21)
@@ -937,13 +1128,16 @@ def _upsert(
 
 
 __all__ = [
+    "EVENTO_PRENOTAZIONE_CESSATA",
     "Calendario",
     "DatiFeed",
     "DatiOspite",
+    "DatiPrenotazioneManuale",
     "EsitoAzzeramentoSuRichiesta",
     "EsitoImport",
     "FeedNonTrovatoError",
     "OspiteNonTrovatoError",
+    "PrenotazioneNonManualeError",
     "PrenotazioneNonTrovataError",
     "StatoFeed",
     "StrutturaDelCalendario",
@@ -952,8 +1146,10 @@ __all__ = [
     "azzera_ospite_su_richiesta",
     "azzera_ospiti_dell_host_su_richiesta",
     "calendario",
+    "cancella_prenotazione",
     "client_di_produzione",
     "collega_feed",
+    "crea_prenotazione_manuale",
     "esegui_sync",
     "leggi_feed",
     "lista_feed",

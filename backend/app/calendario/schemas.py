@@ -13,8 +13,16 @@ credenziali, quelle non si riflettono in nessuna risposta (NFR-17).
 import enum
 import uuid
 from datetime import date, datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+)
 
 from app.calendario.models import (
     AmbitoAzzeramento,
@@ -22,6 +30,29 @@ from app.calendario.models import (
     CategoriaErroreSync,
     StatoPrenotazione,
 )
+
+
+def _niente_se_vuoto(valore: object) -> object:
+    """Stringa vuota o di soli spazi ⇒ `None`, cioè «non indicato».
+
+    Serve perché un form HTML invia **sempre** i suoi campi: i campi che l'Host
+    non ha toccato arrivano come `""`. Senza questa normalizzazione un
+    `nome = ""` finirebbe nell'anagrafica — un valore che non è un valore, che
+    in griglia è indistinguibile da un nome mancante e che la retention
+    dovrebbe poi «azzerare» pur essendo già vuoto. E su `email` la stringa
+    vuota non passerebbe nemmeno la validazione del formato, trasformando un
+    campo facoltativo in un 422: cioè esattamente il modo in cui un campo
+    dichiarato facoltativo diventa obbligatorio nei fatti.
+    """
+    if isinstance(valore, str):
+        pulito = valore.strip()
+        return pulito or None
+    return valore
+
+
+# Testo facoltativo dell'Host: assente, oppure con del contenuto. Mai vuoto.
+TestoFacoltativo = Annotated[str | None, BeforeValidator(_niente_se_vuoto)]
+EmailFacoltativa = Annotated[EmailStr | None, BeforeValidator(_niente_se_vuoto)]
 
 
 class StatoSincronizzazione(enum.Enum):
@@ -42,6 +73,24 @@ class FeedIcalInput(BaseModel):
     struttura_id: uuid.UUID
     url: str = Field(min_length=1, max_length=2000)
     canale: CanaleFeed = CanaleFeed.ALTRO
+
+    @field_validator("canale")
+    @classmethod
+    def _un_feed_non_e_un_inserimento_manuale(cls, valore: CanaleFeed) -> CanaleFeed:
+        """`manuale` è un Canale del Glossario, non un portale da cui leggere.
+
+        Il rifiuto sta qui, all'ingresso, e non solo nel CHECK della tabella:
+        un Feed dichiarato `manuale` supererebbe il collegamento e le sue
+        Prenotazioni verrebbero rifiutate dal database **al primo sync**, cioè
+        come un 500 dentro un job — un fallimento lontano dalla causa e
+        invisibile all'Host, invece di un errore inline sul campo (FR-3).
+        """
+        if valore is CanaleFeed.MANUALE:
+            raise ValueError(
+                "«manuale» è il Canale di una Prenotazione inserita a mano, "
+                "non di un calendario da importare"
+            )
+        return valore
 
 
 class FeedIcalOutput(BaseModel):
@@ -185,6 +234,76 @@ class CalendarioOutput(BaseModel):
     feed_in_errore: int
     strutture: list[StrutturaDelCalendarioOutput]
     voci: list[VoceCalendarioOutput]
+
+
+class OspiteInput(BaseModel):
+    """L'Ospite che l'Host **può** — non deve — indicare (NFR-11, AD-21).
+
+    Tre campi, **tutti facoltativi**, nessuno con un valore di default che non
+    sia «assente». Non esiste un ordine in cui compilarli, non ce n'è uno
+    obbligatorio se ne dai un altro, e nessuno viene dedotto da qualcos'altro:
+    in particolare il `sommario` della Prenotazione **non** è un suggerimento
+    di `nome`, nemmeno come valore iniziale del form
+    (`[DECISIONE MYL-40]` → PRD §14.2).
+
+    Se tutti e tre restano vuoti non nasce alcuna riga `ospite`: «blocco date»
+    è un caso normale, non un inserimento incompleto.
+
+    Nessun campo di documento d'identità: quelli vivono solo in
+    `ospite_documento` (Epic 3, AD-11), con cifratura e retention proprie.
+    """
+
+    nome: TestoFacoltativo = Field(default=None, max_length=200)
+    # `EmailStr` e non una stringa qualsiasi: il contatto serve a scrivere
+    # all'Ospite (Epic 5), e un indirizzo malformato è un messaggio che non
+    # partirà — meglio un errore inline adesso che un invio fallito allora.
+    # La stringa vuota è normalizzata a `None` PRIMA della validazione, quindi
+    # il campo resta facoltativo davvero.
+    email: EmailFacoltativa = Field(default=None, max_length=320)
+    telefono: TestoFacoltativo = Field(default=None, max_length=50)
+
+
+class PrenotazioneManualeInput(BaseModel):
+    """Ciò che l'Host scrive per inserire una Prenotazione a mano (FR-7).
+
+    Tre campi obbligatori — la Struttura e le due date — e nient'altro. Il
+    Canale non si dichiara: una Prenotazione scritta qui è `manuale` per
+    definizione (Glossario PRD §4), e accettarlo dal client permetterebbe di
+    registrare una prenotazione «da Airbnb» che Airbnb non conosce.
+
+    `sommario` è la nota con cui l'Host riconosce la Prenotazione — «blocco per
+    manutenzione», il nome di chi ha chiamato — e resta testo **opaco**: non
+    diventa il nome dell'Ospite passando di qui, ed è un campo diverso proprio
+    perché è una cosa diversa (NFR-11).
+    """
+
+    struttura_id: uuid.UUID
+    check_in: date
+    check_out: date
+    sommario: TestoFacoltativo = Field(default=None, max_length=500)
+    ospite: OspiteInput | None = None
+
+
+class PrenotazioneManualeOutput(BaseModel):
+    """La Prenotazione manuale come il server la restituisce.
+
+    `notti` è derivato qui e il client lo presenta (AD-14): il modo realistico
+    in cui quell'invariante si perde è che il browser rifaccia il conto con la
+    propria timezone, e i due risultati smettano di coincidere il giorno del
+    cambio d'ora.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    struttura_id: uuid.UUID
+    canale: CanaleFeed
+    check_in: date
+    check_out: date
+    notti: int
+    sommario: str | None
+    stato: StatoPrenotazione
+    ospite_principale: str | None
 
 
 class AzzeramentoInput(BaseModel):

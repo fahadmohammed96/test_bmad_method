@@ -53,6 +53,14 @@ const SUPERFICIE_CALENDARIO = [
   "components/CalendarioGriglia.tsx",
   "components/BadgeCanale.tsx",
   "app/(app)/calendario/page.tsx",
+  // Story 2.4. `FormPrenotazioneManuale` è il file con più motivi di tutti per
+  // toccare una data: prende due date dall'Host e potrebbe «aiutarlo»
+  // proponendo oggi, o calcolando la partenza dall'arrivo. Le date restano le
+  // stringhe `AAAA-MM-GG` che l'input produce, e la guardia lo impone qui
+  // invece di sperarlo — è la stessa correzione di E2-F5, applicata prima che
+  // il difetto nasca anziché dopo.
+  "components/FormPrenotazioneManuale.tsx",
+  "components/AzioneCancellaPrenotazione.tsx",
 ];
 
 // Dove il divieto di accessor locali si applica (E2-F5). Puntarlo sul solo
