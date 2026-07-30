@@ -81,7 +81,7 @@ def _emetti_transizione_regime(
         emit(db, "regime_fiscale.soglia_superata", payload)
     else:
         emit(db, "regime_fiscale.rientrato", payload)
-        RegimeLetturaRepository(db).azzera(host_id)
+        RegimeLetturaRepository(db).revoca(host_id)
 
 
 def crea_struttura(db: Session, host_id: uuid.UUID, dati: DatiStruttura) -> Struttura:
