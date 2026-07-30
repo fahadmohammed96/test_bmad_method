@@ -28,6 +28,11 @@ export type CanaleFeed = components["schemas"]["CanaleFeed"];
 export type Calendario = components["schemas"]["CalendarioOutput"];
 export type VoceCalendario = components["schemas"]["VoceCalendarioOutput"];
 export type StatoPrenotazione = components["schemas"]["StatoPrenotazione"];
+export type PrenotazioneManuale =
+  components["schemas"]["PrenotazioneManualeOutput"];
+export type PrenotazioneManualeInput =
+  components["schemas"]["PrenotazioneManualeInput"];
+export type OspiteInput = components["schemas"]["OspiteInput"];
 
 type Problem = { title?: string; detail?: string };
 
@@ -366,6 +371,77 @@ export function useCalendario(parametri: {
     },
     refetchInterval: (query) =>
       query.state.data?.stato_sync === "in_corso" ? 3000 : false,
+  });
+}
+
+/**
+ * Ogni mutazione sulle Prenotazioni invalida la cache del Calendario.
+ *
+ * **Una sola voce di cache, quindi una sola invalidazione** — griglia ed
+ * etichetta «dati aggiornati alle HH:MM» vengono dalla stessa query
+ * (`useCalendario`), che è la ragione per cui non possono divergere. Se un
+ * giorno le si separasse, questa funzione è il punto in cui l'invalidazione
+ * dell'una senza l'altra diventerebbe visibile: è la classe di difetto della
+ * Story 1.6, e i test di componente sono ciechi per costruzione perché lì gli
+ * hook sono mockati e la cache non esiste.
+ *
+ * `["strutture"]` NON si invalida: inserire o cancellare una Prenotazione non
+ * cambia l'elenco delle Strutture né il Regime fiscale, che dipende dal loro
+ * numero (AD-12). Invalidare per abitudine trasformerebbe ogni salvataggio in
+ * tre richieste.
+ */
+function invalidaCalendario(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ["calendario"] });
+}
+
+/** Inserisce una Prenotazione manuale — diretta o blocco date (FR-7). */
+export function useCreaPrenotazioneManuale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (dati: PrenotazioneManualeInput) => {
+      const { data, error } = await api.POST("/api/v1/calendario/prenotazioni", {
+        body: dati,
+      });
+      // Il messaggio arriva dal `detail` di `problem+json` e finisce inline
+      // sul form: è già una frase in italiano scritta per l'Host. Il fallback
+      // serve solo quando non c'è risposta affatto (rete), e va scritto come
+      // una frase per la stessa ragione.
+      if (!data) {
+        throw new Error(
+          titoloErrore(error) ??
+            "Non riusciamo a salvare la prenotazione: controlla la connessione e riprova.",
+        );
+      }
+      return data;
+    },
+    onSuccess: () => invalidaCalendario(queryClient),
+  });
+}
+
+/**
+ * Porta una Prenotazione manuale a `cancellata` (AD-19, AD-20).
+ *
+ * `POST /cancellazione` e non `DELETE`, come l'API: la riga resta e continua a
+ * comparire in griglia con la sua etichetta. Il verbo dice cosa succede al
+ * dato, e un `DELETE` qui inviterebbe il prossimo a implementarlo davvero.
+ */
+export function useCancellaPrenotazione() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (prenotazione_id: string) => {
+      const { data, error } = await api.POST(
+        "/api/v1/calendario/prenotazioni/{prenotazione_id}/cancellazione",
+        { params: { path: { prenotazione_id } } },
+      );
+      if (!data) {
+        throw new Error(
+          titoloErrore(error) ??
+            "Non riusciamo a cancellare la prenotazione: controlla la connessione e riprova.",
+        );
+      }
+      return data;
+    },
+    onSuccess: () => invalidaCalendario(queryClient),
   });
 }
 

@@ -1,3 +1,4 @@
+import { AzioneCancellaPrenotazione } from "@/components/AzioneCancellaPrenotazione";
 import { BadgeCanale } from "@/components/BadgeCanale";
 import { BadgeStato } from "@/components/BadgeStato";
 import type { VoceCalendario } from "@/lib/api/hooks";
@@ -45,7 +46,27 @@ const INIZIALI = ["L", "M", "M", "G", "V", "S", "D"] as const;
 // che AC 12 e UX-DR4 vogliono affidata al testo e non al colore.
 const TONO_NON_ATTIVA = "border-dashed border-muted";
 
-function ChipPrenotazione({ voce }: Readonly<{ voce: VoceCalendario }>) {
+/** Solo una manuale ancora attiva si cancella da qui.
+ *
+ * Una Prenotazione che arriva da un portale la annulla il **portale**: il
+ * sistema non scrive mai verso le OTA (AD-5), quindi un bottone qui
+ * prometterebbe qualcosa che non facciamo, e lo stato divergerebbe al primo
+ * sync. La regola è la stessa che il server impone con un 422: qui non si
+ * ricalcola, si evita di offrire un'azione che sappiamo già come finisce.
+ */
+function siPuoCancellare(voce: VoceCalendario): boolean {
+  return voce.canale === "manuale" && voce.stato === "attiva";
+}
+
+function ChipPrenotazione({
+  voce,
+  onCancella,
+  inCancellazione,
+}: Readonly<{
+  voce: VoceCalendario;
+  onCancella?: (prenotazione_id: string) => void;
+  inCancellazione: boolean;
+}>) {
   const attiva = voce.stato === "attiva";
   return (
     <div
@@ -75,6 +96,13 @@ function ChipPrenotazione({ voce }: Readonly<{ voce: VoceCalendario }>) {
         {formatGiornoIt(voce.check_in)} → {formatGiornoIt(voce.check_out)} ·{" "}
         {grigliaCopy.notti(voce.notti)}
       </p>
+      {onCancella !== undefined && siPuoCancellare(voce) && (
+        <AzioneCancellaPrenotazione
+          etichetta={grigliaCopy.cancella(formatGiornoIt(voce.check_in))}
+          inCorso={inCancellazione}
+          onConferma={() => onCancella(voce.id)}
+        />
+      )}
     </div>
   );
 }
@@ -97,10 +125,15 @@ export function CalendarioGriglia({
   giorni,
   strutture,
   voci,
+  onCancella,
+  idInCancellazione = null,
 }: Readonly<{
   giorni: readonly GiornoIso[];
   strutture: readonly { id: string; nome: string }[];
   voci: readonly VoceCalendario[];
+  /** Assente = griglia in sola lettura: nessun chip mostra l'azione. */
+  onCancella?: (prenotazione_id: string) => void;
+  idInCancellazione?: string | null;
 }>) {
   return (
     // Regione scorrevole RAGGIUNGIBILE DA TASTIERA. Un `overflow-x-auto`
@@ -161,7 +194,11 @@ export function CalendarioGriglia({
                         colSpan={cella.celle}
                         className="border p-0.5 align-top"
                       >
-                        <ChipPrenotazione voce={cella.voce} />
+                        <ChipPrenotazione
+                          voce={cella.voce}
+                          onCancella={onCancella}
+                          inCancellazione={idInCancellazione === cella.voce.id}
+                        />
                       </td>
                     ),
                   )}

@@ -11,10 +11,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const useCalendario = vi.fn();
+const cancellaMutate = vi.fn();
+const creaMutate = vi.fn();
+
+const INERTE = {
+  mutate: vi.fn(),
+  isPending: false,
+  isError: false,
+  isSuccess: false,
+  error: null,
+  variables: undefined,
+};
 
 vi.mock("@/lib/api/hooks", () => ({
   useCalendario: (parametri: unknown) => useCalendario(parametri),
-  useStrutture: () => ({ data: [] }),
+  useStrutture: () => ({ data: [{ id: "s1", nome: "Bologna Centro", stato: "attiva" }] }),
+  useCreaPrenotazioneManuale: () => ({ ...INERTE, mutate: creaMutate }),
+  useCancellaPrenotazione: () => ({ ...INERTE, mutate: cancellaMutate }),
 }));
 
 // L'unico punto che legge l'orologio del client: fissarlo rende
@@ -57,7 +70,88 @@ function mostra() {
 
 beforeEach(() => {
   useCalendario.mockReset();
+  cancellaMutate.mockReset();
+  creaMutate.mockReset();
   rispondi();
+});
+
+const VOCE_MANUALE = {
+  id: "p-manuale",
+  struttura_id: "s1",
+  canale: "manuale",
+  check_in: "2026-08-10",
+  check_out: "2026-08-14",
+  notti: 4,
+  sommario: null,
+  stato: "attiva",
+  ospite_principale: null,
+  altri_ospiti: 0,
+};
+
+describe("inserimento manuale sulla superficie Calendario (Story 2.4)", () => {
+  it("la griglia è il posto in cui si inserisce una prenotazione", () => {
+    mostra();
+
+    expect(
+      screen.getByRole("button", { name: "Inserisci una prenotazione" }),
+    ).toBeVisible();
+  });
+
+  it("cancellare una manuale passa dalla conferma, non dal primo click", async () => {
+    // Portare a `cancellata` non è reversibile dal prodotto: un click
+    // accidentale su un chip largo pochi millimetri costerebbe una
+    // prenotazione da reinserire a mano.
+    rispondi({ voci: [VOCE_MANUALE] });
+    mostra();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Cancella la prenotazione del/ }),
+    );
+    expect(cancellaMutate).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Sì, cancella" }));
+    expect(cancellaMutate).toHaveBeenCalledWith("p-manuale");
+  });
+
+  it("rinunciare alla conferma non cancella nulla", async () => {
+    rispondi({ voci: [VOCE_MANUALE] });
+    mostra();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Cancella la prenotazione del/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "No, lascia stare" }),
+    );
+
+    expect(cancellaMutate).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /Cancella la prenotazione del/ }),
+    ).toBeVisible();
+  });
+
+  it("una Prenotazione da portale non offre la cancellazione", () => {
+    // Il sistema non scrive mai verso le OTA (AD-5): un bottone qui
+    // prometterebbe qualcosa che non facciamo, e lo stato divergerebbe dal
+    // portale al primo sync.
+    rispondi({ voci: [{ ...VOCE_MANUALE, canale: "airbnb" }] });
+    mostra();
+
+    expect(
+      screen.queryByRole("button", { name: /Cancella la prenotazione del/ }),
+    ).toBeNull();
+  });
+
+  it("una manuale già cancellata non si cancella di nuovo", () => {
+    rispondi({ voci: [{ ...VOCE_MANUALE, stato: "cancellata" }] });
+    mostra();
+
+    expect(
+      screen.queryByRole("button", { name: /Cancella la prenotazione del/ }),
+    ).toBeNull();
+    // Ma resta visibile con la sua etichetta (AD-19, AD-20).
+    expect(screen.getByText("Cancellata")).toBeVisible();
+  });
 });
 
 describe("verità temporale (AC 4 — NFR-2, UX-DR6)", () => {

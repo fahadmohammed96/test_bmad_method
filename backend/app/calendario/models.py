@@ -28,6 +28,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -47,11 +48,25 @@ from app.core.db import Base, new_uuid7
 
 
 class CanaleFeed(enum.Enum):
-    """Origine delle Prenotazioni importate (FR-4)."""
+    """Origine di una Prenotazione (FR-4, Glossario PRD §4).
+
+    Il Glossario definisce il Canale come «la fonte OTA di una Prenotazione:
+    Airbnb, Booking.com, **o inserimento manuale**»: `MANUALE` è un valore del
+    vocabolario, non un'aggiunta di comodo. Riusare `ALTRO` renderebbe una
+    Prenotazione scritta dall'Host indistinguibile in griglia da una importata
+    da un terzo portale — cioè l'opposto della «distinzione visiva per Canale»
+    che FR-4 chiede, sul confronto che all'Host interessa più di tutti.
+
+    `MANUALE` non è mai il Canale di un `feed_ical`: un Feed che lo dichiarasse
+    produrrebbe Prenotazioni «inserite a mano» che nessuno ha inserito, e il
+    CHECK di `prenotazione` le rifiuterebbe al primo sync. Il rifiuto sta a
+    monte, sullo schema d'ingresso del collegamento (`FeedIcalInput`).
+    """
 
     AIRBNB = "airbnb"
     BOOKING = "booking"
     ALTRO = "altro"
+    MANUALE = "manuale"
 
 
 class StatoPrenotazione(enum.Enum):
@@ -213,6 +228,18 @@ class Prenotazione(Base):
         # sulle righe che vengono da un Feed, che è esattamente il perimetro
         # dell'idempotenza.
         UniqueConstraint("feed_id", "ical_uid", name="uq_prenotazione_feed_ical_uid"),
+        # `feed_id` e `ical_uid` esistono INSIEME o non esistono: entrambi
+        # valorizzati è una riga da Feed, entrambi `NULL` è una manuale
+        # (Story 2.4). La forma mista non è rappresentabile, e non è pedanteria:
+        # un `feed_id` con `ical_uid` a `NULL` **sfuggirebbe al UNIQUE** — in
+        # Postgres i NULL sono distinti fra loro dentro un indice — e lo stesso
+        # Feed potrebbe produrre righe duplicate senza che l'upsert idempotente
+        # se ne accorga. È lo stesso vincolo, chiuso dal lato che l'unicità non
+        # può coprire.
+        CheckConstraint(
+            "(feed_id IS NULL) = (ical_uid IS NULL)",
+            name="ck_prenotazione_feed_e_uid_insieme",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)

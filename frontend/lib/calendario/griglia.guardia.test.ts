@@ -53,6 +53,14 @@ const SUPERFICIE_CALENDARIO = [
   "components/CalendarioGriglia.tsx",
   "components/BadgeCanale.tsx",
   "app/(app)/calendario/page.tsx",
+  // Story 2.4. `FormPrenotazioneManuale` è il file con più motivi di tutti per
+  // toccare una data: prende due date dall'Host e potrebbe «aiutarlo»
+  // proponendo oggi, o calcolando la partenza dall'arrivo. Le date restano le
+  // stringhe `AAAA-MM-GG` che l'input produce, e la guardia lo impone qui
+  // invece di sperarlo — è la stessa correzione di E2-F5, applicata prima che
+  // il difetto nasca anziché dopo.
+  "components/FormPrenotazioneManuale.tsx",
+  "components/AzioneCancellaPrenotazione.tsx",
 ];
 
 // Dove il divieto di accessor locali si applica (E2-F5). Puntarlo sul solo
@@ -94,6 +102,10 @@ const DERIVATI_DELLA_VOCE = [
   "ospite_principale",
   "altri_ospiti",
 ];
+
+// Gli stessi derivati sulla risposta dell'inserimento manuale: `notti` e
+// `stato` li decide il server anche lì (AD-14).
+const DERIVATI_DELLA_RISPOSTA_MANUALE = ["notti", "stato"];
 
 const DERIVATI_DELLA_VISTA = [
   "ultimo_sync_riuscito_il",
@@ -179,4 +191,17 @@ describe("i valori derivati vengono dal contratto (AD-14)", () => {
   it.each(DERIVATI_DELLA_VISTA)("CalendarioOutput dichiara %s", (campo) => {
     expect(blocco("CalendarioOutput")).toContain(campo);
   });
+
+  it.each(DERIVATI_DELLA_RISPOSTA_MANUALE)(
+    "PrenotazioneManualeOutput dichiara %s",
+    (campo) => {
+      // La risposta dell'inserimento manuale è l'altra strada per cui gli
+      // stessi derivati arrivano al client (Story 2.4). Senza questa riga,
+      // togliere `notti` da QUELLA risposta non farebbe cadere nulla — e la
+      // strada più breve per rimetterlo in pagina sarebbe che il browser
+      // rifaccia il conto sulle due date, cioè AD-14 aggirato dalla porta
+      // accanto.
+      expect(blocco("PrenotazioneManualeOutput")).toContain(campo);
+    },
+  );
 });

@@ -190,6 +190,13 @@ giusta è «c'è qualcosa da azzerare?», non «l'ho già fatto una volta?».
   farlo passare per coperto: il completamento naturale è la 2.4, quando esiste
   una mutazione che produce dati.
 
+  **Chiuso dalla Story 2.4** (`docs/stories/story-2.4-inserimento-manuale-prenotazioni.md`,
+  sezione «I due residui QA della Story 2.3»): l'e2e esercita una mutazione
+  reale della sorgente e asserisce che l'etichetta porta il valore **nuovo**,
+  con prova del rosso. Resta fuori portata soltanto un import che si conclude
+  davvero — nessun worker, e il loopback rifiutato da NFR-17: è l'ambiente, non
+  il perimetro di una Story, e non si chiude aspettando la prossima.
+
 - **E2-G8 (residuo di GS-7 fuori dal modulo `calendario`)** resta **aperto**.
   Questa Story aggiunge una superficie da Feed **dentro** `app/calendario/
   schemas.py`, quindi GS-7 la arruola da sé e la classificazione è stata
@@ -202,6 +209,10 @@ giusta è «c'è qualcosa da azzerare?», non «l'ho già fatto una volta?».
   (AD-18); l'endpoint arriva con la 2.4, che è la Story in cui l'Host scrive
   per la prima volta un Ospite. La tabella non nasce senza scrittore — nasce
   con lo scrittore di modulo e senza quello di rete.
+
+  **Aperto ancora dopo la 2.4**, ristretto: `POST /calendario/prenotazioni`
+  scrive **un** Ospite, quello che l'Host indica, marcato `principale`. Il
+  conteggio «altri Ospiti» resta senza percorso di scrittura via API.
 
 ## Dev Agent Record
 

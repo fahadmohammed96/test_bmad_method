@@ -20,13 +20,15 @@ from sqlalchemy.orm import Session
 
 from app.api.problems import DomainProblem
 from app.calendario import service
-from app.calendario.models import FeedIcal
+from app.calendario.models import FeedIcal, Prenotazione
 from app.calendario.schemas import (
     AzzeramentoInput,
     AzzeramentoOutput,
     CalendarioOutput,
     FeedIcalInput,
     FeedIcalOutput,
+    PrenotazioneManualeInput,
+    PrenotazioneManualeOutput,
     PrenotazioneOutput,
     PrenotazioniDelFeedOutput,
     StrutturaDelCalendarioOutput,
@@ -39,10 +41,11 @@ from app.calendario.uscita_rete import url_redatto
 # guardia `tests/test_auth_convention.py`, e duplicarne una qui darebbe due
 # controlli da tenere allineati.
 from app.config_normativa.deps import AdminToken
+from app.core.date_range import EmptyDateRangeError
 from app.core.db import get_db
 from app.identity.deps import CurrentHost
 from app.identity.service import HostNonTrovatoError
-from app.strutture.service import StrutturaNonTrovataError
+from app.strutture.service import StrutturaArchiviataError, StrutturaNonTrovataError
 
 router = APIRouter(prefix="/feed-ical", tags=["calendario"])
 calendario_router = APIRouter(prefix="/calendario", tags=["calendario"])
@@ -252,6 +255,131 @@ def _azzeramento_in_uscita(
         sommari_azzerati=esito.sommari_azzerati,
         eseguito_il=esito.eseguito_il,
     )
+
+
+def _struttura_archiviata() -> DomainProblem:
+    return DomainProblem(
+        status=422,
+        title="Struttura archiviata",
+        type_slug="struttura-archiviata",
+        detail=(
+            "Questa Struttura è archiviata e non accetta nuove prenotazioni. "
+            "Le prenotazioni già registrate restano visibili."
+        ),
+    )
+
+
+def _prenotazione_in_uscita(
+    db: Session, host_id: uuid.UUID, prenotazione: Prenotazione
+) -> PrenotazioneManualeOutput:
+    """La Prenotazione manuale con i suoi valori DERIVATI dal server (AD-14).
+
+    `ospite_principale` si rilegge dal service invece di essere costruito dal
+    payload d'ingresso: è l'unico modo per cui la risposta descriva ciò che è
+    stato scritto e non ciò che era stato chiesto — e la differenza fra le due
+    cose è precisamente dove vive il difetto (un campo normalizzato a `None`,
+    un'anagrafica non creata).
+    """
+    ospiti = service.ospiti_della_prenotazione(db, host_id, prenotazione.id)
+    principale = next((ospite for ospite in ospiti if ospite.principale), None)
+    return PrenotazioneManualeOutput(
+        id=prenotazione.id,
+        struttura_id=prenotazione.struttura_id,
+        canale=prenotazione.canale,
+        check_in=prenotazione.check_in,
+        check_out=prenotazione.check_out,
+        notti=prenotazione.soggiorno.nights,
+        sommario=prenotazione.sommario,
+        stato=prenotazione.stato,
+        ospite_principale=None if principale is None else principale.nome,
+    )
+
+
+@calendario_router.post("/prenotazioni", status_code=201)
+def crea_prenotazione(
+    dati: PrenotazioneManualeInput, db: DbSession, host: CurrentHost
+) -> PrenotazioneManualeOutput:
+    """Inserisce una Prenotazione manuale — diretta o blocco date (FR-7).
+
+    `struttura_id` arriva dal client, `host_id` dalla sessione (AD-15): la
+    Struttura si risolve nel perimetro dell'Host, quindi quella di un altro
+    Host è un 404 e non una fuga.
+    """
+    try:
+        prenotazione = service.crea_prenotazione_manuale(
+            db,
+            host.id,
+            service.DatiPrenotazioneManuale(
+                struttura_id=dati.struttura_id,
+                check_in=dati.check_in,
+                check_out=dati.check_out,
+                sommario=dati.sommario,
+                ospite=(
+                    None
+                    if dati.ospite is None
+                    else service.DatiOspite(
+                        nome=dati.ospite.nome,
+                        email=dati.ospite.email,
+                        telefono=dati.ospite.telefono,
+                    )
+                ),
+            ),
+        )
+    except StrutturaNonTrovataError:
+        raise _struttura_non_trovata() from None
+    except StrutturaArchiviataError:
+        raise _struttura_archiviata() from None
+    except EmptyDateRangeError:
+        # Il confine dell'intervallo semiaperto `[check_in, check_out)` (AD-3):
+        # un soggiorno di zero notti non è una prenotazione. 422 inline sul
+        # campo, mai un 500 — l'Host ha sbagliato una data, non il sistema.
+        raise DomainProblem(
+            status=422,
+            title="Periodo non valido",
+            type_slug="periodo-prenotazione-non-valido",
+            detail=(
+                "La data di partenza deve essere successiva a quella di "
+                "arrivo: una prenotazione dura almeno una notte."
+            ),
+        ) from None
+    return _prenotazione_in_uscita(db, host.id, prenotazione)
+
+
+@calendario_router.post("/prenotazioni/{prenotazione_id}/cancellazione")
+def cancella_prenotazione(
+    prenotazione_id: uuid.UUID, db: DbSession, host: CurrentHost
+) -> PrenotazioneManualeOutput:
+    """Porta una Prenotazione manuale a `cancellata` (AD-19, AD-20).
+
+    **`POST /cancellazione` e non `DELETE`**, e non è una preferenza di stile:
+    il verbo dell'API dichiara cosa succede al dato. Qui non si cancella nulla
+    — si registra un fatto, la riga resta con la sua storia e continua a
+    comparire in griglia con la sua etichetta. Un `DELETE` inviterebbe il
+    prossimo a implementarlo davvero, che è la quarta cancellazione distruttiva
+    che AD-20 non ammette.
+
+    Idempotente: cancellare due volte risponde `200` con lo stesso stato e non
+    emette un secondo evento.
+    """
+    try:
+        prenotazione = service.cancella_prenotazione(db, host.id, prenotazione_id)
+    except service.PrenotazioneNonTrovataError:
+        raise DomainProblem(
+            status=404,
+            title="Prenotazione non trovata",
+            type_slug="prenotazione-not-found",
+        ) from None
+    except service.PrenotazioneNonManualeError:
+        raise DomainProblem(
+            status=422,
+            title="Prenotazione non inserita a mano",
+            type_slug="prenotazione-non-manuale",
+            detail=(
+                "Questa prenotazione arriva da un portale: annullala nel "
+                "portale e la aggiorneremo alla prossima sincronizzazione."
+            ),
+        ) from None
+    return _prenotazione_in_uscita(db, host.id, prenotazione)
 
 
 @calendario_router.get("")
