@@ -53,8 +53,14 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   sola la guardia che dipendeva da quel conteggio. Regola operativa: ogni cancello nuovo va
   consegnato con la prova che **cade** su un caso costruito per farlo cadere, non solo con la
   prova che passa.
-- 2026-07-30 — **`mutmut` 3.6 su questo stack: gira, ma non vede.** Spike MYL-72, esito in
-  `docs/qa/proposta-mutation-testing-ci.md` §7. Tre fatti da non rimisurare: (1) **17.4%**
+- 2026-07-30 — **DECISIONE: il mutation testing NON si adotta** (Fahad, 30/07, dopo lo spike
+  MYL-72; la sua delibera del mattino era B e l'ha cambiata sulla misura). Il documento agli
+  atti è `docs/qa/decisione-mutation-testing-ci.md` — **rinominato** da `proposta-…` proprio
+  perché fra un anno la distinzione che conta è «misurato e scartato» contro «mai provato». Se
+  qualcuno ripropone il mutation testing, la risposta non è «no»: è quel documento, con i due
+  trigger di riesame verificabili (§4) e i costi già pagati (§5), che nessuno deve rimisurare.
+- 2026-07-30 — **`mutmut` 3.6 su questo stack: gira, ma non vede.** Spike MYL-72, dettaglio in
+  `docs/qa/decisione-mutation-testing-ci.md`. Tre fatti da non rimisurare: (1) **17.4%**
   delle righe di funzione di `backend/app/` è cieco per costruzione — `mutmut` salta funzioni
   e classi **decorate**, quindi lo strato `api.py` è cieco al 78–100%, ogni `@dataclass`
   (compresa `DateRange`, cioè `overlaps`, cioè l'anti-double-booking) riceve zero mutanti, e
@@ -78,7 +84,10 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   costruita una raccomandazione, poi una decisione, poi un incarico di implementazione — e la
   leva che l'incarico chiedeva («disattiva le mutazioni sui letterali stringa») **in `mutmut`
   3.6 non esiste**. Regola: quando riporto un numero preso da uno strumento nuovo, dichiaro
-  accanto se il run era pulito; e se non lo era, il numero non si riporta affatto.
+  accanto se il run era pulito; e se non lo era, il numero **non si riporta affatto**. Non
+  basta scrivere la riserva accanto: qui la riserva c'era — i tre caveat erano dichiarati per
+  esteso — e il numero è diventato lo stesso la base della delibera. Una cifra in tabella pesa
+  più di un caveat in prosa, sempre.
 - 2026-07-30 — **`main` può essere rosso per giorni senza che nessuno se ne accorga**: qui lo
   è stato per **quattro merge consecutivi** (431 test in errore) perché le PR #52 e #53
   avevano aggiunto ciascuna una migrazione `revision = "0013"` su `down_revision = "0012"`.
