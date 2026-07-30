@@ -240,11 +240,12 @@
         "type": "object"
       },
       "CanaleFeed": {
-        "description": "Origine delle Prenotazioni importate (FR-4).",
+        "description": "Origine di una Prenotazione (FR-4, Glossario PRD §4).\n\nIl Glossario definisce il Canale come «la fonte OTA di una Prenotazione:\nAirbnb, Booking.com, **o inserimento manuale**»: `MANUALE` è un valore del\nvocabolario, non un'aggiunta di comodo. Riusare `ALTRO` renderebbe una\nPrenotazione scritta dall'Host indistinguibile in griglia da una importata\nda un terzo portale — cioè l'opposto della «distinzione visiva per Canale»\nche FR-4 chiede, sul confronto che all'Host interessa più di tutti.\n\n`MANUALE` non è mai il Canale di un `feed_ical`: un Feed che lo dichiarasse\nprodurrebbe Prenotazioni «inserite a mano» che nessuno ha inserito, e il\nCHECK di `prenotazione` le rifiuterebbe al primo sync. Il rifiuto sta a\nmonte, sullo schema d'ingresso del collegamento (`FeedIcalInput`).",
         "enum": [
           "airbnb",
           "booking",
-          "altro"
+          "altro",
+          "manuale"
         ],
         "title": "CanaleFeed",
         "type": "string"
@@ -608,6 +609,50 @@
         "title": "Motivo",
         "type": "string"
       },
+      "OspiteInput": {
+        "description": "L'Ospite che l'Host **può** — non deve — indicare (NFR-11, AD-21).\n\nTre campi, **tutti facoltativi**, nessuno con un valore di default che non\nsia «assente». Non esiste un ordine in cui compilarli, non ce n'è uno\nobbligatorio se ne dai un altro, e nessuno viene dedotto da qualcos'altro:\nin particolare il `sommario` della Prenotazione **non** è un suggerimento\ndi `nome`, nemmeno come valore iniziale del form\n(`[DECISIONE MYL-40]` → PRD §14.2).\n\nSe tutti e tre restano vuoti non nasce alcuna riga `ospite`: «blocco date»\nè un caso normale, non un inserimento incompleto.\n\nNessun campo di documento d'identità: quelli vivono solo in\n`ospite_documento` (Epic 3, AD-11), con cifratura e retention proprie.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "format": "email",
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "nome": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nome"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          }
+        },
+        "title": "OspiteInput",
+        "type": "object"
+      },
       "ParametriFiscaliInput": {
         "properties": {
           "aliquote_citate": {
@@ -758,6 +803,125 @@
           "canale_notifica_preferito"
         ],
         "title": "PreferenzeInput",
+        "type": "object"
+      },
+      "PrenotazioneManualeInput": {
+        "description": "Ciò che l'Host scrive per inserire una Prenotazione a mano (FR-7).\n\nTre campi obbligatori — la Struttura e le due date — e nient'altro. Il\nCanale non si dichiara: una Prenotazione scritta qui è `manuale` per\ndefinizione (Glossario PRD §4), e accettarlo dal client permetterebbe di\nregistrare una prenotazione «da Airbnb» che Airbnb non conosce.\n\n`sommario` è la nota con cui l'Host riconosce la Prenotazione — «blocco per\nmanutenzione», il nome di chi ha chiamato — e resta testo **opaco**: non\ndiventa il nome dell'Ospite passando di qui, ed è un campo diverso proprio\nperché è una cosa diversa (NFR-11).",
+        "properties": {
+          "check_in": {
+            "format": "date",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "ospite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OspiteInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sommario": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sommario"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "struttura_id",
+          "check_in",
+          "check_out"
+        ],
+        "title": "PrenotazioneManualeInput",
+        "type": "object"
+      },
+      "PrenotazioneManualeOutput": {
+        "description": "La Prenotazione manuale come il server la restituisce.\n\n`notti` è derivato qui e il client lo presenta (AD-14): il modo realistico\nin cui quell'invariante si perde è che il browser rifaccia il conto con la\npropria timezone, e i due risultati smettano di coincidere il giorno del\ncambio d'ora.",
+        "properties": {
+          "canale": {
+            "$ref": "#/components/schemas/CanaleFeed"
+          },
+          "check_in": {
+            "format": "date",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notti": {
+            "title": "Notti",
+            "type": "integer"
+          },
+          "ospite_principale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ospite Principale"
+          },
+          "sommario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sommario"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoPrenotazione"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "struttura_id",
+          "canale",
+          "check_in",
+          "check_out",
+          "notti",
+          "sommario",
+          "stato",
+          "ospite_principale"
+        ],
+        "title": "PrenotazioneManualeOutput",
         "type": "object"
       },
       "PrenotazioneOutput": {
@@ -1548,6 +1712,92 @@
           }
         },
         "summary": "Griglia",
+        "tags": [
+          "calendario"
+        ]
+      }
+    },
+    "/api/v1/calendario/prenotazioni": {
+      "post": {
+        "description": "Inserisce una Prenotazione manuale — diretta o blocco date (FR-7).\n\n`struttura_id` arriva dal client, `host_id` dalla sessione (AD-15): la\nStruttura si risolve nel perimetro dell'Host, quindi quella di un altro\nHost è un 404 e non una fuga.",
+        "operationId": "crea_prenotazione_api_v1_calendario_prenotazioni_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrenotazioneManualeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrenotazioneManualeOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Crea Prenotazione",
+        "tags": [
+          "calendario"
+        ]
+      }
+    },
+    "/api/v1/calendario/prenotazioni/{prenotazione_id}/cancellazione": {
+      "post": {
+        "description": "Porta una Prenotazione manuale a `cancellata` (AD-19, AD-20).\n\n**`POST /cancellazione` e non `DELETE`**, e non è una preferenza di stile:\nil verbo dell'API dichiara cosa succede al dato. Qui non si cancella nulla\n— si registra un fatto, la riga resta con la sua storia e continua a\ncomparire in griglia con la sua etichetta. Un `DELETE` inviterebbe il\nprossimo a implementarlo davvero, che è la quarta cancellazione distruttiva\nche AD-20 non ammette.\n\nIdempotente: cancellare due volte risponde `200` con lo stesso stato e non\nemette un secondo evento.",
+        "operationId": "cancella_prenotazione_api_v1_calendario_prenotazioni__prenotazione_id__cancellazione_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prenotazione_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Prenotazione Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrenotazioneManualeOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancella Prenotazione",
         "tags": [
           "calendario"
         ]

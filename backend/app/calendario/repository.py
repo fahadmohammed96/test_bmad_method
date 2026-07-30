@@ -340,6 +340,88 @@ class PrenotazioneRepository:
             else_=None,
         )
 
+    def crea_manuale(
+        self,
+        host_id: uuid.UUID,
+        *,
+        struttura_id: uuid.UUID,
+        check_in: date,
+        check_out: date,
+        sommario: str | None,
+    ) -> Prenotazione:
+        """La Prenotazione scritta dall'Host (Story 2.4): mai legata a un Feed.
+
+        `feed_id` e `ical_uid` restano `NULL` — è ciò che distingue una manuale,
+        ed è il motivo per cui il UNIQUE `(feed_id, ical_uid)` non le collassa:
+        in Postgres i `NULL` sono distinti fra loro dentro un indice. Il CHECK
+        `(feed_id IS NULL) = (ical_uid IS NULL)` chiude la forma mista, che
+        sarebbe l'unica in grado di aggirare quel UNIQUE.
+
+        Nessun `commit`: la transazione è del chiamante, come ovunque in questo
+        modulo.
+        """
+        adesso = utcnow()
+        prenotazione = Prenotazione(
+            host_id=host_id,
+            struttura_id=struttura_id,
+            canale=CanaleFeed.MANUALE,
+            check_in=check_in,
+            check_out=check_out,
+            sommario=sommario,
+            stato=StatoPrenotazione.ATTIVA,
+            creata_il=adesso,
+            aggiornata_il=adesso,
+        )
+        self._db.add(prenotazione)
+        return prenotazione
+
+    def marca_cancellata(
+        self, host_id: uuid.UUID, *, prenotazione_id: uuid.UUID, adesso: datetime
+    ) -> int:
+        """Porta una manuale ATTIVA a `cancellata`; ritorna quante righe.
+
+        Transizione, mai una `DELETE` (AD-19, AD-20, GS-6).
+
+        La condizione sullo stato sta **dentro** la `UPDATE`, non in un `if`
+        che la precede: così la lettura e la scrittura sono la stessa
+        istruzione e il doppio click di un Host — o due schede aperte — non è
+        un check-then-write. Il chiamante lo scopre dal `rowcount`: chi ottiene
+        `1` ha fatto la transizione ed emette l'evento, chi ottiene `0` trova
+        la Prenotazione già cessata e non emette nulla.
+
+        Con l'`if` fuori passerebbero entrambi: misurato su otto contendenti,
+        **cinque** `prenotazione.cessata` invece di uno
+        (`tests/test_gara_cancellazione_prenotazione.py`). Le conseguenze sono
+        due, e nessuna delle due dà errore: `cessata_il` riscritta rimanda in
+        avanti la scadenza di un dato personale (AD-21), e nella Story 2.5 lo
+        stesso Conflitto farebbe `decadere` più volte.
+
+        `feed_id IS NULL` nel filtro è difesa in profondità: lo stato di una
+        Prenotazione da Feed lo decide il portale (AD-4), e il service la
+        rifiuta già con un errore parlante. Qui il vincolo resta anche per un
+        chiamante futuro che quel controllo non lo faccia.
+        """
+        istruzione = (
+            update(Prenotazione)
+            .where(
+                Prenotazione.host_id == host_id,
+                Prenotazione.id == prenotazione_id,
+                Prenotazione.feed_id.is_(None),
+                Prenotazione.stato == StatoPrenotazione.ATTIVA,
+            )
+            .values(
+                stato=StatoPrenotazione.CANCELLATA,
+                # Uscita da `attiva`: da qui decorre la retention
+                # dell'anagrafica se precede il `check_out` (AD-21). Il filtro
+                # seleziona solo righe `attiva`, che hanno `cessata_il` a
+                # `NULL`: nessuna data preesistente da conservare.
+                cessata_il=adesso,
+                aggiornata_il=adesso,
+            )
+        )
+        esito = cast(CursorResult, self._db.execute(istruzione))
+        return int(esito.rowcount or 0)
+
     def marca_rimosse_dal_feed(
         self, host_id: uuid.UUID, *, feed_id: uuid.UUID, uid_presenti: Sequence[str]
     ) -> int:

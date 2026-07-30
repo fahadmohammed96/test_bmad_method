@@ -11,6 +11,11 @@ export const calendarioCopy = {
     airbnb: "Airbnb",
     booking: "Booking",
     altro: "Altro",
+    // Il Canale del Glossario per l'inserimento manuale (PRD §4). Distinto da
+    // «Altro», che è un TERZO portale: se avessero la stessa etichetta l'Host
+    // non distinguerebbe più ciò che ha scritto da ciò che è arrivato da fuori,
+    // che è il confronto che gli interessa di più (FR-4).
+    manuale: "Inserita a mano",
   },
   collega: "Collega il calendario",
   nessunFeed: "Nessun calendario collegato a questa Struttura.",
@@ -119,6 +124,24 @@ export const grigliaCopy = {
     rimossa_dal_feed: "Non più nel portale",
   },
 
+  // Cancellazione di una manuale (AD-19, AD-20): si porta a `cancellata`, non
+  // si distrugge. Le parole lo dicono — «annulla» prometterebbe che la
+  // prenotazione sparisce, e invece resta in griglia con la sua etichetta.
+  cancella: (arrivo: string) => `Cancella la prenotazione del ${arrivo}`,
+  cancellaBreve: "Cancella",
+  cancellaDomanda: "Cancellare questa prenotazione?",
+  cancellaSpiegazione:
+    "Resterà nel calendario segnata come cancellata: non la cancelliamo davvero.",
+  cancellaConferma: "Sì, cancella",
+  cancellaAnnulla: "No, lascia stare",
+  cancellaInCorso: "Cancellazione in corso…",
+  cancellaNonRiuscita:
+    "Non riusciamo a cancellare questa prenotazione. Riprova fra poco: non è stata modificata.",
+  // Solo le manuali si cancellano da qui: una da portale la annulla il
+  // portale, e il sistema non scrive mai verso le OTA.
+  soloManualiSiCancellano:
+    "Le prenotazioni che arrivano dai portali si annullano nel portale.",
+
   // UX-DR6 / NFR-2: etichetta PERSISTENTE, mai un tooltip da scoprire.
   aggiornatoAlle: (orario: string) => `Dati aggiornati alle ${orario}`,
   // Con più portali la freschezza della vista è quella del più vecchio: si
@@ -136,4 +159,49 @@ export const grigliaCopy = {
     quanti === 1
       ? "1 calendario non si sincronizza: quello che vedi potrebbe non essere aggiornato."
       : `${quanti} calendari non si sincronizzano: quello che vedi potrebbe non essere aggiornato.`,
+} as const;
+
+/** Copy it-IT dell'inserimento manuale (FR-7, Story 2.4).
+ *
+ * **Ogni campo dell'Ospite porta «facoltativo» nella sua etichetta**, e non è
+ * un vezzo: l'AC dice che l'Host *può* — non deve — indicare l'Ospite, e un
+ * campo che non dichiara di essere facoltativo si legge come obbligatorio. Il
+ * caso d'uso più frequente dell'inserimento manuale è il blocco date, dove non
+ * c'è nessun Ospite da indicare (NFR-11, `[DECISIONE MYL-40]`).
+ */
+export const inserimentoCopy = {
+  titolo: "Inserisci una prenotazione",
+  sottotitolo:
+    "Per una prenotazione diretta o per bloccare delle date: comparirà nel calendario insieme a quelle dei portali.",
+  apri: "Inserisci una prenotazione",
+  chiudi: "Chiudi",
+
+  strutturaEtichetta: "Struttura",
+  arrivoEtichetta: "Arrivo",
+  partenzaEtichetta: "Partenza",
+  // Il confine dell'intervallo semiaperto detto in parole all'Host: la notte
+  // della partenza non è occupata, ed è la ragione per cui due prenotazioni
+  // che si toccano nello stesso giorno non sono un conflitto.
+  partenzaAiuto:
+    "La notte della partenza resta libera: chi arriva quel giorno non è in conflitto.",
+  notaEtichetta: "Nota (facoltativa)",
+  notaAiuto:
+    "Per riconoscere la prenotazione: «blocco per manutenzione», «amici di famiglia».",
+
+  ospiteTitolo: "Ospite (facoltativo)",
+  ospiteAiuto:
+    "Puoi non indicarlo: per un blocco date non serve, e la prenotazione si salva comunque.",
+  nomeEtichetta: "Nome dell'Ospite (facoltativo)",
+  emailEtichetta: "Email dell'Ospite (facoltativa)",
+  telefonoEtichetta: "Telefono dell'Ospite (facoltativo)",
+
+  salva: "Salva la prenotazione",
+  salvataggioInCorso: "Salvataggio in corso…",
+  salvata: "Prenotazione inserita: la trovi nel calendario.",
+  // Mai «errore»: si dice cosa è successo ai dati dell'Host, che è la sua
+  // domanda vera.
+  nonSalvata:
+    "Non riusciamo a salvare questa prenotazione. Riprova fra poco: nel calendario non è stato aggiunto nulla.",
+  nessunaStrutturaAttiva:
+    "Registra una Struttura per poter inserire una prenotazione a mano.",
 } as const;

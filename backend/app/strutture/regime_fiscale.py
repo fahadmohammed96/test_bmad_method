@@ -96,7 +96,7 @@ def calcola_regime(
         disclaimer=DISCLAIMER,
         # Pannello a schermo intero finché l'Host non conferma di averlo
         # letto (UX-DR14). Sotto soglia non si mostra mai — nessuna
-        # notifica residua — e il rientro azzera la conferma, così una
+        # notifica residua — e il rientro revoca la conferma, così una
         # nuova risalita lo ripropone (UJ-4 edge).
         mostra_pannello_transizione=superata and not lettura_confermata,
     )

@@ -57,6 +57,17 @@ SUPERFICI_ESENTI = {
         "derivato da un Feed"
     ),
     "AzzeramentoInput": "input dell'endpoint interno, non mostra nulla",
+    "OspiteInput": "input del client, non mostra nulla",
+    "PrenotazioneManualeInput": "input del client, non mostra nulla",
+    "PrenotazioneManualeOutput": (
+        "una Prenotazione manuale non deriva da alcun Feed: l'Host l'ha appena "
+        "scritta, e la sua freschezza è l'istante della scrittura. Mostrarle "
+        "accanto l'orario dell'ultimo sync di un portale sarebbe una verità "
+        "temporale presa in prestito da un'altra sorgente — un'affermazione "
+        "sulla freschezza di dati che non c'entrano. La griglia, che le mostra "
+        "insieme a quelle da Feed, porta il timestamp per l'intera vista "
+        "(`CalendarioOutput`), ed è lì che la domanda ha senso"
+    ),
     "AzzeramentoOutput": (
         "evidenza di un azzeramento su richiesta (NFR-15): conteggi e "
         "identificatori di ciò che è stato appena CANCELLATO, non dati "

@@ -125,3 +125,18 @@ catalog.register_event(
 catalog.register_event(
     "regime_fiscale.rientrato", payload_keys=("host_id", "conteggio")
 )
+# calendario (Story 2.4) — proprietario: modulo `calendario`.
+# Si emette l'uscita da `attiva` di una Prenotazione manuale (AD-19): è il
+# fatto su cui la Story 2.5 farà `decadere` un Conflitto, e per questo porta
+# anche la `struttura_id` — la rilevazione è scopata alla Struttura, e senza
+# quell'identificatore il consumatore dovrebbe rileggere la Prenotazione solo
+# per sapere dove guardare.
+#
+# SOLI identificatori: né il `sommario`, né il nome dell'Ospite. La tabella
+# `outbox` è append-only e leggibile da chi amministra il sistema, quindi un
+# dato personale scritto qui **sopravvivrebbe** alla retention che AD-21 gli
+# impone (AD-16, AD-17, NFR-11).
+catalog.register_event(
+    "prenotazione.cessata",
+    payload_keys=("prenotazione_id", "host_id", "struttura_id"),
+)

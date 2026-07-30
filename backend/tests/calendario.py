@@ -163,16 +163,21 @@ def crea_prenotazione(
     check_in: date,
     check_out: date,
     struttura_id: uuid.UUID | None = None,
-    canale: CanaleFeed = CanaleFeed.ALTRO,
+    canale: CanaleFeed = CanaleFeed.MANUALE,
     stato: StatoPrenotazione = StatoPrenotazione.ATTIVA,
     cessata_il: datetime | None = None,
     sommario: str | None = None,
+    feed_id: uuid.UUID | None = None,
+    ical_uid: str | None = None,
 ) -> Prenotazione:
     """Prenotazione scritta direttamente: qui interessa lo STATO, non l'import.
 
-    Senza `feed_id`/`ical_uid`, come sarà una manuale della Story 2.4: il
-    UNIQUE `(feed_id, ical_uid)` non morde sui NULL, quindi più righe così
-    convivono senza collidere.
+    Senza `feed_id`/`ical_uid`, come una manuale della Story 2.4: il UNIQUE
+    `(feed_id, ical_uid)` non morde sui NULL, quindi più righe così convivono
+    senza collidere. Il Canale di default è `manuale` per la stessa ragione —
+    il CHECK `(feed_id IS NULL) = (ical_uid IS NULL)` e il Glossario legano
+    «senza Feed» a «inserita a mano», e un default `altro` scriverebbe righe
+    che il prodotto non sa produrre.
     """
     prenotazione = Prenotazione(
         host_id=contesto.host_id,
@@ -183,10 +188,50 @@ def crea_prenotazione(
         stato=stato,
         cessata_il=cessata_il,
         sommario=sommario,
+        feed_id=feed_id,
+        ical_uid=ical_uid,
     )
     db.add(prenotazione)
     db.flush()
     return prenotazione
+
+
+def crea_manuale(
+    db: Session,
+    contesto: Contesto,
+    *,
+    check_in: date,
+    check_out: date,
+    struttura_id: uuid.UUID | None = None,
+    sommario: str | None = None,
+    ospite: service.DatiOspite | None = None,
+) -> Prenotazione:
+    """Prenotazione manuale dal SERVICE, che è il percorso reale dell'Host.
+
+    Distinta da `crea_prenotazione`, che scrive la riga a mano per allestire
+    uno stato: qui interessa proprio il percorso — validazione dell'intervallo,
+    Struttura letta dal service di `strutture`, anagrafica facoltativa.
+    """
+    return service.crea_prenotazione_manuale(
+        db,
+        contesto.host_id,
+        service.DatiPrenotazioneManuale(
+            struttura_id=struttura_id or contesto.struttura_id,
+            check_in=check_in,
+            check_out=check_out,
+            sommario=sommario,
+            ospite=ospite,
+        ),
+    )
+
+
+def archivia(db: Session, contesto: Contesto, struttura_id: uuid.UUID | None = None):
+    """Archivia la Struttura passando dal suo service (AD-18, AD-20)."""
+    from app.strutture import service as strutture_service
+
+    return strutture_service.archivia_struttura(
+        db, contesto.host_id, struttura_id or contesto.struttura_id
+    )
 
 
 def registra_ospite(

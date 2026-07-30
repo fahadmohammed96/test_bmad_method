@@ -28,6 +28,15 @@ class StrutturaNonTrovataError(Exception):
     pass
 
 
+class StrutturaArchiviataError(Exception):
+    """La Struttura è archiviata: non accetta scritture nuove (AD-20, FR-1).
+
+    Archiviare è la forma non distruttiva di «non la uso più»: le Prenotazioni
+    passate restano leggibili, ma aggiungerne di nuove — a mano o collegando un
+    Feed — riporterebbe in vita una Struttura che l'Host ha messo da parte.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class DatiStruttura:
     nome: str
@@ -81,7 +90,7 @@ def _emetti_transizione_regime(
         emit(db, "regime_fiscale.soglia_superata", payload)
     else:
         emit(db, "regime_fiscale.rientrato", payload)
-        RegimeLetturaRepository(db).azzera(host_id)
+        RegimeLetturaRepository(db).revoca(host_id)
 
 
 def crea_struttura(db: Session, host_id: uuid.UUID, dati: DatiStruttura) -> Struttura:
@@ -122,6 +131,27 @@ def leggi_struttura(
     db: Session, host_id: uuid.UUID, struttura_id: uuid.UUID
 ) -> Struttura:
     return _carica(db, host_id, struttura_id)
+
+
+def leggi_struttura_attiva(
+    db: Session, host_id: uuid.UUID, struttura_id: uuid.UUID
+) -> Struttura:
+    """La Struttura, purché accetti ancora scritture (AD-20, FR-1).
+
+    Vive qui e non nei moduli chiamanti perché lo STATO della Struttura è di
+    questo modulo: `calendario` che leggesse `StatoStruttura` importerebbe il
+    modello di un altro dominio (AD-1), e la domanda «posso ancora scriverci?»
+    smetterebbe di avere una sola risposta il giorno in cui gli stati diventano
+    tre.
+
+    Solleva `StrutturaArchiviataError`, distinta da `StrutturaNonTrovataError`:
+    «non è tua» e «non accetta più scritture» sono due esiti diversi, e
+    confonderli darebbe un 404 su una Struttura che l'Host vede in elenco.
+    """
+    struttura = _carica(db, host_id, struttura_id)
+    if struttura.stato is StatoStruttura.ARCHIVIATA:
+        raise StrutturaArchiviataError()
+    return struttura
 
 
 def _carica(db: Session, host_id: uuid.UUID, struttura_id: uuid.UUID) -> Struttura:
