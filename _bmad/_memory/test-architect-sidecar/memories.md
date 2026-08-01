@@ -96,3 +96,24 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   torna, il sync mai riuscito, il conflitto fra due prenotazioni manuali). Quelle voci non le
   risolvo io: tornano a John, che corregge `docs/epics.md`. Provare a scriverle come test le
   avrebbe trasformate in decisioni di prodotto prese di nascosto dentro un documento di QA.
+- 2026-07-30 — **Il token degli agenti NON può scrivere stati di commit** su questo
+  repository: `POST /repos/.../statuses/{sha}` risponde `403 Resource not accessible by
+  personal access token`, mentre contenuti e pull request funzionano. Il permesso
+  `statuses: write` è distinto e va concesso a parte. Finché non lo è, il cancello
+  `verdetto-murat` (MYL-73) esiste e fallisce chiuso, ma non pubblica nulla.
+- 2026-07-30 — **L'account del token è anche l'autore delle PR degli agenti**, quindi GitHub
+  rifiuta con 422 sia `APPROVE` sia `REQUEST_CHANGES` sulle nostre PR («Can not approve your
+  own pull request»). Le review formali degli agenti su questo repo **non sono possibili**
+  finché gli agenti non hanno un'identità GitHub distinta: si ripiega su una review di tipo
+  `COMMENT`. È il motivo per cui il cancello del verdetto è uno **stato di commit** e non una
+  review — la review non si sarebbe potuta né dare né togliere.
+- 2026-07-30 — **`GET /pulls/{n}` può riportare una head in ritardo** di qualche secondo su un
+  `git push` già completato (misurato sul banco di prova di MYL-73). Ogni controllo del tipo
+  «lo SHA che sto giudicando è ancora la head?» è quindi una cortesia, non una garanzia: la
+  garanzia deve essere che l'artefatto pubblicato sia **legato allo SHA** e non alla PR.
+- 2026-07-30 — **Il rosso di `main` non lo guarda nessuno.** Trovato per caso girando la suite:
+  `main` era rosso da quattro merge consecutivi (dal 13:20 circa del 30/07) per due migrazioni
+  Alembic con lo **stesso** `revision = "0013"` arrivate da due PR verdi separatamente (#52 e
+  #53). Nessun cancello di PR può vedere questa classe di difetto, perché nasce dall'**unione**
+  di due rami sani. I presidi sono due, entrambi da attivare: *Require branches to be up to
+  date before merging* e una guardia che imponga un'unica head Alembic.
