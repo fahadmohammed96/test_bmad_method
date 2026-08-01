@@ -722,6 +722,23 @@ l'avevo vista leggendo `docs/epics.md`: si vede solo guardando il codice del 304
     (Sollevato da Amelia e da me nella cross-review della PR #40; la 2.2 non lo implementa, ed è
     corretto che non l'abbia fatto senza una decisione.)
 
+### 4.3 Finding su codice già consegnato — a registro per Fahad
+
+Non vanno ad Amelia e non aprono un batch: sono P2, e la decisione se e quando toccarli è di
+Fahad, come gli altri P2 dell'Epic (E2-F6…E2-F22).
+
+- **E2-F23 — (P2, codice morto) — `PrenotazioneRepository.della_struttura` non è chiamato da
+  nessuno.** `backend/app/calendario/repository.py:491`, entrato con la Story 2.4 (PR #52).
+  L'unico `della_struttura` raggiunto dalla produzione è quello di `FeedIcalRepository`
+  (`repository.py:49`, usato da `service.py:169`). Trovato dallo spike di mutation testing
+  (MYL-72): dei 1712 mutanti generati, i **soli 10 non verificabili** sono i suoi, perché
+  `mutmut` non ha trovato alcun test che ne attraversi le righe — e la ragione non è una lacuna
+  della suite, è che il metodo non esiste per nessuno. **Non toccato**: rimuoverlo è un
+  cambiamento di codice applicativo, non di suite. Il valore della segnalazione non è la riga
+  in sé, è che un metodo di repository può entrare nel trunk senza un chiamante e senza che
+  nulla lo dica — `diff-cover` non c'era ancora quando la 2.4 è stata mergiata, e da MYL-59 in
+  poi lo direbbe. Vale la pena ricontrollarlo alla chiusura dell'Epic e non prima.
+
 ---
 
 ## 5. Fixture e dati di test (vincoli)
@@ -857,8 +874,8 @@ ha retto la chiusura dell'Epic 1:
   zero ≠ rischio zero, e senza questa tabella i rischi noti o inquinano il registro del debito o
   spariscono e riappaiono come debito per dimenticanza
 
-Registro dei finding aperti a oggi: **E2-G1 … E2-G8** (§4.1). Tutti aperti in fase di
-progettazione, nessuno ancora chiuso. Le tredici voci di **§4.2 non sono finding**: sono
+Registro dei finding aperti a oggi: **E2-G1 … E2-G8** (§4.1), tutti aperti in fase di
+progettazione e nessuno ancora chiuso, più **E2-F23** (§4.3), P2 a registro per Fahad. Le tredici voci di **§4.2 non sono finding**: sono
 decisioni di prodotto in attesa di John, e alla chiusura vanno riportate in §7.7 solo se sono
 rimaste aperte.
 
