@@ -16,6 +16,10 @@ tiene il canale di produzione fuori portata, e chi ha bisogno di osservare un
 invio installa un canale finto.
 """
 
+import json
+import pathlib
+import subprocess
+import sys
 from datetime import date, timedelta
 
 import pytest
@@ -42,6 +46,27 @@ from tests.notifiche import (
     notifiche_di,
     preferisci,
 )
+
+REGISTRAZIONI_IN_PROCESSO_FRESCO = """
+import json
+import app.worker  # noqa: F401 — l'unico import: è l'entrypoint di produzione
+from app.core.jobs import handlers
+from app.core.outbox import subscribers
+
+print(
+    json.dumps(
+        {
+            "conflitto_rilevato": [
+                handler.__module__
+                for handler in subscribers.handlers_for("conflitto.rilevato")
+            ],
+            "handler_consegna": bool(
+                handlers.handler_for("notifica.consegna_richiesta")
+            ),
+        }
+    )
+)
+"""
 
 # Le due Prenotazioni si sovrappongono sulle notti 15-17 agosto: è l'esempio
 # di `epics.md`, e serve a poterlo riconoscere nel testo consegnato.
@@ -97,18 +122,32 @@ class TestLaNotificaParte:
     ) -> None:
         # Classe «assenze»: se `app/worker.py` smettesse di importare il
         # cablaggio, gli eventi continuerebbero a essere scritti e
-        # «consegnati» a zero handler, e nessun test funzionale cadrebbe. Si
-        # guarda il registro di PRODUZIONE dopo l'import dell'entrypoint.
-        import app.worker  # noqa: F401 — import con effetto di registrazione
-        from app.cablaggio import al_conflitto_rilevato
-        from app.core.jobs import handlers
-        from app.core.outbox import subscribers
-        from app.notifiche.jobs import TIPO_JOB_CONSEGNA_NOTIFICA
-
-        assert al_conflitto_rilevato in subscribers.handlers_for(
-            calendario_service.EVENTO_CONFLITTO_RILEVATO
+        # «consegnati» a zero handler, e nessun test funzionale cadrebbe.
+        #
+        # In PROCESSO FRESCO, e importando SOLO l'entrypoint: dentro pytest il
+        # cablaggio è già stato importato da altri file, quindi guardare il
+        # registro qui direbbe che qualcuno l'ha importato — non che lo faccia
+        # il worker. Misurato: togliendo l'import da `app/worker.py` la
+        # versione precedente di questo test restava verde.
+        esito = subprocess.run(
+            [sys.executable, "-c", REGISTRAZIONI_IN_PROCESSO_FRESCO],
+            cwd=pathlib.Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
         )
-        assert handlers.handler_for(TIPO_JOB_CONSEGNA_NOTIFICA) is not None
+        assert esito.returncode == 0, esito.stderr[-2000:]
+        registrati = json.loads(esito.stdout)
+        assert "app.cablaggio" in registrati["conflitto_rilevato"], (
+            "l'entrypoint del worker non registra più il sottoscrittore di "
+            "`conflitto.rilevato`: i Conflitti si rileverebbero e nessuno "
+            "notificherebbe l'Host"
+        )
+        assert registrati["handler_consegna"], (
+            "nessun handler per il job di consegna: le notifiche si "
+            "accoderebbero e non partirebbe niente"
+        )
 
     def test_la_consegna_in_app_scrive_il_messaggio_sulla_riga(
         self, db_session: Session, contesto: Contesto
@@ -455,6 +494,38 @@ class TestConflittoSenzaSovrapposizione:
             motivo is not None and "ConflittoSenzaSovrapposizione" in motivo
             for motivo in motivi
         )
+
+    def test_una_consegna_gia_avvenuta_non_ricompone_un_fatto_che_si_e_mosso(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        # Il ritentativo di un job GIÀ consegnato non deve fallire perché nel
+        # frattempo il fatto è cambiato: l'Host quella notifica l'ha ricevuta,
+        # e un job `failed` sarebbe un allarme su niente.
+        prima = crea_prenotazione(
+            db_session, contesto, check_in=PRIMA[0], check_out=PRIMA[1]
+        )
+        crea_prenotazione(
+            db_session, contesto, check_in=SECONDA[0], check_out=SECONDA[1]
+        )
+        calendario_service.rivaluta_conflitti(
+            db_session, contesto.host_id, contesto.struttura_id
+        )
+        db_session.commit()
+        consegna_eventi(db_session)
+        email = installa_email_finta()
+        _esegui_job(db_session)
+        assert len(email.inviati) == 1
+
+        prima.check_out = date(2026, 8, 14)
+        for job in job_di_consegna(db_session):
+            job.status = JobStatus.PENDING
+        db_session.commit()
+        _esegui_job(db_session)
+
+        for job in job_di_consegna(db_session):
+            assert job.status is JobStatus.COMPLETED
+            assert job.last_error is None
+        assert len(email.inviati) == 1
 
 
 class TestPreferenzeIgnorate:
