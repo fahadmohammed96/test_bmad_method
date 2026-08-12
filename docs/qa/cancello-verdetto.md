@@ -108,23 +108,47 @@ GitHub, con lo strumento vero:
 3. **Pubblicazione dello stato rifiutata** (403, vedi sotto) → uscita `1`, e
    sulla PR compare il ritiro dell'approvazione.
 
-## Due limiti reali, emersi solo dalla prova live
+### Primo verdetto reale (PR #60, 2026-08-12)
 
-Nessuno dei due si vedeva dai mock. Entrambi richiedono una decisione umana.
+Il meccanismo è **entrato in servizio**: primo verdetto non di prova pubblicato
+sulla PR #60, SHA `9857aacc96be07658c353b73e196195004dfa969`.
 
-### 1. Il token non può scrivere stati di commit — il cancello oggi non si apre
+```
+verdetto pubblicato: review `COMMENT` sulla PR #60,
+cancello `verdetto-murat` su 9857aac… = verde
+$ verdetto_gate.py verifica --sha 9857aac…
+cancello `verdetto-murat` su 9857aac…: verde        (uscita 0)
+```
+
+La rilettura non è una formalità: è la stessa `verifica` che chiunque — umano o
+controller di auto-merge — può eseguire senza fidarsi di ciò che lo strumento
+dichiara di aver scritto.
+
+## I limiti reali, emersi solo dalla prova live
+
+Nessuno si vedeva dai mock. Il primo è caduto il 2026-08-12; gli altri due
+richiedono ancora una decisione umana.
+
+### 1. ~~Il token non può scrivere stati di commit~~ — **risolto il 2026-08-12**
+
+Il 30/07 la pubblicazione dello stato tornava:
 
 ```
 HTTP 403: Resource not accessible by personal access token
 ```
 
 Il permesso sugli **stati di commit** (`statuses: write`) è distinto da
-`contents` e `pull requests`, e il token dell'ambiente agenti ha i secondi due
-ma non il primo. Finché non viene concesso, il meccanismo funziona ma **non può
-pubblicare nulla**: si comporta come da progetto — fallisce chiuso — e nessun
-verdetto arriva su GitHub.
+`contents` e `pull requests`, e il token dell'ambiente agenti aveva i secondi
+due ma non il primo. Finché non è stato concesso, il meccanismo funzionava ma
+**non poteva pubblicare nulla**: si è comportato come da progetto — fallendo
+chiuso — e nessun verdetto arrivava su GitHub. Non l'ho aggirato e non ho
+allargato i permessi da solo.
 
-Non l'ho aggirato e non ho allargato i permessi da solo.
+**Il permesso c'è dal 2026-08-12**, verificato non con una prova sintetica ma
+con il primo verdetto vero (sopra): `POST /statuses/{sha}` accettato, `201`,
+rilettura `verde`. Con il limite 1 caduto, il **punto 2** di «Cosa manca» —
+rendere `verdetto-murat` un check obbligatorio — non ha più un prerequisito
+tecnico: è solo la decisione di Fahad.
 
 ### 2. Un account non può approvare le proprie PR
 
@@ -162,8 +186,8 @@ rispetto a qualunque presidio che ragioni «sulla PR».
 Il meccanismo esiste; **renderlo vincolante no**, ed è deliberato: la
 protezione del ramo riguarda anche i merge di Fahad.
 
-1. Concedere al token degli agenti il permesso di scrittura sugli **stati di
-   commit** (limite 1). Senza, il resto non si attiva.
+1. ~~Concedere al token degli agenti il permesso di scrittura sugli **stati di
+   commit** (limite 1).~~ **Fatto: verificato il 2026-08-12 sulla PR #60.**
 2. Rendere `verdetto-murat` un **check obbligatorio** nella branch protection di
    `main` (Settings → Branches → `main` → *Require status checks to pass*).
    Da quel momento una PR senza verdetto sullo SHA corrente non è mergiabile.
@@ -173,4 +197,8 @@ protezione del ramo riguarda anche i merge di Fahad.
    prodotto un `main` rotto una volta unite.
 
 Finché il punto 2 non è fatto, il cancello è **informativo**: comparirà sulla
-pagina della PR, ma non impedirà nulla.
+pagina della PR, ma non impedirà nulla. **Dal 2026-08-12 il punto 2 è l'unica
+cosa che separa il verdetto dall'essere vincolante**: il prerequisito tecnico
+(punto 1) è caduto, e sulla PR #60 il pallino `verdetto-murat` è comparso verde
+accanto agli altri sette check. Oggi un merge su uno SHA senza verdetto è
+ancora possibile — visibile, ma possibile.
