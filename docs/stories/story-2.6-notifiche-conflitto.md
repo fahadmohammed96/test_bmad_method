@@ -239,10 +239,39 @@ motivo, che è visibile.
 esca da `attiva`») vista dal lato della notifica. Resta aperta: la decisione su
 cosa debba succedere al Conflitto è di prodotto, e la 2.7 è il suo posto.
 
-### D — L'e2e non si allarga
+### D — L'e2e non si allarga, **e non potrebbe vedere questa Story comunque** (E2-G5)
 
 A4, elenco chiuso: la 2.6 non ha superficie e non apre spec. Nessun file in
 `frontend/e2e/` è toccato.
+
+C'è però un limite da scrivere **come limite**, non da far passare per
+copertura. `playwright.config.ts` avvia backend e frontend ma **non**
+`python -m app.worker`: negli e2e i job durevoli non girano mai, e la guardia
+di uscita di rete rifiuta il loopback. Ne segue che **nessuna promessa di
+questa Story è osservabile end-to-end**, perché tutte passano da un job. È il
+finding **E2-G5** del test design (§8), aperto dalla 2.1 e mai deciso.
+
+Copertura scelta: l'opzione **(a)** raccomandata da Murat — quegli AC vivono a
+livello di **integrazione**, con lo stato seminato dal percorso reale
+(rilevazione → `outbox` → job) e i registri di PRODUZIONE, non un
+`EventSubscribers` costruito nel test. Nessuno spec e2e nuovo. L'opzione (b)
+— un tick di worker dietro un endpoint interno protetto — resta una decisione
+di ambiente e non la prendo io.
+
+### F — D1 non è stata decisa da me: il punto di innesto è una funzione sola
+
+L'Addendum del 12/08 (MYL-90) chiede di non colmare in silenzio la
+contraddizione fra «in-app + email» (AC 1) e «un canale preferito» (FR-20,
+AC 5), e di lasciare il punto di innesto esplicito. Il punto di innesto è
+`notifiche.service.canali_da_servire`, e nient'altro nel modulo conosce la
+regola.
+
+**Il comportamento consegnato è un default provvisorio, dichiarato — non una
+decisione presa.** L'alternativa (preferenza esclusiva) si applica cambiando
+quelle due righe e fa cadere due test nominati nel docstring della funzione.
+Consegnare il modulo con la funzione vuota avrebbe reso non consegnabili anche
+gli AC 1, 3, 7 e 8, che non dipendono dal bivio: il default esiste per non
+bloccare quelli, e la scelta resta di Fahad (`DECISIONE-UMANA: sì`).
 
 ### E — I P2 e le `[PROPOSTA]` aperte non sono stati toccati
 

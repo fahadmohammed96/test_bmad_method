@@ -53,6 +53,17 @@ def canali_da_servire(preferito: CanaleNotifica) -> tuple[CanaleConsegna, ...]:
 
     Quello che la preferenza governa davvero è ciò che esce dal prodotto e
     arriva addosso all'Host: con `in_app` scelto, nessuna email parte.
+
+    **Questa funzione è il punto di innesto della decisione D1** (MYL-90,
+    aperta a Fahad): `host.canale_notifica_preferito` è UN canale solo, mentre
+    l'AC promette «in-app + email». Il comportamento qui sopra è il
+    DEFAULT PROVVISORIO scelto per non lasciare la Story incompleta, non la
+    decisione — che è di prodotto. La lettura alternativa (preferenza
+    esclusiva: `return (CanaleConsegna[preferito.name],)`) si applica
+    cambiando queste due righe, e fa cadere
+    `test_notifiche_preferenze.py::TestCanaliDaServire::test_l_in_app_c_e_sempre`
+    più `test_notifiche_consegna.py::TestPreferenzeIgnorate`. Nessun'altra
+    parte del modulo la conosce.
     """
     if preferito is CanaleNotifica.EMAIL:
         return (CanaleConsegna.IN_APP, CanaleConsegna.EMAIL)
