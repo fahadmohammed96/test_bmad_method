@@ -232,9 +232,13 @@ Li registro qui perché non si perdano fra un commento e l'altro.
   successiva aprirebbe un `rilevato` nuovo senza la finestra configurabile e
   senza il collegamento al precedente che la 2.7 AC 5 richiede. **Latente oggi**
   (nessun percorso scrive `gestito`), trappola certa per chi implementa la 2.7.
+  → **Chiuso** con MYL-88, opzione A (decisione di Fahad del 12/08):
+  `docs/note-tecniche/myl-88-memoria-del-gestito.md`.
 - **F6 — la guardia anti-riapertura non ha test**, perché nessun test della
   suite può scrivere `gestito` senza violare l'invariante di AC 8. Arriva con la
-  2.7, insieme al percorso che la rende esercitabile.
+  2.7, insieme al percorso che la rende esercitabile. → **Chiuso con F4**: a
+  scrivere `gestito` è un helper di *allestimento*, non `app/`, quindi AC 8
+  regge invariato (`tests/test_conflitti_memoria_del_gestito.py`).
 - **F7 — ordine di merge**: la PR #60 porta negli AC i quattro requisiti che
   questa PR implementa ed è **ancora aperta**. Mergiare la #62 prima
   lascerebbe su `main` il codice senza il contratto che lo giustifica.
