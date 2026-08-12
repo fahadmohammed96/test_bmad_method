@@ -21,21 +21,40 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   tracciati* (§7.7), che non violano AC né invarianti ma hanno un momento preciso di
   rivalutazione. Se i rischi noti non hanno una tabella propria, o inquinano il registro del
   debito o spariscono — e riappaiono come debito per dimenticanza.
-- 2026-07-25 — I check obbligatori del repo sono **cinque**: `backend`, `frontend`, `e2e`,
-  `api-contract` e **SonarCloud Code Analysis**. Verdi a vuoto non possono essere:
-  `HOSTPILOT_TEST_DB_REQUIRED=1` rende errore lo skip dei test su Postgres reale e
-  `api-contract` fallisce sul `git diff` se OpenAPI/client TS divergono dal codice. È questo
-  che rende «CI verde» un'evidenza citabile in una dichiarazione di chiusura.
-  **CORREZIONE del 2026-07-30 (MYL-59):** l'ultima frase era falsa per il quinto check. Il
-  Quality Gate SonarCloud valuta cinque condizioni — affidabilità, sicurezza,
-  manutenibilità, duplicazione, hotspot — e **nessuna sulla copertura**; le metriche
-  `coverage`/`new_coverage` non esistono nemmeno sul progetto, perché la Automatic Analysis
-  non importa report. Il `0.0% Coverage on New Code` citato per settimane era l'assenza del
-  dato, non un esito. Dal 30/07 la copertura la misura e la fa mordere la nostra CI (job
-  `copertura`, `diff-cover` sulle righe toccate): vedi `docs/qa/copertura-e-cancelli.md`.
-  Lezione generale: **avevo dedotto la solidità di un check dalla solidità degli altri
-  quattro**, invece di interrogarlo. Un cancello si verifica uno per uno, e si verifica
-  rompendo ciò che difende.
+- 2026-07-25, **riscritta il 2026-08-12 (MYL-91) perché era falsa** — I check obbligatori del
+  repo. La voce diceva «sono **cinque**: `backend`, `frontend`, `e2e`, `api-contract`,
+  **SonarCloud Code Analysis**», e l'ho ripetuta in dichiarazioni di chiusura. Erano i cinque
+  **job della CI**, non cancelli di merge: fino al 12/08 `main` era **completamente
+  sprotetto** — zero check obbligatori, zero ruleset, push diretto possibile. Ciò che reggeva
+  era la **disciplina**, ed è misurabile: su tutta la storia di `main` l'unico commit
+  non-merge in first-parent è la genesi del repo (`d66c264`, 24/07), a fronte di 61 merge —
+  zero commit arrivati fuori da una PR — e le ultime dieci PR tutte verdi. Buona disciplina,
+  nessuna garanzia.
+  **Dalle 13:46 del 2026-08-12 la branch protection è accesa** e i check obbligatori sono
+  **otto**: `backend`, `frontend`, `e2e`, `api-contract`, `base-della-pr`, `copertura`,
+  `SonarCloud Code Analysis`, `verdetto-murat`. Più *require branches to be up to date before
+  merging* (chiude MYL-74 e il presidio della voce del 30/07 sul rosso di `main`).
+  `enforcement_level: non_admins` — a Fahad resta una via di fuga, lasciata aperta apposta.
+  *Require approvals* è **spenta di proposito**: le PR risultano aperte dal token di Fahad e
+  GitHub vieta di approvare una PR propria, quindi obbligarla bloccherebbe ogni merge.
+  Verificato il 12/08 **interrogando** `GET /repos/{o}/{r}/branches/main` (`protected: true`,
+  `enabled: true`, gli otto `contexts`); l'endpoint `/protection` completo richiede permessi
+  admin che il mio token non ha, quindi «up to date» resta agli atti di Fahad, non a una mia
+  misura. Da qui in avanti il `verdetto-murat` non è più un'opinione autorevole: senza verde
+  sullo SHA esatto la PR non è mergiabile.
+  **CORREZIONE del 2026-07-30 (MYL-59), tuttora valida:** «verdi a vuoto non possono essere»
+  era falso per SonarCloud. Il suo Quality Gate valuta cinque condizioni — affidabilità,
+  sicurezza, manutenibilità, duplicazione, hotspot — e **nessuna sulla copertura**; le
+  metriche `coverage`/`new_coverage` non esistono nemmeno sul progetto, perché la Automatic
+  Analysis non importa report. Il `0.0% Coverage on New Code` citato per settimane era
+  l'assenza del dato, non un esito. Dal 30/07 la copertura la misura e la fa mordere la nostra
+  CI (job `copertura`, `diff-cover` sulle righe toccate): vedi
+  `docs/qa/copertura-e-cancelli.md`.
+  **Lezione, ed è la stessa due volte nella stessa voce**: il 30/07 avevo dedotto la solidità
+  di un check dalla solidità degli altri quattro; il 25/07 avevo dedotto che cinque check
+  *configurati* fossero cinque check *vincolanti*. Nessuna delle due si vede leggendo il
+  repository: si vedono solo interrogando il sistema. **Prima di citare un cancello come
+  evidenza, interrogalo** — e verificalo rompendo ciò che difende.
 - 2026-07-30 — **Un pavimento di copertura globale non è un cancello**, misurato su questo
   repo: togliendo `backend/tests/test_calendario_sync.py` intero (81 test, il file che copre
   il modulo più rischioso) il totale scende da 96.44% a 95.16% — un `fail_under` a 93 non se
@@ -170,9 +189,10 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
 - 2026-08-12 — **Il permesso `statuses: write` c'è: il cancello `verdetto-murat` è in
   servizio.** La voce del 30/07 qui sopra è **superata**: sulla PR #60 (SHA `9857aac`) il
   primo verdetto non di prova è stato pubblicato e riletto `verde`, `POST /statuses/{sha}`
-  accettato. Resta aperto **solo** il punto 2 di `docs/qa/cancello-verdetto.md` (renderlo un
-  check obbligatorio in branch protection), che è una decisione di Fahad, non un limite
-  tecnico. Da riusare: un limite d'ambiente registrato in un documento **non scade da solo**
+  accettato. Il punto 2 di `docs/qa/cancello-verdetto.md` (renderlo un check obbligatorio in
+  branch protection) **è stato chiuso da Fahad alle 13:46 dello stesso giorno**: `verdetto-murat`
+  è ora uno degli otto check obbligatori — vedi la voce riscritta del 25/07.
+  Da riusare: un limite d'ambiente registrato in un documento **non scade da solo**
   quando l'ambiente cambia — se non lo rilegge chi lo ha scritto, resta lì a dire «non si può
   fare» e blocca una decisione umana che nessuno sa più di poter prendere. Il momento in cui
   lo strumento funziona per la prima volta è il momento in cui si aggiorna il documento.
