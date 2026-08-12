@@ -10,7 +10,7 @@ di essi è osservabile senza stato.
 """
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,6 +29,7 @@ from tests.calendario import (
     crea_manuale,
     crea_prenotazione,
     crea_struttura,
+    crea_sync_run,
     prenotazioni,
     sincronizza,
     vevent,
@@ -411,6 +412,56 @@ class TestFonteEtimestamp:
         )
         assert da_feed.sincronizzata is True
         assert da_feed.aggiornata_il is None
+
+    def test_il_timestamp_avanza_con_i_sync_successivi_alla_rilevazione(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        """AC 5: il valore è DERIVATO alla lettura, mai una fotografia.
+
+        È l'unico test che distingue le due implementazioni. Gli altri tre
+        leggono il Conflitto quando l'ultimo sync è già quello di sempre:
+        una copia scritta sulla riga alla rilevazione supererebbe tutti e
+        tre senza fare una piega. Qui il sync arriva DOPO che il Conflitto è
+        nato, ed è il caso che fa il danno — un Conflitto resta aperto per
+        giorni, e un orario congelato direbbe all'Host «sincronizzato alle
+        14:32» riferendosi a un controllo di tre giorni prima, nel punto in
+        cui sta scegliendo quale Prenotazione tenere (NFR-2, §4.2-6).
+        """
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=corpo_ical(
+                    vevent("conflitto-1@example.com", dal="20261001", al="20261005")
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+        primo = sincronizza(db_session, feed, client())
+        crea_manuale(
+            db_session, contesto, check_in=SECONDO_ARRIVO, check_out=SECONDA_PARTENZA
+        )
+
+        def orario_mostrato() -> datetime | None:
+            vista = service.conflitti_rilevati(db_session, contesto.host_id)
+            return next(
+                lato.aggiornata_il
+                for lato in vista.conflitti[0].prenotazioni
+                if lato.prenotazione.canale is CanaleFeed.AIRBNB
+            )
+
+        assert orario_mostrato() == primo.concluso_il
+
+        # Il portale viene ricontrollato mentre il Conflitto è ancora aperto.
+        dopo = crea_sync_run(
+            db_session, feed, concluso_il=primo.concluso_il + timedelta(hours=3)
+        )
+        db_session.commit()
+
+        assert orario_mostrato() == dopo.concluso_il, (
+            "fonte e timestamp sono derivati alla lettura: dopo un nuovo sync "
+            "riuscito l'Host deve vedere l'orario di ADESSO, non quello "
+            "scattato quando il Conflitto è emerso"
+        )
 
 
 class TestApiDeiConflitti:
