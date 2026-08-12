@@ -129,8 +129,9 @@ dichiara di aver scritto.
 
 ## I limiti reali, emersi solo dalla prova live
 
-Nessuno si vedeva dai mock. Il primo è caduto il 2026-08-12; gli altri due
-richiedono ancora una decisione umana.
+Nessuno si vedeva dai mock. Il primo è caduto il 2026-08-12; il secondo resta
+aperto e dipende da una scelta di piattaforma; il terzo non è un difetto da
+chiudere ma una proprietà del sistema, resa innocua dall'architettura.
 
 ### 1. ~~Il token non può scrivere stati di commit~~ — **risolto il 2026-08-12**
 
@@ -188,8 +189,8 @@ rispetto a qualunque presidio che ragioni «sulla PR».
 
 Fino a quel momento questo documento chiudeva dicendo che il cancello era
 **informativo** e che «un merge su uno SHA senza verdetto è ancora possibile».
-Da quell'ora **è falso**, e la riga qui sotto è la correzione: Fahad ha acceso la
-protezione del ramo su `main`.
+Da quell'ora **è falso**: Fahad ha acceso la protezione del ramo su `main`, e
+questa sezione sostituisce quella conclusione.
 
 Non lo deduco dalla comunicazione della decisione — lo interrogo, che è la
 lezione stessa di questo documento. `GET /repos/{o}/{r}/branches/main`:
@@ -201,9 +202,10 @@ contexts: backend, frontend, e2e, api-contract, base-della-pr,
           copertura, SonarCloud Code Analysis, verdetto-murat
 ```
 
-E il cancello si verifica **rompendo ciò che difende**: sulle PR aperte il
-12/08, quelle senza lo stato sullo SHA non sono mergiabili — non «segnalate»,
-non mergiabili.
+La configurazione però dice cosa il repository *è impostato* per fare, non cosa
+**fa**. Il contro-esempio esisteva già senza doverlo costruire: fra le PR aperte
+il 12/08 ce ne sono due senza lo stato sullo SHA, e non sono mergiabili — non
+«segnalate», non mergiabili.
 
 | PR | `verdetto-murat` sullo SHA | `mergeable_state` |
 |---|---|---|
