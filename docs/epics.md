@@ -4,7 +4,7 @@ status: approved
 gate: G3
 gate_status: 'approvato da Fahad al gate G3 (2026-07-24). Esiti G2-A…E e G3-1…5 registrati (PRD §14, project-context §6). Fase 4 aperta ad Amelia.'
 created: 2026-07-24
-updated: 2026-07-26
+updated: 2026-08-12
 author: John — Product Manager (leader squad)
 phase: '3 · Solutioning (co-artefatto del gate G3, con Winston)'
 stepsCompleted: ['step-01-validate-prerequisites', 'step-02-design-epics', 'step-03-create-stories', 'step-04-final-validation']
@@ -375,8 +375,11 @@ So that nessuna doppia prenotazione mi sfugga.
 **Given** l'insieme delle Prenotazioni in stato `attiva` di una Struttura
 **When** termina un import o viene inserita una Prenotazione manuale
 **Then** la rilevazione è una **funzione pura** rieseguita su quell'insieme; due Prenotazioni sovrapposte generano **esattamente un** Conflitto con stato `rilevato`, con identità stabile `(struttura_id, coppia di prenotazioni)` — mai due Conflitti aperti per la stessa coppia, mai Conflitti persi (FR-5, AD-3, AD-5)
-**And** il Conflitto registra fonte e timestamp di sincronizzazione di ciascuna Prenotazione coinvolta (FR-5)
-**And** se una delle due Prenotazioni esce da `attiva` (cancellata sull'OTA, `rimossa_dal_feed`, `cancellata` manuale), il Conflitto passa a **`decaduto`** — transizione di sistema tracciata, distinta da `gestito`, che alimenta la misura di SM-C1 (AD-5, AD-19) `[estensione Glossario da registrare: readiness R-2]`
+**And** la **coppia non è ordinata**: `(A,B)` e `(B,A)` sono la stessa identità, canonicalizzata, e il vincolo è imposto da un **indice UNIQUE parziale** sullo stato `rilevato` **nel database**, non dal solo codice applicativo — sotto concorrenza il codice perde `[DECISIONE ratificata: test design Epic 2 §4.2-4]`
+**And** l'unità del Conflitto è la **coppia**, non il gruppo: tre Prenotazioni sovrapposte a due a due producono **tre** Conflitti — criterio deterministico, senza duplicati né buchi; il conteggio del badge (2.8) e la misura di SM-1 lo seguono `[DECISIONE ratificata: test design Epic 2 §4.2-5]`
+**And** il Conflitto registra fonte e timestamp di sincronizzazione di ciascuna Prenotazione coinvolta (FR-5); per una Prenotazione **manuale**, che un sync non ce l'ha, la fonte è il Canale «Manuale» e il timestamp è la **data di inserimento**, con etichetta che dichiara che **non** è un dato sincronizzato — la falsa simmetria fra le due colonne della Finestra di riconciliazione (2.7) sarebbe peggio dell'asimmetria `[DECISIONE ratificata: test design Epic 2 §4.2-6]`
+**And** **ogni** uscita dallo stato `attiva` emette `prenotazione.cessata`, da qualunque strada arrivi — cancellazione manuale, `rimossa_dal_feed` (evento scomparso dal feed), `cancellata` per `STATUS:CANCELLED` dal feed: chi ascolta vede **un solo fatto** e la rilevazione non conosce le tre strade `[DECISIONE MYL-69 → opzione A]`
+**And** se una delle due Prenotazioni esce da `attiva`, il Conflitto passa a **`decaduto`** — transizione di sistema tracciata, distinta da `gestito`, che alimenta la misura di SM-C1 (AD-5, AD-19); la consegna dell'evento è **at-least-once** (AD-10, AD-16), quindi l'handler è **idempotente**: lo stesso Conflitto non decade due volte `[Glossario registrato al gate G3: PRD §Glossario; readiness R-2 chiusa]`
 **And** un Conflitto `rilevato` resta in evidenza in Dashboard finché non è gestito (FR-6)
 
 ### Story 2.6: Notifiche di Conflitto (in-app + email) — fondazione `notifiche`
