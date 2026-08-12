@@ -10,12 +10,14 @@ import logging
 
 # Import con effetto di registrazione: ogni modulo dichiara qui i propri
 # handler di job e i propri subscriber di eventi.
+from app import cablaggio  # noqa: F401 — collega `calendario` e `notifiche`
 from app.calendario import jobs as calendario_jobs
 from app.calendario import sottoscrizioni as calendario_sottoscrizioni  # noqa: F401
 from app.core import manutenzione as core_manutenzione
 from app.core.db import get_sessionmaker
 from app.core.worker import main as ciclo_worker
 from app.identity import jobs as identity_jobs  # noqa: F401
+from app.notifiche import jobs as notifiche_jobs  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

@@ -23,7 +23,8 @@ from alembic import command
 from tests.server_feed import ServerFeed
 
 TABELLE_DA_SVUOTARE = (
-    "outbox, job, conflitto, ospite, prenotazione, sync_run, feed_ical, "
+    "outbox, job, notifica_consegna, notifica, "
+    "conflitto, ospite, prenotazione, sync_run, feed_ical, "
     "azzeramento_audit, "
     "regime_lettura, struttura, sessione, tentativo_login, host, comune_config, "
     "regione_config, parametro_fiscale, config_audit, comune"
@@ -120,6 +121,42 @@ def isolamento_di_rete(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
     monkeypatch.setattr(socket, "create_connection", create_connection)
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+
+
+class TentativoDiInvioReale(BaseException):
+    """Guardia della Story 2.6 (AC 10): nessun invio reale nella suite.
+
+    Deriva da `BaseException` per la stessa ragione di
+    `TentativoDiUscitaDiRete`: il percorso di consegna converte i guasti del
+    canale in `ConsegnaFallitaError` e ritenta, quindi una guardia che
+    derivasse da `Exception` verrebbe assorbita e trasformata in un job che
+    fallisce — un test verde per il motivo sbagliato.
+    """
+
+
+@pytest.fixture(autouse=True)
+def isolamento_canale_email() -> Iterator[None]:
+    """Il canale email di PRODUZIONE non è raggiungibile da nessun test.
+
+    È l'altra metà di GS-1: la guardia di rete impedisce la socket, questa
+    impedisce che si arrivi fin lì. Sono due difese indipendenti, e
+    `tests/test_isolamento_notifiche.py` verifica che mordano entrambe — chi
+    ha bisogno di osservare un invio installa un canale finto con
+    `tests.notifiche.installa_email_finta`.
+    """
+    from app.notifiche.canali import canali
+    from app.notifiche.models import CanaleConsegna
+
+    class CanaleEmailVietato:
+        def invia(self, destinatario: str, messaggio: object) -> None:
+            raise TentativoDiInvioReale(
+                "invio email reale in un test: installa un canale finto "
+                "(tests.notifiche.installa_email_finta)"
+            )
+
+    canali.installa(CanaleConsegna.EMAIL, CanaleEmailVietato())
+    yield
+    canali.rimuovi(CanaleConsegna.EMAIL)
 
 
 @pytest.fixture(autouse=True)

@@ -557,6 +557,19 @@ def cancella_prenotazione(
 # ------------------------------- rilevazione dei Conflitti (FR-5, AD-5, 2.5)
 
 
+class ConflittoSenzaSovrapposizioneError(Exception):
+    """Il Conflitto è aperto ma le due Prenotazioni non si sovrappongono più.
+
+    Raggiungibile: il portale può spostare le date di un evento già importato,
+    e nessuna transizione fa decadere un Conflitto per questo — il decadimento
+    ha una sola causa, l'uscita da `attiva` (AD-5, AD-19). Chi deve raccontare
+    il Conflitto si ferma con un errore invece di inventare un intervallo:
+    scrivere all'Host notti che nessuno ha prenotato due volte sarebbe un
+    allarme più largo del fatto, cioè il modo in cui la funzione di fiducia
+    comincia a fare rumore.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class FonteDellaPrenotazione:
     """Da dove viene una Prenotazione, e a quando risale ciò che ne sappiamo.
@@ -800,6 +813,62 @@ def conflitti_rilevati(
         stato=stato.stato,
         ultimo_sync_riuscito_il=stato.ultimo_sync_riuscito_il,
         conflitti=esito,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RiepilogoConflitto:
+    """Il minimo che serve a raccontare un Conflitto FUORI da `calendario`.
+
+    Tre valori e nessuna entità: chi lo riceve — il compositore del testo
+    della notifica, che vive nella radice di composizione — non deve poter
+    navigare da qui alla Prenotazione e all'Ospite. Non è pudore
+    architetturale: `notifiche` è il modulo che l'Epic 3 e l'Epic 5 riusano, e
+    ciò che passa da questo confine oggi diventa ciò che devono fornire domani.
+
+    L'intervallo è la **sovrapposizione**, non l'unione dei due soggiorni: le
+    notti davvero prenotate due volte sono quelle, e sono le sole su cui
+    l'Host deve intervenire. L'unione includerebbe notti a prenotazione
+    singola, cioè allargherebbe l'allarme oltre il fatto.
+    """
+
+    struttura: str
+    check_in: date
+    check_out: date
+
+
+def riepilogo_conflitto(
+    db: Session, host_id: uuid.UUID, conflitto_id: uuid.UUID
+) -> RiepilogoConflitto | None:
+    """Struttura e notti sovrapposte di un Conflitto; `None` se non esiste.
+
+    Lettura sola, scopata all'Host (AD-2, NFR-14): il Conflitto di un altro
+    Host non è distinguibile da uno inesistente.
+    """
+    conflitto = ConflittoRepository(db).by_id(host_id, conflitto_id)
+    if conflitto is None:
+        return None
+    prenotazioni = PrenotazioneRepository(db)
+    lati = [
+        prenotazioni.by_id(host_id, conflitto.prenotazione_min_id),
+        prenotazioni.by_id(host_id, conflitto.prenotazione_max_id),
+    ]
+    if any(lato is None for lato in lati):
+        # Irraggiungibile: le Prenotazioni non si cancellano (AD-20, GS-6) e la
+        # FK del Conflitto le tiene. Se accadesse, tacere sarebbe peggio.
+        raise PrenotazioneNonTrovataError()
+    sovrapposizione = lati[0].soggiorno.intersection(lati[1].soggiorno)  # type: ignore[union-attr]
+    if sovrapposizione is None:
+        # Le due Prenotazioni non si sovrappongono più: un Conflitto aperto
+        # su un'intersezione vuota non è rappresentabile come intervallo, e
+        # inventarne uno metterebbe nel messaggio notti che nessuno ha
+        # prenotato due volte.
+        raise ConflittoSenzaSovrapposizioneError(str(conflitto_id))
+    struttura = strutture_service.leggi_struttura(db, host_id, conflitto.struttura_id)
+    return RiepilogoConflitto(
+        struttura=struttura.nome,
+        check_in=sovrapposizione.check_in,
+        check_out=sovrapposizione.check_out,
     )
 
 
