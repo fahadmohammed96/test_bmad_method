@@ -4,7 +4,7 @@ status: approved
 gate: G3
 gate_status: 'approvata da Fahad al gate G3 (2026-07-24). Decisioni §10 [G3-1…5] ratificate; stack registrato in docs/project-context.md §6.'
 created: 2026-07-24
-updated: 2026-07-27
+updated: 2026-08-12
 author: Winston — System Architect
 phase: '3 · Solutioning'
 depends_on:
@@ -147,7 +147,7 @@ fetch (ETag/If-Modified-Since) → parse VEVENT → normalizza → upsert idempo
 - Il Conflitto registra fonte e timestamp di sync di ciascuna Prenotazione coinvolta — esattamente ciò che la Finestra di riconciliazione mostra affiancato (UX UJ-2).
 - **Risoluzione solo umana**: `rilevato → gestito` avviene esclusivamente per azione esplicita dell'Host, con istruzioni guidate per bloccare le date sull'altro Canale. Il sistema **non scrive mai verso le OTA** e non modifica/cancella mai Prenotazioni autonomamente (FR-6 Out of Scope, Non-Goal §8).
 - **Ri-verifica dopo `gestito`** (raccomandazione UX UJ-2 accolta): se la sovrapposizione persiste nei sync successivi oltre una finestra configurabile (default proposto: 24h), si apre un **nuovo** Conflitto collegato al precedente — il sistema non si fida ciecamente della conferma umana, contenendo i falsi negativi (SM-1) senza gonfiare il rumore (SM-C1).
-- Un Conflitto `rilevato` resta in evidenza in Dashboard finché non gestito (FR-6); la notifica parte alla prima sincronizzazione in cui emerge (FR-5) via job durevole (mai silenziosa — NFR-3).
+- Un Conflitto `rilevato` resta in evidenza in Dashboard finché non gestito (FR-6); la notifica parte alla **prima rilevazione** del Conflitto — quale che sia l'origine che l'ha prodotta, import o inserimento manuale — via job durevole (mai silenziosa — FR-5, NFR-3). *(Ragione e casi in `docs/epics.md` §Story 2.6 — [DECISIONE ratificata: test design Epic 2 §4.2-10, 2026-08-12].)*
 
 ---
 
