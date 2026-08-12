@@ -132,6 +132,22 @@ class Settings(BaseSettings):
     # dichiara che un parametro sbagliato «deve fermare l'avvio»: la
     # validazione va dove l'avvio la incontra, cioè qui, altrimenti
     # `import app.main` riesce e il difetto si manifesta a regime.
+    # Canale email delle notifiche (AD-13, Story 2.6). Sono INFRASTRUTTURA —
+    # dove sta il relay, con che mittente si firma — quindi vivono qui e non
+    # in `config_normativa` (AD-9), che ospita i parametri normativi.
+    #
+    # Default VUOTI e nessun fallback: senza SMTP configurato il canale
+    # fallisce in modo esplicito e il job resta ritentabile, poi `failed` col
+    # motivo. Un default inventato (`localhost:25`) produrrebbe notifiche
+    # dichiarate inviate e mai partite, che è il difetto di severità alta di
+    # NFR-3 nella sua forma peggiore, perché silenziosa.
+    smtp_host: str = ""
+    smtp_porta: int = 587
+    smtp_mittente: str = ""
+    # `gt=0`: un timeout di 0 secondi non è «senza limite», è una connessione
+    # che non può riuscire — e un parametro assurdo deve fermare l'avvio.
+    smtp_timeout_secondi: float = Field(default=10.0, gt=0)
+
     ospite_retention_giorni: int = Field(default=90, gt=0)
     # Ogni quanto gira il job di azzeramento. Distinto dal periodo: è la
     # granularità con cui si esegue l'adempimento, non la sua scadenza.

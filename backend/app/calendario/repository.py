@@ -984,10 +984,17 @@ class ConflittoRepository:
             )
         )
 
-    # Qui c'era un `by_id` senza chiamanti, in `app/` come in `tests/`: E2-F23
-    # riaperto nella stessa PR che lo chiude, e nella stessa forma. È stato
-    # rimosso invece di essere «tenuto per la 2.7»: un metodo di repository
-    # arriva con il percorso che lo usa, o non arriva.
+    # `by_id` era stato rimosso nella 2.5 perché non aveva chiamanti (E2-F23):
+    # un metodo di repository arriva con il percorso che lo usa, o non arriva.
+    # Il percorso è arrivato con la 2.6 — il testo della notifica si compone
+    # alla consegna a partire dall'identificatore del Conflitto — e il metodo
+    # torna insieme a lui.
+    def by_id(self, host_id: uuid.UUID, conflitto_id: uuid.UUID) -> Conflitto | None:
+        return self._db.scalars(
+            select(Conflitto).where(
+                Conflitto.host_id == host_id, Conflitto.id == conflitto_id
+            )
+        ).one_or_none()
 
 
 class AzzeramentoAuditRepository:

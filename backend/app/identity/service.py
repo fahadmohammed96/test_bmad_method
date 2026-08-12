@@ -158,6 +158,37 @@ def leggi_host(db: Session, host_id: uuid.UUID) -> Host:
     return host
 
 
+@dataclass(frozen=True, slots=True)
+class DestinatarioNotifiche:
+    """Chi va raggiunto e su quale canale (spine: `notifiche → identity`).
+
+    È un valore, non la riga `host`: `notifiche` non può importare i modelli di
+    un altro modulo (AD-1, GS-3), e passargli l'entità gli darebbe accesso a
+    `password_hash` per il gusto di leggere un'email. La superficie che
+    `identity` espone verso l'esterno è esattamente ciò che serve a consegnare
+    — destinatario e preferenza, niente altro.
+    """
+
+    host_id: uuid.UUID
+    email: str
+    canale_preferito: CanaleNotifica
+
+
+def destinatario_notifiche(db: Session, host_id: uuid.UUID) -> DestinatarioNotifiche:
+    """Destinatario e preferenze di notifica dell'Host (FR-20, sola lettura).
+
+    Solleva se l'Host non esiste, come `leggi_host`: una notifica accodata per
+    un `host_id` inesistente deve fermarsi con un errore, non consegnarsi a
+    nessuno in silenzio.
+    """
+    host = leggi_host(db, host_id)
+    return DestinatarioNotifiche(
+        host_id=host.id,
+        email=host.email,
+        canale_preferito=host.canale_notifica_preferito,
+    )
+
+
 def host_da_token(db: Session, token: str) -> Host | None:
     sessione = SessioneRepository(db).valida_by_token_hash(
         _token_hash(token), now=utcnow()
