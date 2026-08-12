@@ -36,9 +36,13 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 # `ospite` è entrata con la Story 2.3 e la sua presenza qui è la forma in cui
 # AD-21 diventa strutturale: la retention dell'anagrafica azzera i CAMPI, e
 # una `DELETE` della riga sarebbe una quarta cancellazione distruttiva, cioè
-# fuori dalla lista esaustiva di AD-20. `conflitto` arriva con la 2.5: entra
-# quando esiste, e `test_le_tabelle_protette_esistono` impedisce che la lista
-# contenga nomi morti che la svuoterebbero in silenzio.
+# fuori dalla lista esaustiva di AD-20. `conflitto` è entrata con la Story
+# 2.5, come la riga sopra prevedeva: un Conflitto non si cancella MAI, nemmeno
+# quando decade — `decaduto` è una transizione tracciata, ed è ciò che rende
+# misurabile SM-C1. Cancellarlo invece di farlo decadere non romperebbe nulla
+# oggi e renderebbe la metrica inutilizzabile domani.
+# `test_le_tabelle_protette_esistono` impedisce che la lista contenga nomi
+# morti che la svuoterebbero in silenzio.
 #
 # `regime_lettura` entra con la decisione MYL-68: porta l'evidenza datata che
 # l'Host è stato informato della soglia fiscale, e il suo rientro sotto soglia
@@ -46,14 +50,16 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 # `calendario`, ed è la ragione per cui i modelli protetti sono raggruppati
 # per modulo proprietario qui sotto.
 TABELLE_PROTETTE = frozenset(
-    {"prenotazione", "sync_run", "feed_ical", "ospite", "regime_lettura"}
+    {"prenotazione", "sync_run", "feed_ical", "ospite", "conflitto", "regime_lettura"}
 )
 
 # Modelli protetti per modulo PROPRIETARIO (AD-18): il modulo serve a ritrovare
 # il modello, e un raggruppamento per stringa fissa terrebbe insieme cose che
 # vivono in file diversi senza dire dove cercarle.
 MODELLI_PROTETTI_PER_MODULO = {
-    "calendario": frozenset({"Prenotazione", "SyncRun", "FeedIcal", "Ospite"}),
+    "calendario": frozenset(
+        {"Prenotazione", "SyncRun", "FeedIcal", "Ospite", "Conflitto"}
+    ),
     "strutture": frozenset({"RegimeLettura"}),
 }
 

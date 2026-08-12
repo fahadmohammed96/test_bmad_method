@@ -416,6 +416,79 @@
         "title": "ConfigurazioneNormativaOutput",
         "type": "object"
       },
+      "ConflittiOutput": {
+        "description": "I Conflitti aperti **con** la verità temporale del perimetro.\n\nEnvelope, per la ragione di sempre: questa superficie mostra dati\nderivati da Feed, e UX-DR6 vuole «dati aggiornati alle HH:MM» su ognuna.\nSenza, «nessun Conflitto» e «nessun Conflitto che abbiamo potuto vedere,\nperché un portale non risponde da tre giorni» arriverebbero identici —\ne sono affermazioni opposte proprio sulla funzione di fiducia del\nprodotto.",
+        "properties": {
+          "conflitti": {
+            "items": {
+              "$ref": "#/components/schemas/ConflittoOutput"
+            },
+            "title": "Conflitti",
+            "type": "array"
+          },
+          "stato_sync": {
+            "$ref": "#/components/schemas/StatoSincronizzazione"
+          },
+          "ultimo_sync_riuscito_il": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Sync Riuscito Il"
+          }
+        },
+        "required": [
+          "stato_sync",
+          "ultimo_sync_riuscito_il",
+          "conflitti"
+        ],
+        "title": "ConflittiOutput",
+        "type": "object"
+      },
+      "ConflittoOutput": {
+        "description": "Una sovrapposizione fra due Prenotazioni della stessa Struttura (AD-5).\n\nLe due Prenotazioni arrivano in ordine CRONOLOGICO, non nell'ordine\ncanonico dell'identità: `min`/`max` è un ordine di identificatori, e non\nsignifica niente per chi guarda due soggiorni affiancati.\n\nLo `stato` viaggia anche se questa risposta contiene solo i `rilevato`:\nè il derivato di dominio su cui la Dashboard costruisce la severità\n(AD-14), e ometterlo inviterebbe il client a dedurlo dalla rotta.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "prenotazioni": {
+            "items": {
+              "$ref": "#/components/schemas/PrenotazioneInConflittoOutput"
+            },
+            "title": "Prenotazioni",
+            "type": "array"
+          },
+          "rilevato_il": {
+            "format": "date-time",
+            "title": "Rilevato Il",
+            "type": "string"
+          },
+          "stato": {
+            "$ref": "#/components/schemas/StatoConflitto"
+          },
+          "struttura_id": {
+            "format": "uuid",
+            "title": "Struttura Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "struttura_id",
+          "stato",
+          "rilevato_il",
+          "prenotazioni"
+        ],
+        "title": "ConflittoOutput",
+        "type": "object"
+      },
       "CredenzialiInput": {
         "properties": {
           "email": {
@@ -805,6 +878,72 @@
         "title": "PreferenzeInput",
         "type": "object"
       },
+      "PrenotazioneInConflittoOutput": {
+        "description": "Un lato del Conflitto: la Prenotazione **e da dove viene** (FR-5).\n\nL'AC chiede «fonte e timestamp di sincronizzazione di ciascuna\nPrenotazione coinvolta», ed è il dato su cui l'Host deciderà quale delle\ndue tenere (2.7). Una Prenotazione manuale un sync non ce l'ha (§4.2-6,\nratificato): `canale` vale `manuale`, `aggiornata_il` è la data di\nINSERIMENTO e `sincronizzata` è `False`.\n\n**Il flag esiste perché la falsa simmetria sarebbe peggio\ndell'asimmetria.** Con due colonne affiancate e due orari dall'aria\nidentica, l'Host leggerebbe «aggiornato alle 09:10» su una riga che\nnessun portale ha mai confermato. Il testo dell'etichetta è del client;\nil fatto che i due valori non siano la stessa cosa è del server (AD-14).\n\n`aggiornata_il` è `None` quando la Prenotazione viene da un Feed che non\nha MAI avuto un sync riuscito: lì non esiste un orario da mostrare, e il\nsistema dice «non lo so» invece di inventarne uno (NFR-2).",
+        "properties": {
+          "aggiornata_il": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggiornata Il"
+          },
+          "canale": {
+            "$ref": "#/components/schemas/CanaleFeed"
+          },
+          "check_in": {
+            "format": "date",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notti": {
+            "title": "Notti",
+            "type": "integer"
+          },
+          "sincronizzata": {
+            "title": "Sincronizzata",
+            "type": "boolean"
+          },
+          "sommario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sommario"
+          }
+        },
+        "required": [
+          "id",
+          "canale",
+          "check_in",
+          "check_out",
+          "notti",
+          "sommario",
+          "sincronizzata",
+          "aggiornata_il"
+        ],
+        "title": "PrenotazioneInConflittoOutput",
+        "type": "object"
+      },
       "PrenotazioneManualeInput": {
         "description": "Ciò che l'Host scrive per inserire una Prenotazione a mano (FR-7).\n\nTre campi obbligatori — la Struttura e le due date — e nient'altro. Il\nCanale non si dichiara: una Prenotazione scritta qui è `manuale` per\ndefinizione (Glossario PRD §4), e accettarlo dal client permetterebbe di\nregistrare una prenotazione «da Airbnb» che Airbnb non conosce.\n\n`sommario` è la nota con cui l'Host riconosce la Prenotazione — «blocco per\nmanutenzione», il nome di chi ha chiamato — e resta testo **opaco**: non\ndiventa il nome dell'Ospite passando di qui, ed è un campo diverso proprio\nperché è una cosa diversa (NFR-11).",
         "properties": {
@@ -1169,6 +1308,16 @@
           "configurazione_non_disponibile"
         ],
         "title": "StatoConfigurazione",
+        "type": "string"
+      },
+      "StatoConflitto": {
+        "description": "Gli stati di AD-5, e la distinzione fra i due modi di chiudere.\n\n`gestito` è l'esito di un'AZIONE ESPLICITA dell'Host (Story 2.7);\n`decaduto` è l'unica transizione di SISTEMA, e avviene quando una delle\ndue Prenotazioni esce da `attiva` (AD-19). Confonderli non rompe niente\noggi e rende inutilizzabile SM-C1 domani: «quanti Conflitti l'Host ha\ndavvero risolto» e «quanti si sono spenti da soli» sono la metrica e il\nsuo rumore.\n\nIl valore `gestito` esiste qui ma **nessun percorso di questa Story ci\narriva**: lo introduce la 2.7, e la guardia\n`tests/test_conflitti_niente_auto_chiusura.py` impone che resti così.",
+        "enum": [
+          "rilevato",
+          "gestito",
+          "decaduto"
+        ],
+        "title": "StatoConflitto",
         "type": "string"
       },
       "StatoPrenotazione": {
@@ -1848,6 +1997,57 @@
         "summary": "Comuni",
         "tags": [
           "config_normativa"
+        ]
+      }
+    },
+    "/api/v1/conflitti": {
+      "get": {
+        "description": "I Conflitti `rilevato` dell'Host (FR-5, FR-6).\n\n**Nessun parametro può nasconderne uno.** Non c'è un filtro temporale,\nnon c'è una paginazione che tagli la coda, non c'è un `limit`: un\nConflitto `rilevato` resta in evidenza finché non è gestito, e ogni\nmeccanismo che lo faccia sparire da sé è il gemello di AD-8 — il\nprodotto smetterebbe di segnalare una doppia prenotazione che è ancora\nlì. `struttura_id` restringe il PERIMETRO, come il selettore trasversale\ndel Calendario (UX-DR1), e non lo stato.\n\nLo storico — i Conflitti `gestito` e `decaduto` — non passa di qui: è la\nsuperficie della Story 2.7, e non si cancella nulla per non averla\nancora (AD-20).",
+        "operationId": "conflitti_api_v1_conflitti_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "struttura_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Struttura Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflittiOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Conflitti",
+        "tags": [
+          "calendario"
         ]
       }
     },

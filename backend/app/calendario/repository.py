@@ -10,10 +10,23 @@ constraint (lezione G-2 dell'Epic 1, test di gara A3-1).
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import cast
 
-from sqlalchemy import Select, case, func, literal, select, text, tuple_, update
+from sqlalchemy import (
+    DateTime,
+    Select,
+    Uuid,
+    case,
+    func,
+    literal,
+    or_,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
@@ -21,14 +34,17 @@ from sqlalchemy.orm import Session
 from app.calendario.models import (
     AzzeramentoAudit,
     CanaleFeed,
+    Conflitto,
     EsitoSyncRun,
     FeedIcal,
     Ospite,
     Prenotazione,
+    StatoConflitto,
     StatoPrenotazione,
     SyncRun,
 )
 from app.core.date_range import utcnow
+from app.core.db import new_uuid7
 from app.core.jobs import Job, JobStatus
 
 
@@ -219,6 +235,44 @@ class SyncRunRepository:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PrenotazioneCessata:
+    """Una Prenotazione appena USCITA da `attiva`, in soli identificatori.
+
+    È ciò che serve a emettere `prenotazione.cessata` (AD-19, MYL-69): la
+    `struttura_id` viaggia col fatto perché la rilevazione dei Conflitti è
+    scopata alla Struttura, e senza di essa il consumatore dovrebbe rileggere
+    la Prenotazione solo per sapere dove guardare.
+    """
+
+    id: uuid.UUID
+    struttura_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ConflittoDecaduto:
+    """Un Conflitto appena passato a `decaduto`, in soli identificatori."""
+
+    id: uuid.UUID
+    struttura_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class EsitoUpsert:
+    """Cosa è successo alla riga, e se ha lasciato lo stato `attiva`.
+
+    Due informazioni distinte, e la seconda non è deducibile dalla prima:
+    `"aggiornata"` copre sia il sync che non cambia niente sia quello che
+    porta la Prenotazione da `attiva` a `cancellata` perché il portale l'ha
+    annullata — che è la TRANSIZIONE su cui la Story 2.5 fa `decadere` un
+    Conflitto.
+    """
+
+    prenotazione_id: uuid.UUID
+    esito: str
+    uscita_da_attiva: bool
+
+
 class PrenotazioneRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -235,7 +289,7 @@ class PrenotazioneRepository:
         check_out: object,
         sommario: str | None,
         cancellata: bool,
-    ) -> str:
+    ) -> EsitoUpsert:
         """Inserisce o aggiorna la Prenotazione; ritorna cosa è successo.
 
         Esiti possibili: `"importata"`, `"aggiornata"`, `"ricomparsa"`.
@@ -245,6 +299,24 @@ class PrenotazioneRepository:
         transizione di ritorno è una decisione di prodotto ancora aperta
         (test design §4.2-2). Il fatto non si perde: l'esito `"ricomparsa"`
         lo porta nel `sync_run`.
+
+        **Come si riconosce la transizione `attiva → cancellata`** (MYL-69,
+        strada 3). In un `ON CONFLICT DO UPDATE` il `RETURNING` di Postgres
+        vede la riga NUOVA, mai quella vecchia: «è `cancellata`» si legge,
+        «ERA `attiva` e ora è `cancellata`» no — e sono due proprietà diverse,
+        perché la prima è vera anche al decimo sync consecutivo che trova la
+        stessa Prenotazione già annullata da settimane.
+
+        L'informazione che manca è però già scritta qui accanto:
+        `_cessata_il_dopo_upsert` conserva con un `COALESCE` la decorrenza di
+        una riga già cessata, quindi `cessata_il` torna uguale ad `adesso`
+        **solo** se questa esecuzione è quella che l'ha fatta uscire da
+        `attiva`. È lo stesso dato che protegge la retention di AD-21 dallo
+        spostamento in avanti, letto per la domanda gemella.
+
+        Emettere a ogni sync invece che alla transizione non darebbe alcun
+        errore: farebbe `decadere` più volte lo stesso Conflitto e
+        rimanderebbe avanti la scadenza di un dato personale.
         """
         adesso = utcnow()
         stato_dal_feed = (
@@ -306,14 +378,39 @@ class PrenotazioneRepository:
             # aggiornata: senza questo il conteggio «importate» sarebbe una
             # stima.
             text("(xmax = 0) AS inserita"),
+            Prenotazione.id,
             Prenotazione.stato,
+            Prenotazione.cessata_il,
         )
-        inserita, stato = self._db.execute(istruzione).one()
+        inserita, prenotazione_id, stato, cessata_il = self._db.execute(
+            istruzione
+        ).one()
+        # Una riga INSERITA ora non è mai uscita da `attiva`: non c'è mai
+        # stata. Un VEVENT già `CANCELLED` al primo import nasce `cancellata`
+        # e non ha alcun Conflitto da far decadere, quindi non è il fatto che
+        # `prenotazione.cessata` racconta.
+        uscita_da_attiva = (
+            not inserita
+            and stato is StatoPrenotazione.CANCELLATA
+            and cessata_il == adesso
+        )
         if inserita:
-            return "importata"
+            return EsitoUpsert(
+                prenotazione_id=prenotazione_id,
+                esito="importata",
+                uscita_da_attiva=False,
+            )
         if stato is StatoPrenotazione.RIMOSSA_DAL_FEED:
-            return "ricomparsa"
-        return "aggiornata"
+            return EsitoUpsert(
+                prenotazione_id=prenotazione_id,
+                esito="ricomparsa",
+                uscita_da_attiva=False,
+            )
+        return EsitoUpsert(
+            prenotazione_id=prenotazione_id,
+            esito="aggiornata",
+            uscita_da_attiva=uscita_da_attiva,
+        )
 
     @staticmethod
     def _cessata_il_dopo_upsert(adesso: datetime, cancellata: bool) -> object:
@@ -424,8 +521,17 @@ class PrenotazioneRepository:
 
     def marca_rimosse_dal_feed(
         self, host_id: uuid.UUID, *, feed_id: uuid.UUID, uid_presenti: Sequence[str]
-    ) -> int:
-        """Transizione, non cancellazione (AD-4, AD-19): ritorna quante.
+    ) -> list["PrenotazioneCessata"]:
+        """Transizione, non cancellazione (AD-4, AD-19): ritorna QUALI.
+
+        **Quali, non quante**, ed è il cambiamento che la Story 2.5 richiede
+        (MYL-69, opzione A). Ogni uscita da `attiva` emette
+        `prenotazione.cessata`, e un evento per Prenotazione ha bisogno degli
+        identificatori delle righe toccate: questa è una `UPDATE` di massa, e
+        un `rowcount` dice quante sono state ma non chi. `RETURNING` è ciò che
+        rende la domanda rispondibile senza una seconda lettura — che sarebbe
+        anche una lettura su uno stato già cambiato, quindi non più in grado
+        di distinguere chi è appena transitato da chi lo era già.
 
         `uid_presenti` deve contenere **tutti** gli uid letti dal feed, non
         solo quelli normalizzati con successo: un VEVENT malformato ma con
@@ -441,7 +547,7 @@ class PrenotazioneRepository:
         succedere niente.
         """
         if not uid_presenti:
-            return 0
+            return []
         adesso = utcnow()
         istruzione = (
             update(Prenotazione)
@@ -460,12 +566,12 @@ class PrenotazioneRepository:
                 cessata_il=adesso,
                 aggiornata_il=adesso,
             )
+            .returning(Prenotazione.id, Prenotazione.struttura_id)
         )
-        # `cast`: `Session.execute` è tipizzato genericamente, ma una UPDATE
-        # restituisce sempre un CursorResult, che espone `rowcount` (stesso
-        # motivo del `cast` in app/identity/jobs.py).
-        esito = cast(CursorResult, self._db.execute(istruzione))
-        return int(esito.rowcount or 0)
+        return [
+            PrenotazioneCessata(id=riga_id, struttura_id=struttura_id)
+            for riga_id, struttura_id in self._db.execute(istruzione).all()
+        ]
 
     def by_id(
         self, host_id: uuid.UUID, prenotazione_id: uuid.UUID
@@ -488,17 +594,39 @@ class PrenotazioneRepository:
             )
         )
 
-    def della_struttura(
+    def attive_della_struttura(
         self, host_id: uuid.UUID, struttura_id: uuid.UUID
     ) -> list[Prenotazione]:
+        """L'insieme su cui gira la rilevazione dei Conflitti (AD-5, AD-19).
+
+        **Solo `attiva`**, e il filtro sta nella query: una Prenotazione
+        cancellata o `rimossa_dal_feed` non concorre ai Conflitti, e
+        selezionarle tutte per scartarle in Python renderebbe la regola pura
+        responsabile di una decisione che è di AD-19.
+
+        Ordine STABILE fino all'`id`: la rilevazione è deterministica per
+        costruzione, ma un insieme che arriva in ordine diverso a ogni
+        lettura rende irriproducibile qualunque confronto fra due esecuzioni.
+
+        Sostituisce il precedente `della_struttura`, che non aveva chiamanti
+        in produzione (E2-F23: i soli 10 mutanti `no tests` dello spike
+        MYL-72). La forma che serviva alla 2.5 è questa — l'insieme `attiva`
+        di una Struttura — e un metodo senza chiamante è il posto in cui il
+        prossimo difetto della stessa famiglia si nasconde.
+        """
         return list(
             self._db.scalars(
                 select(Prenotazione)
                 .where(
                     Prenotazione.host_id == host_id,
                     Prenotazione.struttura_id == struttura_id,
+                    Prenotazione.stato == StatoPrenotazione.ATTIVA,
                 )
-                .order_by(Prenotazione.check_in)
+                .order_by(
+                    Prenotazione.check_in,
+                    Prenotazione.check_out,
+                    Prenotazione.id,
+                )
             )
         )
 
@@ -658,6 +786,208 @@ class OspiteRepository:
         for ospite in righe:
             raggruppati.setdefault(ospite.prenotazione_id, []).append(ospite)
         return raggruppati
+
+
+class ConflittoRepository:
+    """Il Conflitto (AD-5): si apre, si fa decadere, non si cancella MAI.
+
+    Nessun metodo scrive lo stato `gestito`: quella transizione è un'azione
+    esplicita dell'Host e arriva con la Story 2.7. Nessun metodo cancella:
+    `decaduto` è una transizione tracciata, e la riga resta nello storico
+    (AD-20, GS-6).
+    """
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def apri(
+        self,
+        host_id: uuid.UUID,
+        *,
+        struttura_id: uuid.UUID,
+        prenotazione_min_id: uuid.UUID,
+        prenotazione_max_id: uuid.UUID,
+        adesso: datetime,
+    ) -> uuid.UUID | None:
+        """Apre il Conflitto della coppia; `None` se ce n'è già uno aperto.
+
+        **Una sola istruzione**, e non è un vezzo: «esiste già?» seguito da
+        «aprilo» è un check-then-write, e sotto otto rilevazioni concorrenti
+        sulla stessa Struttura — due Feed che concludono l'import insieme —
+        lo passano tutti (gara A3-4). Qui a decidere è il database, in due
+        modi che coprono due casi diversi:
+
+        - `ON CONFLICT DO NOTHING` sull'indice UNIQUE parziale ferma il
+          secondo `rilevato` per la stessa coppia. È l'invariante di AD-5, e
+          vive nello schema perché sotto concorrenza il codice perde;
+        - il `WHERE NOT EXISTS` sullo stato `gestito` impedisce di riaprire
+          da sé un Conflitto che l'Host ha già chiuso. La riapertura dopo
+          `gestito` esiste (AD-5) ma ha una finestra configurabile e un
+          collegamento al precedente: è materia della Story 2.7, e una
+          rilevazione che aprisse un `rilevato` nuovo al primo sync
+          successivo la scavalcherebbe silenziosamente.
+
+        Il chiamante decide dal ritorno: chi ottiene un id ha aperto il
+        Conflitto ed emette l'evento, chi ottiene `None` ha trovato il lavoro
+        già fatto e non emette nulla — la stessa forma di `marca_cancellata`.
+        """
+        nuovo_id = new_uuid7()
+        gia_gestito = (
+            select(Conflitto.id)
+            .where(
+                Conflitto.host_id == host_id,
+                Conflitto.struttura_id == struttura_id,
+                Conflitto.prenotazione_min_id == prenotazione_min_id,
+                Conflitto.prenotazione_max_id == prenotazione_max_id,
+                Conflitto.stato == StatoConflitto.GESTITO,
+            )
+            .exists()
+        )
+        sorgente = select(
+            literal(nuovo_id, Uuid),
+            literal(host_id, Uuid),
+            literal(struttura_id, Uuid),
+            literal(prenotazione_min_id, Uuid),
+            literal(prenotazione_max_id, Uuid),
+            literal(StatoConflitto.RILEVATO, Conflitto.__table__.c.stato.type),
+            literal(adesso, DateTime(timezone=True)),
+        ).where(~gia_gestito)
+        istruzione = (
+            pg_insert(Conflitto)
+            .from_select(
+                [
+                    "id",
+                    "host_id",
+                    "struttura_id",
+                    "prenotazione_min_id",
+                    "prenotazione_max_id",
+                    "stato",
+                    "rilevato_il",
+                ],
+                sorgente,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    "struttura_id",
+                    "prenotazione_min_id",
+                    "prenotazione_max_id",
+                ],
+                # Letterale e non un parametro: Postgres deduce l'indice
+                # dalla forma del predicato, e un `$1` non gli permette di
+                # riconoscere quello parziale.
+                index_where=text("stato = 'rilevato'"),
+            )
+            # `RETURNING` e non il `rowcount`: su un `INSERT … SELECT`
+            # SQLAlchemy non garantisce il conteggio e restituisce `-1`
+            # quando non lo ha — un valore VERO in un `if`, quindi ogni
+            # tentativo si sarebbe dichiarato riuscito e ogni rilevazione
+            # avrebbe emesso un `conflitto.rilevato` di troppo. Misurato:
+            # il vincolo faceva il suo lavoro (nessuna riga doppia) e il
+            # chiamante non se ne accorgeva. Con `RETURNING` la domanda «ho
+            # inserito?» ha per risposta la riga stessa.
+            .returning(Conflitto.id)
+        )
+        inserito = self._db.execute(istruzione).first()
+        return None if inserito is None else nuovo_id
+
+    def decadi_per_prenotazione(
+        self, host_id: uuid.UUID, *, prenotazione_id: uuid.UUID, adesso: datetime
+    ) -> list["ConflittoDecaduto"]:
+        """Fa decadere i Conflitti aperti che coinvolgono la Prenotazione.
+
+        Transizione di SISTEMA (AD-5), tracciata e distinta da `gestito`: la
+        sovrapposizione è cessata perché una delle due Prenotazioni è uscita
+        da `attiva`, non perché l'Host abbia deciso qualcosa.
+
+        La condizione sullo stato sta **dentro** la `UPDATE`: la consegna
+        degli eventi è at-least-once (AD-10), quindi questo percorso viene
+        rieseguito sullo stesso fatto ogni volta che un handler più avanti
+        nel batch fallisce. Con l'`if` fuori il secondo giro riscriverebbe
+        `decaduto_il` — cioè sposterebbe la data di un fatto già avvenuto,
+        che è ciò che SM-C1 misura — e riemetterebbe l'evento. Qui il secondo
+        giro tocca zero righe e non ritorna niente.
+
+        La coppia non è ordinata: la Prenotazione può essere il `min` o il
+        `max`, e cercare in una sola delle due colonne lascerebbe metà dei
+        Conflitti accesi su una Prenotazione che non esiste più.
+
+        **La Prenotazione deve essere fuori da `attiva` ADESSO** (F1). Non è
+        una ripetizione dell'idempotenza, che regge da sola: è la difesa
+        contro un fatto **vero quando è stato scritto e falso quando lo si
+        consuma**. La consegna è asincrona, e fra le due cose lo stato può
+        essere tornato indietro — una `cancellata` che il portale ritira
+        torna `attiva`, perché la clausola che blocca il ritorno nell'upsert
+        protegge solo `rimossa_dal_feed`. Senza questa condizione un evento
+        in ritardo spegne un Conflitto fra due Prenotazioni ancora vive e
+        ancora sovrapposte: l'AC 11 dal lato opposto, con un
+        `conflitto.decaduto` di troppo che `outbox` conserva per sempre.
+
+        Sta **dentro** la `UPDATE` per la stessa ragione di tutto il resto in
+        questo modulo: fuori sarebbe un check-then-write, e la rilevazione
+        che riporta `attiva` la Prenotazione gira in un'altra transazione.
+        """
+        ancora_attiva = (
+            select(Prenotazione.id)
+            .where(
+                Prenotazione.host_id == host_id,
+                Prenotazione.id == prenotazione_id,
+                Prenotazione.stato == StatoPrenotazione.ATTIVA,
+            )
+            .exists()
+        )
+        istruzione = (
+            update(Conflitto)
+            .where(
+                Conflitto.host_id == host_id,
+                or_(
+                    Conflitto.prenotazione_min_id == prenotazione_id,
+                    Conflitto.prenotazione_max_id == prenotazione_id,
+                ),
+                # `rilevato` E `gestito`: AD-5 ammette il decadimento da
+                # entrambi — una sovrapposizione che cessa dopo che l'Host
+                # l'ha gestita è comunque cessata.
+                Conflitto.stato != StatoConflitto.DECADUTO,
+                ~ancora_attiva,
+            )
+            .values(stato=StatoConflitto.DECADUTO, decaduto_il=adesso)
+            .returning(Conflitto.id, Conflitto.struttura_id)
+        )
+        return [
+            ConflittoDecaduto(id=riga_id, struttura_id=struttura_id)
+            for riga_id, struttura_id in self._db.execute(istruzione).all()
+        ]
+
+    def rilevati(
+        self, host_id: uuid.UUID, *, struttura_id: uuid.UUID | None = None
+    ) -> list[Conflitto]:
+        """I Conflitti che aspettano una decisione dell'Host (FR-6).
+
+        Nessun filtro temporale, e l'assenza è il requisito: un Conflitto
+        `rilevato` resta in evidenza finché non è gestito. Un'esclusione «dopo
+        N giorni» lo farebbe sparire da solo dalla Dashboard — cioè il
+        prodotto smetterebbe di segnalare una doppia prenotazione che è
+        ancora lì (gemello di AD-8).
+        """
+        criteri = [
+            Conflitto.host_id == host_id,
+            Conflitto.stato == StatoConflitto.RILEVATO,
+        ]
+        if struttura_id is not None:
+            criteri.append(Conflitto.struttura_id == struttura_id)
+        return list(
+            self._db.scalars(
+                select(Conflitto)
+                .where(*criteri)
+                # Il più vecchio per primo: è quello che aspetta da più tempo,
+                # e l'ordine non deve dipendere dal piano del database.
+                .order_by(Conflitto.rilevato_il, Conflitto.id)
+            )
+        )
+
+    # Qui c'era un `by_id` senza chiamanti, in `app/` come in `tests/`: E2-F23
+    # riaperto nella stessa PR che lo chiude, e nella stessa forma. È stato
+    # rimosso invece di essere «tenuto per la 2.7»: un metodo di repository
+    # arriva con il percorso che lo usa, o non arriva.
 
 
 class AzzeramentoAuditRepository:

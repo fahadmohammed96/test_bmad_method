@@ -125,12 +125,25 @@ catalog.register_event(
 catalog.register_event(
     "regime_fiscale.rientrato", payload_keys=("host_id", "conteggio")
 )
-# calendario (Story 2.4) — proprietario: modulo `calendario`.
-# Si emette l'uscita da `attiva` di una Prenotazione manuale (AD-19): è il
-# fatto su cui la Story 2.5 farà `decadere` un Conflitto, e per questo porta
-# anche la `struttura_id` — la rilevazione è scopata alla Struttura, e senza
-# quell'identificatore il consumatore dovrebbe rileggere la Prenotazione solo
-# per sapere dove guardare.
+# calendario (Story 2.4, esteso dalla 2.5) — proprietario: modulo `calendario`.
+#
+# `prenotazione.cessata` è l'evento dell'USCITA dallo stato `attiva` (AD-19),
+# e le uscite sono TRE — non solo la cancellazione manuale dell'Host:
+#
+#   1. l'Host cancella una Prenotazione manuale   `attiva → cancellata`
+#   2. l'evento scompare dal feed                 `attiva → rimossa_dal_feed`
+#   3. il feed la dà `STATUS:CANCELLED`           `attiva → cancellata`
+#
+# Fino alla Story 2.4 lo emetteva solo la prima, e il nome prometteva più di
+# quanto il catalogo mantenesse: chi legge questa riga per implementare un
+# consumatore trova un evento che SEMBRA coprire i tre casi. Dalla decisione
+# MYL-69 (opzione A) lo emettono tutte e tre, e il consumatore ne ascolta uno
+# solo — il caso più frequente nella vita reale è il secondo, perché le
+# disdette arrivano dai portali, non dall'Host.
+#
+# La `struttura_id` viaggia col fatto perché la rilevazione dei Conflitti è
+# scopata alla Struttura, e senza quell'identificatore il consumatore dovrebbe
+# rileggere la Prenotazione solo per sapere dove guardare.
 #
 # SOLI identificatori: né il `sommario`, né il nome dell'Ospite. La tabella
 # `outbox` è append-only e leggibile da chi amministra il sistema, quindi un
@@ -139,4 +152,17 @@ catalog.register_event(
 catalog.register_event(
     "prenotazione.cessata",
     payload_keys=("prenotazione_id", "host_id", "struttura_id"),
+)
+# Conflitti (Story 2.5, AD-5). Due fatti e non uno stato: SM-C1 distingue i
+# Conflitti che l'Host ha davvero risolto (`gestito`, Story 2.7) da quelli che
+# si sono spenti da soli perché una Prenotazione è uscita da `attiva`
+# (`decaduto`), e AD-16 vuole che le metriche si misurino dagli eventi di
+# dominio senza strumentazione separata. Con un solo evento «conflitto
+# cambiato» quella distinzione andrebbe cercata rileggendo lo stato corrente,
+# che al momento della misura è già l'ultimo e non dice come ci si è arrivati.
+catalog.register_event(
+    "conflitto.rilevato", payload_keys=("conflitto_id", "host_id", "struttura_id")
+)
+catalog.register_event(
+    "conflitto.decaduto", payload_keys=("conflitto_id", "host_id", "struttura_id")
 )

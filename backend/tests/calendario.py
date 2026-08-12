@@ -16,11 +16,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.calendario import service
 from app.calendario.models import (
     CanaleFeed,
+    Conflitto,
     EsitoSyncRun,
     FeedIcal,
     Ospite,
@@ -222,6 +224,43 @@ def crea_manuale(
             sommario=sommario,
             ospite=ospite,
         ),
+    )
+
+
+def consegna_eventi(db: Session) -> int:
+    """Un tick di consegna `outbox` con il registro di PRODUZIONE.
+
+    Non un `EventSubscribers` costruito nel test: ciò che deve funzionare è
+    la catena reale — l'entrypoint del worker importa i moduli che si
+    registrano, e `deliver_pending` trova gli handler. Un registro finto
+    proverebbe che l'handler fa il suo lavoro e tacerebbe sull'unica cosa che
+    può mancare davvero, cioè la registrazione.
+
+    L'import di `app.worker` è quello che registra, ed è deliberatamente qui
+    dentro e non in testa al file: è la stessa catena che gira in produzione.
+    """
+    import app.worker  # noqa: F401 — import con effetto di registrazione
+    from app.core.outbox import deliver_pending
+
+    consegnati = deliver_pending(db)
+    db.commit()
+    return consegnati
+
+
+def conflitti(db: Session, contesto: Contesto) -> list[Conflitto]:
+    """I Conflitti dell'Host, TUTTI gli stati, in ordine stabile.
+
+    Non passa dal service — che ritorna i soli `rilevato` — perché quasi ogni
+    test di questo perimetro deve poter osservare un `decaduto`: uno stato
+    che il prodotto conserva e non mostra è comunque uno stato, e un test che
+    non riesce a vederlo non può distinguere «decaduto» da «cancellato».
+    """
+    return list(
+        db.scalars(
+            select(Conflitto)
+            .where(Conflitto.host_id == contesto.host_id)
+            .order_by(Conflitto.rilevato_il, Conflitto.id)
+        )
     )
 
 

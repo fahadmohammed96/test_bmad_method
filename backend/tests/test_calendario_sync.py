@@ -473,7 +473,10 @@ class TestGuardiaDelRepository:
         )
         db_session.commit()
 
-        assert rimosse == 0
+        # Dalla Story 2.5 il metodo ritorna QUALI righe ha transitato, non
+        # quante: ogni uscita da `attiva` emette `prenotazione.cessata`, e un
+        # evento per Prenotazione ha bisogno degli identificatori (MYL-69).
+        assert rimosse == []
         assert {riga.stato for riga in prenotazioni(db_session, feed)} == {
             StatoPrenotazione.ATTIVA
         }
@@ -501,7 +504,11 @@ class TestGuardiaDelRepository:
         )
         db_session.commit()
 
-        assert rimosse == 1
+        assert [riga.id for riga in rimosse] == [
+            riga.id
+            for riga in prenotazioni(db_session, feed)
+            if riga.ical_uid == "uid-2@example.com"
+        ]
         stati = {riga.ical_uid: riga.stato for riga in prenotazioni(db_session, feed)}
         assert stati["uid-1@example.com"] is StatoPrenotazione.ATTIVA
         assert stati["uid-2@example.com"] is StatoPrenotazione.RIMOSSA_DAL_FEED

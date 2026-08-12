@@ -1,6 +1,6 @@
-"""Entità del modulo `calendario` (AD-4, AD-18, AD-19, AD-20, AD-21).
+"""Entità del modulo `calendario` (AD-4, AD-5, AD-18, AD-19, AD-20, AD-21).
 
-Quattro tabelle, tutte tenant-owned (AD-2):
+Cinque tabelle, tutte tenant-owned (AD-2):
 
 - `feed_ical` — il collegamento fra una Struttura e l'URL di export di un
   Canale. L'URL è input non fidato (NFR-17): qui si conserva, non si fida.
@@ -13,6 +13,10 @@ Quattro tabelle, tutte tenant-owned (AD-2):
   a decidere deve essere il vincolo (A3-1).
 - `ospite` — anagrafica dell'Ospite (AD-21): contatti facoltativi, mai
   dedotti, con retention per AZZERAMENTO dei campi.
+- `conflitto` — la sovrapposizione fra due Prenotazioni della stessa
+  Struttura (AD-5). L'identità è `(struttura_id, coppia)` con la coppia NON
+  ordinata, e «mai due Conflitti aperti per la stessa coppia» è imposto da
+  un indice UNIQUE PARZIALE del database: sotto concorrenza il codice perde.
 
 Più `azzeramento_audit`, che non è un'entità del dominio ma la traccia
 chi/cosa/quando degli azzeramenti CHIESTI (NFR-15) — la stessa forma di
@@ -378,6 +382,113 @@ class Ospite(Base):
     @property
     def ha_contatti(self) -> bool:
         return any((self.nome, self.email, self.telefono))
+
+
+class StatoConflitto(enum.Enum):
+    """Gli stati di AD-5, e la distinzione fra i due modi di chiudere.
+
+    `gestito` è l'esito di un'AZIONE ESPLICITA dell'Host (Story 2.7);
+    `decaduto` è l'unica transizione di SISTEMA, e avviene quando una delle
+    due Prenotazioni esce da `attiva` (AD-19). Confonderli non rompe niente
+    oggi e rende inutilizzabile SM-C1 domani: «quanti Conflitti l'Host ha
+    davvero risolto» e «quanti si sono spenti da soli» sono la metrica e il
+    suo rumore.
+
+    Il valore `gestito` esiste qui ma **nessun percorso di questa Story ci
+    arriva**: lo introduce la 2.7, e la guardia
+    `tests/test_conflitti_niente_auto_chiusura.py` impone che resti così.
+    """
+
+    RILEVATO = "rilevato"
+    GESTITO = "gestito"
+    DECADUTO = "decaduto"
+
+
+class Conflitto(Base):
+    """Due Prenotazioni sovrapposte sulla stessa Struttura (AD-5, FR-5).
+
+    **La coppia non è ordinata** (§4.2-4, ratificato): `(A,B)` e `(B,A)` sono
+    la stessa identità, e le due colonne si chiamano `min`/`max` perché
+    l'ordine è canonico, non cronologico. Senza canonicalizzazione
+    l'invariante «mai due Conflitti aperti per la stessa coppia» sarebbe
+    violabile **senza violare la lettera dell'AC**, ed è esattamente il modo
+    in cui questi difetti nascono.
+
+    **Il vincolo vive nel DATABASE**, come indice UNIQUE parziale sullo stato
+    `rilevato`: sotto concorrenza un controllo applicativo perde, e due Feed
+    della stessa Struttura che concludono l'import insieme sono il caso
+    normale, non quello raro (test di gara A3-4).
+
+    **Non si cancella mai**, nemmeno quando decade (AD-20, GS-6): `decaduto` è
+    una transizione tracciata, con il suo istante, e la riga resta nello
+    storico. È ciò che rende misurabile SM-C1.
+    """
+
+    __tablename__ = "conflitto"
+    __table_args__ = (
+        # L'invariante di AD-5, imposto dal database e non dal codice.
+        # PARZIALE sullo stato `rilevato`: un Conflitto `decaduto` è storia, e
+        # la stessa coppia può tornare a sovrapporsi — impedirlo per sempre
+        # renderebbe invisibile il secondo Conflitto invece che impossibile.
+        Index(
+            "uq_conflitto_rilevato_per_coppia",
+            "struttura_id",
+            "prenotazione_min_id",
+            "prenotazione_max_id",
+            unique=True,
+            postgresql_where=text("stato = 'rilevato'"),
+        ),
+        # La canonicalizzazione è imposta anche qui, e non solo dalla
+        # funzione che la calcola: con le colonne libere di essere scambiate,
+        # `(A,B)` e `(B,A)` sarebbero due righe che l'indice sopra considera
+        # diverse — cioè il vincolo esisterebbe e non morderebbe.
+        CheckConstraint(
+            "prenotazione_min_id < prenotazione_max_id",
+            name="ck_conflitto_coppia_canonica",
+        ),
+        # Una transizione TRACCIATA: `decaduto` senza il suo istante sarebbe
+        # uno stato senza il fatto che lo ha prodotto, e SM-C1 misura proprio
+        # il quando. L'implicazione vale nei due sensi: un `decaduto_il`
+        # scritto su un Conflitto ancora `rilevato` sarebbe un decadimento
+        # dichiarato e non avvenuto.
+        CheckConstraint(
+            "(stato = 'decaduto') = (decaduto_il IS NOT NULL)",
+            name="ck_conflitto_decaduto_ha_istante",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
+    host_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("host.id"), nullable=False, index=True
+    )
+    # La rilevazione è scopata alla Struttura (AD-3): mai un Conflitto fra
+    # Prenotazioni di Strutture diverse, nemmeno dello stesso Host.
+    struttura_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("struttura.id"), nullable=False, index=True
+    )
+    prenotazione_min_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("prenotazione.id"), nullable=False, index=True
+    )
+    prenotazione_max_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("prenotazione.id"), nullable=False, index=True
+    )
+    stato: Mapped[StatoConflitto] = mapped_column(
+        Enum(
+            StatoConflitto,
+            name="stato_conflitto",
+            values_callable=lambda s: [stato.value for stato in s],
+        ),
+        nullable=False,
+        default=StatoConflitto.RILEVATO,
+    )
+    rilevato_il: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    # `NULL` finché il Conflitto non decade. Non è `aggiornato_il`: qui serve
+    # l'istante della transizione, che non si muove più.
+    decaduto_il: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class AmbitoAzzeramento(enum.Enum):

@@ -35,7 +35,17 @@ from app.calendario import schemas
 # ed è la superficie per cui questa guardia è stata scritta un Epic prima
 # che esistesse.
 SUPERFICI_CON_DATI_DA_FEED = frozenset(
-    {"FeedIcalOutput", "PrenotazioniDelFeedOutput", "CalendarioOutput"}
+    {
+        "FeedIcalOutput",
+        "PrenotazioniDelFeedOutput",
+        "CalendarioOutput",
+        # `ConflittiOutput` è la superficie della Story 2.5: mostra
+        # Prenotazioni che vengono dai Feed, e senza il timestamp «nessun
+        # Conflitto» sarebbe indistinguibile da «nessun Conflitto che abbiamo
+        # potuto vedere, perché un portale non risponde da tre giorni». Sulla
+        # funzione di fiducia del prodotto, le due affermazioni sono opposte.
+        "ConflittiOutput",
+    }
 )
 
 # Schemi che NON sono una superficie, con il motivo per cui non lo sono.
@@ -55,6 +65,18 @@ SUPERFICI_ESENTI = {
     "StrutturaDelCalendarioOutput": (
         "etichetta di riga (id + nome della Struttura): non mostra alcun dato "
         "derivato da un Feed"
+    ),
+    "ConflittoOutput": (
+        "elemento dentro `ConflittiOutput`, che porta il timestamp per "
+        "l'intera risposta: la freschezza è una proprietà del perimetro, non "
+        "del singolo Conflitto"
+    ),
+    "PrenotazioneInConflittoOutput": (
+        "porta già la verità temporale del PROPRIO lato — `aggiornata_il` "
+        "più `sincronizzata`, che dichiara se quell'orario viene da un sync o "
+        "dall'inserimento a mano (§4.2-6). Aggiungerle l'ultimo sync "
+        "dell'insieme metterebbe due orari diversi sulla stessa riga, e "
+        "l'Host sta scegliendo quale prenotazione tenere proprio guardando lì"
     ),
     "AzzeramentoInput": "input dell'endpoint interno, non mostra nulla",
     "OspiteInput": "input del client, non mostra nulla",
