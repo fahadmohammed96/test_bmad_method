@@ -11,6 +11,7 @@ import logging
 # Import con effetto di registrazione: ogni modulo dichiara qui i propri
 # handler di job e i propri subscriber di eventi.
 from app.calendario import jobs as calendario_jobs
+from app.calendario import sottoscrizioni as calendario_sottoscrizioni  # noqa: F401
 from app.core import manutenzione as core_manutenzione
 from app.core.db import get_sessionmaker
 from app.core.worker import main as ciclo_worker

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.problems import register_problem_handlers
-from app.calendario.api import calendario_router
+from app.calendario.api import calendario_router, conflitti_router
 from app.calendario.api import interno_router as calendario_interno_router
 from app.calendario.api import router as feed_ical_router
 from app.config_normativa.api import anagrafica_router, interno_router
@@ -28,6 +28,7 @@ api_router.include_router(strutture_router)
 api_router.include_router(regime_router)
 api_router.include_router(feed_ical_router)
 api_router.include_router(calendario_router)
+api_router.include_router(conflitti_router)
 api_router.include_router(calendario_interno_router)
 api_router.include_router(anagrafica_router)
 api_router.include_router(interno_router)

@@ -23,7 +23,8 @@ from alembic import command
 from tests.server_feed import ServerFeed
 
 TABELLE_DA_SVUOTARE = (
-    "outbox, job, ospite, prenotazione, sync_run, feed_ical, azzeramento_audit, "
+    "outbox, job, conflitto, ospite, prenotazione, sync_run, feed_ical, "
+    "azzeramento_audit, "
     "regime_lettura, struttura, sessione, tentativo_login, host, comune_config, "
     "regione_config, parametro_fiscale, config_audit, comune"
 )

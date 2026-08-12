@@ -151,6 +151,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conflitti": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Conflitti
+         * @description I Conflitti `rilevato` dell'Host (FR-5, FR-6).
+         *
+         *     **Nessun parametro può nasconderne uno.** Non c'è un filtro temporale,
+         *     non c'è una paginazione che tagli la coda, non c'è un `limit`: un
+         *     Conflitto `rilevato` resta in evidenza finché non è gestito, e ogni
+         *     meccanismo che lo faccia sparire da sé è il gemello di AD-8 — il
+         *     prodotto smetterebbe di segnalare una doppia prenotazione che è ancora
+         *     lì. `struttura_id` restringe il PERIMETRO, come il selettore trasversale
+         *     del Calendario (UX-DR1), e non lo stato.
+         *
+         *     Lo storico — i Conflitti `gestito` e `decaduto` — non passa di qui: è la
+         *     superficie della Story 2.7, e non si cancella nulla per non averla
+         *     ancora (AD-20).
+         */
+        get: operations["conflitti_api_v1_conflitti_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/feed-ical": {
         parameters: {
             query?: never;
@@ -742,6 +774,56 @@ export interface components {
             istat: components["schemas"]["AreaIstatOutput"];
             tassa_soggiorno: components["schemas"]["AreaTassaOutput"];
         };
+        /**
+         * ConflittiOutput
+         * @description I Conflitti aperti **con** la verità temporale del perimetro.
+         *
+         *     Envelope, per la ragione di sempre: questa superficie mostra dati
+         *     derivati da Feed, e UX-DR6 vuole «dati aggiornati alle HH:MM» su ognuna.
+         *     Senza, «nessun Conflitto» e «nessun Conflitto che abbiamo potuto vedere,
+         *     perché un portale non risponde da tre giorni» arriverebbero identici —
+         *     e sono affermazioni opposte proprio sulla funzione di fiducia del
+         *     prodotto.
+         */
+        ConflittiOutput: {
+            /** Conflitti */
+            conflitti: components["schemas"]["ConflittoOutput"][];
+            stato_sync: components["schemas"]["StatoSincronizzazione"];
+            /** Ultimo Sync Riuscito Il */
+            ultimo_sync_riuscito_il: string | null;
+        };
+        /**
+         * ConflittoOutput
+         * @description Una sovrapposizione fra due Prenotazioni della stessa Struttura (AD-5).
+         *
+         *     Le due Prenotazioni arrivano in ordine CRONOLOGICO, non nell'ordine
+         *     canonico dell'identità: `min`/`max` è un ordine di identificatori, e non
+         *     significa niente per chi guarda due soggiorni affiancati.
+         *
+         *     Lo `stato` viaggia anche se questa risposta contiene solo i `rilevato`:
+         *     è il derivato di dominio su cui la Dashboard costruisce la severità
+         *     (AD-14), e ometterlo inviterebbe il client a dedurlo dalla rotta.
+         */
+        ConflittoOutput: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Prenotazioni */
+            prenotazioni: components["schemas"]["PrenotazioneInConflittoOutput"][];
+            /**
+             * Rilevato Il
+             * Format: date-time
+             */
+            rilevato_il: string;
+            stato: components["schemas"]["StatoConflitto"];
+            /**
+             * Struttura Id
+             * Format: uuid
+             */
+            struttura_id: string;
+        };
         /** CredenzialiInput */
         CredenzialiInput: {
             /**
@@ -895,6 +977,52 @@ export interface components {
         /** PreferenzeInput */
         PreferenzeInput: {
             canale_notifica_preferito: components["schemas"]["CanaleNotifica"];
+        };
+        /**
+         * PrenotazioneInConflittoOutput
+         * @description Un lato del Conflitto: la Prenotazione **e da dove viene** (FR-5).
+         *
+         *     L'AC chiede «fonte e timestamp di sincronizzazione di ciascuna
+         *     Prenotazione coinvolta», ed è il dato su cui l'Host deciderà quale delle
+         *     due tenere (2.7). Una Prenotazione manuale un sync non ce l'ha (§4.2-6,
+         *     ratificato): `canale` vale `manuale`, `aggiornata_il` è la data di
+         *     INSERIMENTO e `sincronizzata` è `False`.
+         *
+         *     **Il flag esiste perché la falsa simmetria sarebbe peggio
+         *     dell'asimmetria.** Con due colonne affiancate e due orari dall'aria
+         *     identica, l'Host leggerebbe «aggiornato alle 09:10» su una riga che
+         *     nessun portale ha mai confermato. Il testo dell'etichetta è del client;
+         *     il fatto che i due valori non siano la stessa cosa è del server (AD-14).
+         *
+         *     `aggiornata_il` è `None` quando la Prenotazione viene da un Feed che non
+         *     ha MAI avuto un sync riuscito: lì non esiste un orario da mostrare, e il
+         *     sistema dice «non lo so» invece di inventarne uno (NFR-2).
+         */
+        PrenotazioneInConflittoOutput: {
+            /** Aggiornata Il */
+            aggiornata_il: string | null;
+            canale: components["schemas"]["CanaleFeed"];
+            /**
+             * Check In
+             * Format: date
+             */
+            check_in: string;
+            /**
+             * Check Out
+             * Format: date
+             */
+            check_out: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Notti */
+            notti: number;
+            /** Sincronizzata */
+            sincronizzata: boolean;
+            /** Sommario */
+            sommario: string | null;
         };
         /**
          * PrenotazioneManualeInput
@@ -1072,6 +1200,23 @@ export interface components {
          * @enum {string}
          */
         StatoConfigurazione: "configurata" | "configurazione_non_disponibile";
+        /**
+         * StatoConflitto
+         * @description Gli stati di AD-5, e la distinzione fra i due modi di chiudere.
+         *
+         *     `gestito` è l'esito di un'AZIONE ESPLICITA dell'Host (Story 2.7);
+         *     `decaduto` è l'unica transizione di SISTEMA, e avviene quando una delle
+         *     due Prenotazioni esce da `attiva` (AD-19). Confonderli non rompe niente
+         *     oggi e rende inutilizzabile SM-C1 domani: «quanti Conflitti l'Host ha
+         *     davvero risolto» e «quanti si sono spenti da soli» sono la metrica e il
+         *     suo rumore.
+         *
+         *     Il valore `gestito` esiste qui ma **nessun percorso di questa Story ci
+         *     arriva**: lo introduce la 2.7, e la guardia
+         *     `tests/test_conflitti_niente_auto_chiusura.py` impone che resti così.
+         * @enum {string}
+         */
+        StatoConflitto: "rilevato" | "gestito" | "decaduto";
         /**
          * StatoPrenotazione
          * @description Stati di AD-19: solo `attiva` concorre ai Conflitti.
@@ -1440,6 +1585,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComuneOutput"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    conflitti_api_v1_conflitti_get: {
+        parameters: {
+            query?: {
+                struttura_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConflittiOutput"];
                 };
             };
             /** @description Validation Error */

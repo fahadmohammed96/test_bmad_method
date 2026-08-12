@@ -25,8 +25,11 @@ from app.calendario.schemas import (
     AzzeramentoInput,
     AzzeramentoOutput,
     CalendarioOutput,
+    ConflittiOutput,
+    ConflittoOutput,
     FeedIcalInput,
     FeedIcalOutput,
+    PrenotazioneInConflittoOutput,
     PrenotazioneManualeInput,
     PrenotazioneManualeOutput,
     PrenotazioneOutput,
@@ -49,6 +52,11 @@ from app.strutture.service import StrutturaArchiviataError, StrutturaNonTrovataE
 
 router = APIRouter(prefix="/feed-ical", tags=["calendario"])
 calendario_router = APIRouter(prefix="/calendario", tags=["calendario"])
+# I Conflitti hanno una rotta propria e non un sotto-percorso del calendario:
+# sono l'entità su cui la Dashboard (2.8) e la Finestra di riconciliazione
+# (2.7) lavoreranno, e annidarli sotto la griglia legherebbe due superfici
+# che cambiano per ragioni diverse.
+conflitti_router = APIRouter(prefix="/conflitti", tags=["calendario"])
 # Endpoint di servizio, non esposti all'Host finale: la cancellazione su
 # richiesta GDPR (NFR-15) arriva oggi come istanza al titolare, non come
 # bottone nell'app. Vivono sotto `/interno` come quelli di `config_normativa`,
@@ -380,6 +388,58 @@ def cancella_prenotazione(
             ),
         ) from None
     return _prenotazione_in_uscita(db, host.id, prenotazione)
+
+
+@conflitti_router.get("")
+def conflitti(
+    db: DbSession,
+    host: CurrentHost,
+    struttura_id: uuid.UUID | None = None,
+) -> ConflittiOutput:
+    """I Conflitti `rilevato` dell'Host (FR-5, FR-6).
+
+    **Nessun parametro può nasconderne uno.** Non c'è un filtro temporale,
+    non c'è una paginazione che tagli la coda, non c'è un `limit`: un
+    Conflitto `rilevato` resta in evidenza finché non è gestito, e ogni
+    meccanismo che lo faccia sparire da sé è il gemello di AD-8 — il
+    prodotto smetterebbe di segnalare una doppia prenotazione che è ancora
+    lì. `struttura_id` restringe il PERIMETRO, come il selettore trasversale
+    del Calendario (UX-DR1), e non lo stato.
+
+    Lo storico — i Conflitti `gestito` e `decaduto` — non passa di qui: è la
+    superficie della Story 2.7, e non si cancella nulla per non averla
+    ancora (AD-20).
+    """
+    try:
+        vista = service.conflitti_rilevati(db, host.id, struttura_id=struttura_id)
+    except StrutturaNonTrovataError:
+        raise _struttura_non_trovata() from None
+    return ConflittiOutput(
+        stato_sync=vista.stato,
+        ultimo_sync_riuscito_il=vista.ultimo_sync_riuscito_il,
+        conflitti=[
+            ConflittoOutput(
+                id=riga.conflitto.id,
+                struttura_id=riga.conflitto.struttura_id,
+                stato=riga.conflitto.stato,
+                rilevato_il=riga.conflitto.rilevato_il,
+                prenotazioni=[
+                    PrenotazioneInConflittoOutput(
+                        id=lato.prenotazione.id,
+                        canale=lato.prenotazione.canale,
+                        check_in=lato.prenotazione.check_in,
+                        check_out=lato.prenotazione.check_out,
+                        notti=lato.prenotazione.soggiorno.nights,
+                        sommario=lato.prenotazione.sommario,
+                        sincronizzata=lato.sincronizzata,
+                        aggiornata_il=lato.aggiornata_il,
+                    )
+                    for lato in riga.prenotazioni
+                ],
+            )
+            for riga in vista.conflitti
+        ],
+    )
 
 
 @calendario_router.get("")

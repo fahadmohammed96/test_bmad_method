@@ -28,6 +28,7 @@ from app.calendario.models import (
     AmbitoAzzeramento,
     CanaleFeed,
     CategoriaErroreSync,
+    StatoConflitto,
     StatoPrenotazione,
 )
 
@@ -234,6 +235,77 @@ class CalendarioOutput(BaseModel):
     feed_in_errore: int
     strutture: list[StrutturaDelCalendarioOutput]
     voci: list[VoceCalendarioOutput]
+
+
+class PrenotazioneInConflittoOutput(BaseModel):
+    """Un lato del Conflitto: la Prenotazione **e da dove viene** (FR-5).
+
+    L'AC chiede «fonte e timestamp di sincronizzazione di ciascuna
+    Prenotazione coinvolta», ed è il dato su cui l'Host deciderà quale delle
+    due tenere (2.7). Una Prenotazione manuale un sync non ce l'ha (§4.2-6,
+    ratificato): `canale` vale `manuale`, `aggiornata_il` è la data di
+    INSERIMENTO e `sincronizzata` è `False`.
+
+    **Il flag esiste perché la falsa simmetria sarebbe peggio
+    dell'asimmetria.** Con due colonne affiancate e due orari dall'aria
+    identica, l'Host leggerebbe «aggiornato alle 09:10» su una riga che
+    nessun portale ha mai confermato. Il testo dell'etichetta è del client;
+    il fatto che i due valori non siano la stessa cosa è del server (AD-14).
+
+    `aggiornata_il` è `None` quando la Prenotazione viene da un Feed che non
+    ha MAI avuto un sync riuscito: lì non esiste un orario da mostrare, e il
+    sistema dice «non lo so» invece di inventarne uno (NFR-2).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    canale: CanaleFeed
+    check_in: date
+    check_out: date
+    notti: int
+    sommario: str | None
+    sincronizzata: bool
+    aggiornata_il: datetime | None
+
+
+class ConflittoOutput(BaseModel):
+    """Una sovrapposizione fra due Prenotazioni della stessa Struttura (AD-5).
+
+    Le due Prenotazioni arrivano in ordine CRONOLOGICO, non nell'ordine
+    canonico dell'identità: `min`/`max` è un ordine di identificatori, e non
+    significa niente per chi guarda due soggiorni affiancati.
+
+    Lo `stato` viaggia anche se questa risposta contiene solo i `rilevato`:
+    è il derivato di dominio su cui la Dashboard costruisce la severità
+    (AD-14), e ometterlo inviterebbe il client a dedurlo dalla rotta.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    struttura_id: uuid.UUID
+    stato: StatoConflitto
+    rilevato_il: datetime
+    prenotazioni: list[PrenotazioneInConflittoOutput]
+
+
+class ConflittiOutput(BaseModel):
+    """I Conflitti aperti **con** la verità temporale del perimetro.
+
+    Envelope, per la ragione di sempre: questa superficie mostra dati
+    derivati da Feed, e UX-DR6 vuole «dati aggiornati alle HH:MM» su ognuna.
+    Senza, «nessun Conflitto» e «nessun Conflitto che abbiamo potuto vedere,
+    perché un portale non risponde da tre giorni» arriverebbero identici —
+    e sono affermazioni opposte proprio sulla funzione di fiducia del
+    prodotto.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    stato_sync: StatoSincronizzazione
+    ultimo_sync_riuscito_il: datetime | None
+    conflitti: list[ConflittoOutput]
 
 
 class OspiteInput(BaseModel):

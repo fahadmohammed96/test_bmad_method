@@ -23,18 +23,24 @@ SAVEPOINT (G-1) e un `commit` interno lo scavalcherebbe.
 
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.calendario import azzeramento, ical, jobs
+from app.calendario.conflitti import (
+    PrenotazioneAttiva,
+    coppie_sovrapposte,
+)
 from app.calendario.intervallo import ParametriIntervallo, intervallo_di_sync
 from app.calendario.models import (
     AmbitoAzzeramento,
     AzzeramentoAudit,
     CanaleFeed,
     CategoriaErroreSync,
+    Conflitto,
     EsitoSyncRun,
     FeedIcal,
     Ospite,
@@ -48,8 +54,11 @@ from app.calendario.normalizzazione import (
 )
 from app.calendario.repository import (
     AzzeramentoAuditRepository,
+    ConflittoRepository,
+    EsitoUpsert,
     FeedIcalRepository,
     OspiteRepository,
+    PrenotazioneCessata,
     PrenotazioneRepository,
     SyncRunRepository,
 )
@@ -78,11 +87,13 @@ from app.strutture import service as strutture_service
 
 logger = logging.getLogger(__name__)
 
-# AD-17: il nome è a catalogo in `core/events.py`, che ne valida anche il
-# payload. La costante vive qui perché `calendario` è il modulo che emette
-# l'evento, e un letterale ripetuto nel codice e nei test è un letterale che
+# AD-17: i nomi sono a catalogo in `core/events.py`, che ne valida anche il
+# payload. Le costanti vivono qui perché `calendario` è il modulo che emette
+# gli eventi, e un letterale ripetuto nel codice e nei test è un letterale che
 # prima o poi diverge.
 EVENTO_PRENOTAZIONE_CESSATA = "prenotazione.cessata"
+EVENTO_CONFLITTO_RILEVATO = "conflitto.rilevato"
+EVENTO_CONFLITTO_DECADUTO = "conflitto.decaduto"
 
 
 class FeedNonTrovatoError(Exception):
@@ -454,6 +465,14 @@ def crea_prenotazione_manuale(
                 principale=True,
             ),
         )
+
+    # La rilevazione gira PRIMA del `commit`, nella stessa transazione della
+    # scrittura (AD-5): una Prenotazione manuale che si sovrappone a una da
+    # Feed genera un Conflitto, e non deve esistere un istante in cui la
+    # Prenotazione è salvata e il Conflitto no. Non serve un evento nuovo —
+    # l'ingresso è un percorso solo, dentro il modulo che è l'unico
+    # scrittore (AD-18).
+    rivaluta_conflitti(db, host_id, dati.struttura_id)
     db.commit()
     # Soli identificatori: un nome di Ospite scritto qui sopravviverebbe alla
     # retention che AD-21 gli impone (AD-16, NFR-11).
@@ -533,6 +552,275 @@ def cancella_prenotazione(
         },
     )
     return prenotazione
+
+
+# ------------------------------- rilevazione dei Conflitti (FR-5, AD-5, 2.5)
+
+
+@dataclass(frozen=True, slots=True)
+class FonteDellaPrenotazione:
+    """Da dove viene una Prenotazione, e a quando risale ciò che ne sappiamo.
+
+    È il dato che la Finestra di riconciliazione (2.7) mostra accanto a
+    ciascuna delle due Prenotazioni, e l'AC lo chiede come «fonte e timestamp
+    di **sincronizzazione**». Una Prenotazione manuale un sync non ce l'ha
+    (§4.2-6, ratificato): la fonte è il Canale «Manuale» e il timestamp è la
+    data di INSERIMENTO, con `sincronizzata` a `False` a dichiarare che non è
+    un dato sincronizzato.
+
+    La falsa simmetria fra le due colonne sarebbe peggio dell'asimmetria:
+    l'Host deciderebbe quale prenotazione tenere fidandosi di un orario che
+    non significa quello che sembra. Il flag è il valore su cui la superficie
+    costruisce l'etichetta — il testo è del client, la verità è del server
+    (AD-14).
+
+    **Derivato alla lettura, non copiato sul Conflitto.** Un timestamp
+    scritto sulla riga al momento della rilevazione sarebbe una fotografia
+    che invecchia: il Conflitto resta aperto per giorni e continuerebbe a
+    dichiarare la freschezza di ieri, cioè la falsa sincronia che NFR-2
+    vieta. La verità è la traccia append-only dei `sync_run`, ed è la stessa
+    scelta già fatta per «dati aggiornati alle HH:MM».
+    """
+
+    prenotazione: Prenotazione
+    sincronizzata: bool
+    aggiornata_il: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ConflittoConFonti:
+    """Un Conflitto con le due Prenotazioni e la provenienza di ciascuna."""
+
+    conflitto: Conflitto
+    prenotazioni: list[FonteDellaPrenotazione]
+
+
+@dataclass(frozen=True, slots=True)
+class VistaConflitti:
+    """I Conflitti aperti di un perimetro, con la sua verità temporale.
+
+    L'envelope porta lo stato di sincronizzazione dell'insieme, come la
+    griglia: questa è una superficie che mostra dati derivati da Feed, e
+    UX-DR6 li vuole tutti datati. Il valore è lo STESSO derivato del
+    Calendario (`_stato_aggregato`), non un secondo conto: due sorgenti per
+    la stessa affermazione divergono, e l'Host le vede una accanto all'altra.
+    """
+
+    stato: StatoSincronizzazione
+    ultimo_sync_riuscito_il: datetime | None
+    conflitti: list[ConflittoConFonti]
+
+
+def rivaluta_conflitti(db: Session, host_id: uuid.UUID, struttura_id: uuid.UUID) -> int:
+    """Rileva le sovrapposizioni della Struttura e apre i Conflitti mancanti.
+
+    Ritorna quanti Conflitti ha aperto. **Non fa `commit`**: gira dentro la
+    transazione del percorso che l'ha chiamata — l'import o l'inserimento
+    manuale — e un Conflitto senza la Prenotazione che lo ha causato, o
+    viceversa, non deve essere uno stato raggiungibile.
+
+    **Una sola funzione per i due percorsi.** L'AC dice che la rilevazione è
+    rieseguita «quando termina un import o viene inserita una Prenotazione
+    manuale», ed entrambe le scritture vivono dentro `calendario`, che ne è
+    l'unico scrittore (AD-18): una chiamata diretta è legittima e
+    sufficiente. Ciò che non è ammesso è che esistano DUE funzioni di
+    rilevazione, una per strada — è il modo in cui il criterio diverge e il
+    Conflitto compare da un lato e non dall'altro.
+
+    L'asimmetria con il decadimento è deliberata: le USCITE da `attiva` sono
+    tre e una avviene in un worker di sfondo, quindi passano per l'evento;
+    l'INGRESSO è un percorso solo, nello stesso modulo.
+
+    **Questa funzione non fa decadere niente**, e ci vuole poco a leggerlo
+    come una dimenticanza: è invece ciò che rende vero l'AC 11. Un import
+    fallito o parziale non lascia l'insieme delle Prenotazioni `attiva` più
+    povero di quanto sia — perché una transizione la scrive solo un parse
+    completo (E2-G3) — ma se la rilevazione chiudesse i Conflitti «non più
+    visti» sarebbe comunque lei a trasformare un errore di trasporto in una
+    doppia prenotazione non segnalata. Il decadimento ha una sola causa
+    (l'uscita da `attiva`) e arriva per evento.
+    """
+    attive = PrenotazioneRepository(db).attive_della_struttura(host_id, struttura_id)
+    coppie = coppie_sovrapposte(
+        PrenotazioneAttiva(
+            id=riga.id, struttura_id=riga.struttura_id, soggiorno=riga.soggiorno
+        )
+        for riga in attive
+    )
+    conflitti = ConflittoRepository(db)
+    adesso = utcnow()
+    aperti = 0
+    for coppia in coppie:
+        conflitto_id = conflitti.apri(
+            host_id,
+            struttura_id=coppia.struttura_id,
+            prenotazione_min_id=coppia.prenotazione_min_id,
+            prenotazione_max_id=coppia.prenotazione_max_id,
+            adesso=adesso,
+        )
+        if conflitto_id is None:
+            # C'era già un Conflitto aperto per questa coppia: rieseguire la
+            # rilevazione non ne crea un secondo (AD-5).
+            continue
+        emit(
+            db,
+            EVENTO_CONFLITTO_RILEVATO,
+            {
+                "conflitto_id": str(conflitto_id),
+                "host_id": str(host_id),
+                "struttura_id": str(coppia.struttura_id),
+            },
+        )
+        aperti += 1
+    if aperti:
+        logger.info(
+            "conflitti rilevati",
+            extra={
+                "host_id": str(host_id),
+                "struttura_id": str(struttura_id),
+                "aperti": aperti,
+                "prenotazioni_attive": len(attive),
+            },
+        )
+    return aperti
+
+
+def decadi_conflitti_della_prenotazione(
+    db: Session, host_id: uuid.UUID, prenotazione_id: uuid.UUID
+) -> int:
+    """Fa decadere i Conflitti aperti di una Prenotazione uscita da `attiva`.
+
+    È il consumatore di `prenotazione.cessata` (AD-5, AD-19): la
+    sovrapposizione è cessata, e il Conflitto passa a `decaduto` — mai
+    cancellato (AD-20), mai confuso con `gestito`, che è l'esito di
+    un'azione dell'Host.
+
+    **Idempotente**, perché deve esserlo: la consegna degli eventi è
+    at-least-once (AD-10) e questo è il primo consumatore di `outbox` del
+    progetto. La transizione è condizionata allo stato dentro la `UPDATE`,
+    quindi una seconda consegna dello stesso evento tocca zero righe, non
+    riscrive `decaduto_il` e non emette un secondo `conflitto.decaduto`.
+    """
+    decaduti = ConflittoRepository(db).decadi_per_prenotazione(
+        host_id, prenotazione_id=prenotazione_id, adesso=utcnow()
+    )
+    for conflitto in decaduti:
+        emit(
+            db,
+            EVENTO_CONFLITTO_DECADUTO,
+            {
+                "conflitto_id": str(conflitto.id),
+                "host_id": str(host_id),
+                "struttura_id": str(conflitto.struttura_id),
+            },
+        )
+    if decaduti:
+        logger.info(
+            "conflitti decaduti",
+            extra={
+                "host_id": str(host_id),
+                "prenotazione_id": str(prenotazione_id),
+                "decaduti": len(decaduti),
+            },
+        )
+    return len(decaduti)
+
+
+def conflitti_rilevati(
+    db: Session, host_id: uuid.UUID, *, struttura_id: uuid.UUID | None = None
+) -> VistaConflitti:
+    """I Conflitti che aspettano una decisione, con la provenienza dei due lati.
+
+    Nessun percorso di questa lettura nasconde un Conflitto: non c'è un
+    filtro temporale, e non c'è un limite. Un Conflitto `rilevato` resta in
+    evidenza finché non è gestito (FR-6) — l'invariante è un'ASSENZA di
+    comportamento, e le assenze si impongono, non si promettono.
+
+    Il perimetro è lo stesso del Calendario: con `struttura_id` la Struttura
+    si legge dal service di `strutture`, che solleva per quella di un altro
+    Host (AD-2, AD-18, NFR-14).
+    """
+    if struttura_id is not None:
+        strutture_service.leggi_struttura(db, host_id, struttura_id)
+    prenotazioni = PrenotazioneRepository(db)
+    letture: dict[uuid.UUID, Prenotazione] = {}
+    ultimi_sync: dict[uuid.UUID, datetime | None] = {}
+
+    def fonte(prenotazione_id: uuid.UUID) -> FonteDellaPrenotazione:
+        if prenotazione_id not in letture:
+            riga = prenotazioni.by_id(host_id, prenotazione_id)
+            if riga is None:
+                # Irraggiungibile: le Prenotazioni non si cancellano (AD-20)
+                # e la FK del Conflitto le tiene. Se accadesse, tacere
+                # sarebbe la scelta peggiore.
+                raise PrenotazioneNonTrovataError()
+            letture[prenotazione_id] = riga
+        riga = letture[prenotazione_id]
+        if riga.feed_id is None:
+            # Manuale: fonte «Manuale», timestamp = data di inserimento, e
+            # `sincronizzata` a False perché non è un dato sincronizzato.
+            return FonteDellaPrenotazione(
+                prenotazione=riga, sincronizzata=False, aggiornata_il=riga.creata_il
+            )
+        if riga.feed_id not in ultimi_sync:
+            run = SyncRunRepository(db).ultimo_riuscito(host_id, riga.feed_id)
+            ultimi_sync[riga.feed_id] = None if run is None else run.concluso_il
+        # `None` è una risposta: il Feed non ha MAI avuto un sync riuscito, e
+        # inventare un orario qui sarebbe la falsa sincronia nel punto in cui
+        # l'Host sta scegliendo quale prenotazione tenere.
+        return FonteDellaPrenotazione(
+            prenotazione=riga,
+            sincronizzata=True,
+            aggiornata_il=ultimi_sync[riga.feed_id],
+        )
+
+    esito = []
+    for conflitto in ConflittoRepository(db).rilevati(
+        host_id, struttura_id=struttura_id
+    ):
+        lati = [
+            fonte(conflitto.prenotazione_min_id),
+            fonte(conflitto.prenotazione_max_id),
+        ]
+        # Ordine di presentazione CRONOLOGICO: `min`/`max` è l'ordine
+        # canonico dell'identità, cioè un ordine di identificatori, e
+        # mostrare per primo «quello con l'uuid più piccolo» non significa
+        # niente per chi guarda due soggiorni affiancati.
+        lati.sort(
+            key=lambda lato: (
+                lato.prenotazione.check_in,
+                lato.prenotazione.check_out,
+                lato.prenotazione.id,
+            )
+        )
+        esito.append(ConflittoConFonti(conflitto=conflitto, prenotazioni=lati))
+
+    stato = _stato_aggregato(db, host_id, struttura_id=struttura_id)
+    return VistaConflitti(
+        stato=stato.stato,
+        ultimo_sync_riuscito_il=stato.ultimo_sync_riuscito_il,
+        conflitti=esito,
+    )
+
+
+def _emetti_cessate(
+    db: Session, host_id: uuid.UUID, cessate: Sequence[PrenotazioneCessata]
+) -> None:
+    """`prenotazione.cessata` per ogni uscita da `attiva` (AD-19, MYL-69).
+
+    Un evento per Prenotazione, nella stessa transazione della transizione
+    (AD-1): non esiste uno stato uscito da `attiva` senza il suo evento.
+    """
+    for riga in cessate:
+        emit(
+            db,
+            EVENTO_PRENOTAZIONE_CESSATA,
+            {
+                "prenotazione_id": str(riga.id),
+                "host_id": str(host_id),
+                "struttura_id": str(riga.struttura_id),
+            },
+        )
 
 
 # ------------------------- azzeramento su richiesta (NFR-15, AD-21)
@@ -1024,6 +1312,10 @@ def esegui_sync(
         )
 
     conteggi = _riconcilia(db, feed, analizzato, uid_presenti)
+    # «Quando termina un import» (AD-5): la rilevazione gira sull'insieme
+    # appena riconciliato, e solo su questa strada — un run fallito esce
+    # molto prima di qui, quindi non può né aprire né chiudere Conflitti.
+    rivaluta_conflitti(db, feed.host_id, feed.struttura_id)
     # DOPO la riconciliazione, mai prima: il validatore certifica che questo
     # corpo è entrato nel database. Scriverlo prima significherebbe che un
     # errore a metà riconciliazione lascerebbe un validatore che promette
@@ -1053,9 +1345,18 @@ def _riconcilia(
     analizzato: ical.FeedAnalizzato,
     uid_presenti: list[str],
 ) -> EsitoImport:
-    """Upsert degli eventi e transizione degli scomparsi. Mai una DELETE."""
+    """Upsert degli eventi e transizione degli scomparsi. Mai una DELETE.
+
+    **Due delle tre uscite da `attiva` passano di qui** (MYL-69, opzione A):
+    l'evento che il portale dà `STATUS:CANCELLED` e l'evento che sparisce dal
+    feed. Sono le due strade più frequenti nella vita reale, perché le
+    disdette arrivano dai portali e non dall'Host — ed è la ragione per cui
+    un avviso di sovrapposizione, senza queste emissioni, resterebbe acceso
+    per sempre su una prenotazione che non esiste più.
+    """
     prenotazioni = PrenotazioneRepository(db)
     importate = aggiornate = ricomparse = malformati = ricorrenti = 0
+    cessate: list[PrenotazioneCessata] = []
 
     for vevent in analizzato.eventi:
         try:
@@ -1082,29 +1383,46 @@ def _riconcilia(
         if evento.ricorrente:
             ricorrenti += 1
         esito = _upsert(prenotazioni, feed, evento)
-        if esito == "importata":
+        if esito.uscita_da_attiva:
+            # Strada 3: il portale l'ha annullata. Solo alla TRANSIZIONE —
+            # emettere a ogni sync farebbe `decadere` più volte lo stesso
+            # Conflitto e non darebbe alcun errore.
+            cessate.append(
+                PrenotazioneCessata(
+                    id=esito.prenotazione_id, struttura_id=feed.struttura_id
+                )
+            )
+        if esito.esito == "importata":
             importate += 1
-        elif esito == "ricomparsa":
+        elif esito.esito == "ricomparsa":
             ricomparse += 1
         else:
             aggiornate += 1
 
+    # Strada 2: l'evento è scomparso dal feed. `RETURNING` dice QUALI righe
+    # sono transitate — un `rowcount` direbbe quante, e un evento per
+    # Prenotazione ha bisogno degli identificatori.
     rimosse = prenotazioni.marca_rimosse_dal_feed(
         feed.host_id, feed_id=feed.id, uid_presenti=uid_presenti
     )
+    _emetti_cessate(db, feed.host_id, cessate + rimosse)
     logger.info(
         "sync del feed concluso",
         extra={
             "feed_id": str(feed.id),
             "importate": importate,
             "aggiornate": aggiornate,
-            "rimosse_dal_feed": rimosse,
+            "rimosse_dal_feed": len(rimosse),
+            # Le uscite da `attiva` sono più delle sole scomparse dal feed:
+            # il contatore del `sync_run` conta le seconde, l'evento le
+            # racconta tutte.
+            "cessate": len(cessate) + len(rimosse),
         },
     )
     return EsitoImport(
         importate=importate,
         aggiornate=aggiornate,
-        rimosse_dal_feed=rimosse,
+        rimosse_dal_feed=len(rimosse),
         ricomparse=ricomparse,
         malformati=malformati,
         ricorrenti_non_espansi=ricorrenti,
@@ -1113,7 +1431,7 @@ def _riconcilia(
 
 def _upsert(
     prenotazioni: PrenotazioneRepository, feed: FeedIcal, evento: EventoFeed
-) -> str:
+) -> EsitoUpsert:
     return prenotazioni.upsert_dal_feed(
         feed.host_id,
         feed_id=feed.id,
@@ -1128,8 +1446,11 @@ def _upsert(
 
 
 __all__ = [
+    "EVENTO_CONFLITTO_DECADUTO",
+    "EVENTO_CONFLITTO_RILEVATO",
     "EVENTO_PRENOTAZIONE_CESSATA",
     "Calendario",
+    "ConflittoConFonti",
     "DatiFeed",
     "DatiOspite",
     "DatiPrenotazioneManuale",
@@ -1140,6 +1461,7 @@ __all__ = [
     "PrenotazioneNonManualeError",
     "PrenotazioneNonTrovataError",
     "StatoFeed",
+    "FonteDellaPrenotazione",
     "StrutturaDelCalendario",
     "UrlFeedNonValidoError",
     "VoceCalendario",
@@ -1149,13 +1471,16 @@ __all__ = [
     "cancella_prenotazione",
     "client_di_produzione",
     "collega_feed",
+    "conflitti_rilevati",
     "crea_prenotazione_manuale",
+    "decadi_conflitti_della_prenotazione",
     "esegui_sync",
     "leggi_feed",
     "lista_feed",
     "ospiti_della_prenotazione",
     "prenotazioni_del_feed",
     "registra_ospite",
+    "rivaluta_conflitti",
     "stato_del_feed",
     "ultimo_run",
     "ultimo_run_riuscito",
