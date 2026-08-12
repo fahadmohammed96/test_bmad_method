@@ -391,8 +391,9 @@ So that possa intervenire in tempo, perché questa è la funzione di fiducia del
 **Acceptance Criteria:**
 
 **Given** il modulo `notifiche` (canali MVP: in-app + email) e l'infrastruttura di job durevoli (AD-10, AR-11)
-**When** un Conflitto emerge alla prima sincronizzazione in cui è rilevato
+**When** un Conflitto emerge — cioè alla **prima rilevazione**, quale che sia l'origine che l'ha prodotta
 **Then** parte una notifica (in-app + email) via **job durevole**, mai silenziosa ("Possibile doppia prenotazione — Bologna Centro, 15-17 agosto") (FR-5, NFR-3, AD-10)
+**And** il trigger è la **prima rilevazione del Conflitto**, non la sincronizzazione: un Conflitto nato da un **inserimento manuale** (Story 2.4) notifica esattamente come uno nato da un import, perché per una Prenotazione manuale una «sincronizzazione» non esiste e prendere l'AC alla lettera lascerebbe scoperto proprio il caso che FR-5 promette di coprire `[ratifica del punto §4.2-10 del test design, 2026-08-12]`
 **And** `notifiche` dipende solo in lettura da `identity` per risolvere destinatario e preferenze (spine); nessun modulo dipende sincronicamente da `notifiche` (solo via job/eventi)
 **And** la consegna è at-least-once con handler idempotente (nessuna notifica persa per restart/crash; nessun doppione fastidioso per ritentativo) (AD-10)
 **And** questa fondazione `notifiche` è riusata da Epic 3 (promemoria/escalation Adempimenti) ed Epic 5 (Messaggi Ospiti)
