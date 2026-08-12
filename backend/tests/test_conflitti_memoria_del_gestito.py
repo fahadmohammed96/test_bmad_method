@@ -35,11 +35,14 @@ loro il dato su cui poggiare.
 
 from datetime import date
 
+import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.calendario import service
 from app.calendario.models import Conflitto, StatoConflitto, StatoPrenotazione
+from app.core.date_range import utcnow
 from app.core.outbox import OutboxEvent
 from tests.calendario import (
     Contesto,
@@ -84,8 +87,14 @@ def _gestito_dall_host(db: Session, conflitto: Conflitto) -> None:
     esiste ancora: è l'unico modo di esercitare oggi un ramo che oggi non ha
     chiamanti. Il giorno in cui la 2.7 arriva, questo helper si sostituisce col
     suo service e i test qui sotto restano gli stessi.
+
+    Le due scritture sono UNA cosa sola, e il CHECK
+    `ck_conflitto_gestito_ha_istante` lo impone: `gestito` senza il suo istante
+    sarebbe una decisione senza il quando, cioè la finestra della 2.7 senza il
+    punto da cui si misura.
     """
     conflitto.stato = StatoConflitto.GESTITO
+    conflitto.gestito_il = utcnow()
     db.commit()
 
 
@@ -168,3 +177,62 @@ class TestLaDecisioneDellHostSopravviveAlDecadimento:
         )
 
         assert _eventi(db_session, service.EVENTO_CONFLITTO_RILEVATO) == 1
+
+
+class TestIlDatoCheLaStoria27Trovera:
+    """La 2.7 non deve ricostruire niente: il fatto è già sulla riga.
+
+    Questa classe guarda il DATO, non il comportamento sopra. La distinzione
+    conta perché la finestra configurabile della 2.7 non si misura sullo stato
+    — che nel frattempo è passato a `decaduto` — ma sull'istante in cui l'Host
+    ha deciso: senza quello, «riapri dopo N ore dalla decisione» non ha un
+    punto da cui contare, e il rimedio sarebbe una migrazione di dati che
+    nessuna tabella permette più di ricostruire.
+    """
+
+    def test_il_decadimento_non_azzera_l_istante_della_decisione(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        _gestito_poi_decaduto_poi_di_nuovo_sovrapposto(
+            db_session, contesto, server_feed
+        )
+
+        (conflitto,) = conflitti(db_session, contesto)
+
+        assert conflitto.stato is StatoConflitto.DECADUTO
+        assert conflitto.decaduto_il is not None
+        assert conflitto.gestito_il is not None, (
+            "il Conflitto è decaduto e con lui è sparito l'istante in cui "
+            "l'Host aveva deciso: la finestra di riconciliazione della 2.7 "
+            "non ha più un punto da cui misurare"
+        )
+        # E i due istanti restano DISTINTI: `decaduto` e `gestito` sono due
+        # transizioni diverse (AD-5), e SM-C1 misura «quanti Conflitti l'Host
+        # ha davvero risolto» separandole. Sovrascrivere l'uno con l'altro non
+        # romperebbe nulla oggi.
+        assert conflitto.gestito_il < conflitto.decaduto_il
+
+    def test_un_gestito_senza_il_suo_istante_non_e_rappresentabile(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        # Il CHECK, non il commento: quando la 2.7 scriverà `gestito`, il
+        # database rifiuterà una decisione senza il suo quando. Senza questo
+        # vincolo la colonna sarebbe una convenzione, e una convenzione non
+        # sopravvive alla prima `UPDATE` scritta di fretta.
+        crea_manuale(
+            db_session,
+            contesto,
+            check_in=date(2026, 10, 1),
+            check_out=date(2026, 10, 5),
+        )
+        crea_manuale(
+            db_session, contesto, check_in=ARRIVO_MANUALE, check_out=PARTENZA_MANUALE
+        )
+        db_session.commit()
+        (conflitto,) = conflitti(db_session, contesto)
+        conflitto.stato = StatoConflitto.GESTITO
+
+        with pytest.raises(IntegrityError, match="ck_conflitto_gestito_ha_istante"):
+            db_session.commit()
+
+        db_session.rollback()
