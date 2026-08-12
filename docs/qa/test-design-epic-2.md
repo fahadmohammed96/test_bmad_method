@@ -814,9 +814,12 @@ resta a Fahad.
 1. **Tutti gli AC P0 della Story hanno un test verde al livello indicato in §3.** Gli AC
    derivati (`†`) valgono quanto quelli scritti in `epics.md`: sono la metà del piano e sono la
    metà che l'Epic 1 ha imparato a non lasciare implicita.
-2. **CI verde su tutti e cinque i check obbligatori**: `backend`, `frontend`, `e2e`,
-   `api-contract` e **SonarCloud Quality Gate**. Zero test flaky. Una CI rossa — Sonar incluso —
-   non riceve APPROVA.
+2. **CI verde su tutti e otto i check obbligatori**: `backend`, `frontend`, `e2e`,
+   `api-contract`, `base-della-pr`, `copertura`, **SonarCloud Code Analysis** e
+   `verdetto-murat`. Zero test flaky. Una CI rossa — Sonar incluso — non riceve APPROVA.
+   *(Aggiornato il 12/08 con MYL-91: fino a quel giorno `main` era sprotetto e i «cinque check
+   obbligatori» scritti qui erano cinque job di CI senza potere di blocco. Dalle 13:46 del
+   12/08 la branch protection li rende vincolanti — otto, `enforcement_level: non_admins`.)*
 3. **Guardie strutturali verdi**: `test_auth_convention.py` e `test_tenancy_convention.py`
    (esistenti, si auto-arruolano sul modulo `calendario`) più quelle introdotte dalla Story
    secondo §2.6 (GS-1, GS-2, GS-5, GS-6 dalla 2.1; GS-7 dalla 2.3; GS-3 dalla 2.6; GS-4 dalla 2.7). Ogni allowlist
