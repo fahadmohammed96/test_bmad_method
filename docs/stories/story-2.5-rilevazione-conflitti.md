@@ -33,7 +33,7 @@ tracciate, 9 P0). I percorsi dei test sono relativi a `backend/`.
 | 2 | ⚡ Due sovrapposte ⇒ **esattamente un** Conflitto `rilevato`, identità stabile, mai due aperti per la stessa coppia | U + I (**gara A3-4**) | ✅ | `TestAperturaDelConflitto::test_due_manuali_sovrapposte_aprono_un_conflitto`, `::test_rieseguire_la_rilevazione_non_apre_un_secondo_conflitto`, `tests/test_calendario_gara_conflitti.py` (8 contendenti) |
 | 3 | † Coppia **canonicalizzata**, vincolo UNIQUE **parziale nel DB** | U + I | ✅ | U: `TestIdentitaDellaCoppia` (3 test); I: `TestIdentitaImpostaDalDatabase` (3 test) — il secondo prova che la coppia scambiata **non è rappresentabile** (CHECK), che è ciò che rende efficace l'indice |
 | 4 | † Sovrapposizione = intersezione non vuota di intervalli **semiaperti**; il turnover dello stesso giorno **non** è un Conflitto | U | ✅ | `TestConfineDellIntervalloSemiaperto` — 10 casi al confine × 2 ordini + turnover + notte singola; sul percorso reale `TestAperturaDelConflitto::test_il_turnover_dello_stesso_giorno_non_apre_niente` |
-| 5 | Il Conflitto registra **fonte e timestamp di sincronizzazione** di ciascuna Prenotazione | I | ✅ (**derivato alla lettura**, vedi «Scelte di progetto» 1) | `TestFonteEtimestamp` (3 test), `TestApiDeiConflitti::test_i_conflitti_dell_host_con_i_due_lati` |
+| 5 | Il Conflitto **espone fonte e timestamp di sincronizzazione** di ciascuna Prenotazione, derivati alla lettura (AC riformulato il 12/08 con MYL-90) | I | ✅ (**derivato alla lettura**, vedi «Scelte di progetto» 1) | `TestFonteEtimestamp` (3 test), `TestApiDeiConflitti::test_i_conflitti_dell_host_con_i_due_lati` |
 | 6 | Una Prenotazione che esce da `attiva` porta il Conflitto a **`decaduto`** — transizione tracciata, distinta da `gestito`, mai una cancellazione | I + **S** (GS-6) | ✅ | `tests/test_conflitti_decadimento.py::TestLeTreStradeArrivanoAlloStessoEsito` (3 test, una per strada), `TestLeDueMetaDellaCoppia` (F3: la Prenotazione che esce è il **`max`**), `TestEventoInRitardo` (F1: **e solo se è fuori da `attiva` adesso**), `TestTracciaturaEmisura`; GS-6 **irrigidita**: `conflitto` è ora in `TABELLE_PROTETTE` |
 | 7 | `decaduto` alimenta SM-C1 ed è distinguibile da `gestito` **negli eventi di dominio** | I | ✅ | `TestTracciaturaEmisura::test_il_decadimento_e_interrogabile_dagli_eventi_di_dominio` — due tipi distinti a catalogo, payload di soli identificatori |
 | 8 | Un Conflitto `rilevato` resta **in evidenza** finché non è gestito, senza auto-nascondimento a tempo | I (API) + E (2.8) | ✅ per la parte API + guardia strutturale; **E è della 2.8** | `tests/test_conflitti_niente_auto_chiusura.py` (11 test: 4 sentinelle della guardia, 3 anzianità, comportamento) |
@@ -77,6 +77,19 @@ ritorna per ciascun lato `canale`, `aggiornata_il` e `sincronizzata`. **Se quest
 lettura non regge, si corregge una riga di documento adesso, non del codice
 dopo** — ma il test dell'AC 5 non cambierebbe di una virgola, perché asserisce il
 valore mostrato, non dove è memorizzato.
+
+> **Ratificato il 2026-08-12 (MYL-90): opzione A — l'implementazione resta, il
+> documento è stato corretto.** Fahad ha ratificato la raccomandazione, che
+> Amelia e Murat avevano dato in modo indipendente. La parola «registra»
+> dell'AC è stata sostituita in `docs/epics.md` §Story 2.5, e con essa i due
+> riassunti che la ricopiavano (`docs/prd.md` FR-5, `docs/architecture.md`
+> §3.2) più la riga 5 del test design: fonte e timestamp sono **derivati alla
+> lettura** e sempre correnti. Immutata la ratifica §4.2-6 (Prenotazione
+> manuale: fonte «Manuale», timestamp = data di inserimento, con etichetta che
+> dichiara che non è un dato sincronizzato). Il terzo caso deciso qui — Feed
+> mai sincronizzato con successo, timestamp assente — è ora **registrato**
+> nell'AC come comportamento consegnato; la sua resa in UI resta il punto
+> aperto §4.2-3, di Fahad.
 
 ### 2. §4.2-6: la falsa simmetria si evita con un flag, non con un'etichetta
 
