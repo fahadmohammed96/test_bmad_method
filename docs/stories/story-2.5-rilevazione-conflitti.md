@@ -4,7 +4,7 @@ epic: 'Epic 2: Calendario unificato e anti double-booking'
 status: in_review
 created: 2026-08-12
 updated: 2026-08-12
-review: 'in attesa del verdetto di Murat (cross-review code + test)'
+review: 'verdetto BOCCIA del 12/08 — batch F1, F2, F3 + F5 applicato fix-forward sulla stessa PR #62, in attesa del secondo verdetto'
 owner: 'Amelia — Senior Software Engineer (Fase 4)'
 sources:
   - 'docs/epics.md (Story 2.5) + i quattro AC che arrivano con la PR #60 (MYL-69, §4.2-4/5/6), scritti per intero nell''issue MYL-83'
@@ -29,12 +29,12 @@ tracciate, 9 P0). I percorsi dei test sono relativi a `backend/`.
 
 | # | AC (test design) | Livello | Esito | Dove |
 | :---: | --- | :---: | :---: | --- |
-| 1 | La rilevazione è una **funzione pura** dell'insieme `attiva`, rieseguita dopo ogni import e ogni inserimento manuale | U | ✅ | `tests/test_conflitti_rilevazione.py` (21 test, 0,09 s, **nessun import di `Session`/`Engine`/modello**); i due inneschi in `tests/test_conflitti.py::TestAperturaDelConflitto` e `tests/test_conflitti_decadimento.py` |
+| 1 | La rilevazione è una **funzione pura** dell'insieme `attiva`, rieseguita dopo ogni import e ogni inserimento manuale | U | ✅ | `tests/test_conflitti_rilevazione.py` (21 test, 0,09 s, **nessun import di `Session`/`Engine`/modello**). I **due** inneschi hanno ciascuno il suo test: manuale → `::test_due_manuali_sovrapposte_aprono_un_conflitto`; **import** → `::test_e_l_IMPORT_a_rilevare_quando_arriva_la_seconda` (aggiunto col batch, F2) |
 | 2 | ⚡ Due sovrapposte ⇒ **esattamente un** Conflitto `rilevato`, identità stabile, mai due aperti per la stessa coppia | U + I (**gara A3-4**) | ✅ | `TestAperturaDelConflitto::test_due_manuali_sovrapposte_aprono_un_conflitto`, `::test_rieseguire_la_rilevazione_non_apre_un_secondo_conflitto`, `tests/test_calendario_gara_conflitti.py` (8 contendenti) |
 | 3 | † Coppia **canonicalizzata**, vincolo UNIQUE **parziale nel DB** | U + I | ✅ | U: `TestIdentitaDellaCoppia` (3 test); I: `TestIdentitaImpostaDalDatabase` (3 test) — il secondo prova che la coppia scambiata **non è rappresentabile** (CHECK), che è ciò che rende efficace l'indice |
 | 4 | † Sovrapposizione = intersezione non vuota di intervalli **semiaperti**; il turnover dello stesso giorno **non** è un Conflitto | U | ✅ | `TestConfineDellIntervalloSemiaperto` — 10 casi al confine × 2 ordini + turnover + notte singola; sul percorso reale `TestAperturaDelConflitto::test_il_turnover_dello_stesso_giorno_non_apre_niente` |
 | 5 | Il Conflitto registra **fonte e timestamp di sincronizzazione** di ciascuna Prenotazione | I | ✅ (**derivato alla lettura**, vedi «Scelte di progetto» 1) | `TestFonteEtimestamp` (3 test), `TestApiDeiConflitti::test_i_conflitti_dell_host_con_i_due_lati` |
-| 6 | Una Prenotazione che esce da `attiva` porta il Conflitto a **`decaduto`** — transizione tracciata, distinta da `gestito`, mai una cancellazione | I + **S** (GS-6) | ✅ | `tests/test_conflitti_decadimento.py::TestLeTreStradeArrivanoAlloStessoEsito` (3 test, una per strada), `TestTracciaturaEmisura`; GS-6 **irrigidita**: `conflitto` è ora in `TABELLE_PROTETTE` |
+| 6 | Una Prenotazione che esce da `attiva` porta il Conflitto a **`decaduto`** — transizione tracciata, distinta da `gestito`, mai una cancellazione | I + **S** (GS-6) | ✅ | `tests/test_conflitti_decadimento.py::TestLeTreStradeArrivanoAlloStessoEsito` (3 test, una per strada), `TestLeDueMetaDellaCoppia` (F3: la Prenotazione che esce è il **`max`**), `TestEventoInRitardo` (F1: **e solo se è fuori da `attiva` adesso**), `TestTracciaturaEmisura`; GS-6 **irrigidita**: `conflitto` è ora in `TABELLE_PROTETTE` |
 | 7 | `decaduto` alimenta SM-C1 ed è distinguibile da `gestito` **negli eventi di dominio** | I | ✅ | `TestTracciaturaEmisura::test_il_decadimento_e_interrogabile_dagli_eventi_di_dominio` — due tipi distinti a catalogo, payload di soli identificatori |
 | 8 | Un Conflitto `rilevato` resta **in evidenza** finché non è gestito, senza auto-nascondimento a tempo | I (API) + E (2.8) | ✅ per la parte API + guardia strutturale; **E è della 2.8** | `tests/test_conflitti_niente_auto_chiusura.py` (11 test: 4 sentinelle della guardia, 3 anzianità, comportamento) |
 | 9 | † Tre sovrapposte a due a due ⇒ **tre** Conflitti | U | ✅ | `TestUnitaDiRilevazione` (2 test: mutue e catena), I: `::test_tre_sovrapposte_a_due_a_due_aprono_tre_conflitti` |
@@ -105,6 +105,15 @@ segnalata, con esito riuscito e quindi in silenzio.
 Il costo di questa scelta è dichiarato sotto, in «Voci aperte»: una
 sovrapposizione che cessa **senza** che nessuna delle due Prenotazioni esca da
 `attiva` (il portale sposta le date) oggi non fa decadere niente.
+
+**E la simmetrica, chiusa col batch (F1).** Il decadimento non si fida
+dell'evento: la `UPDATE` chiede anche che la Prenotazione sia fuori da `attiva`
+**adesso**. La consegna è asincrona e il percorso di ritorno esiste — una
+`cancellata` che il portale ritira torna `attiva`, perché la clausola che
+blocca il ritorno nell'upsert protegge solo `rimossa_dal_feed` — quindi un
+evento in ritardo racconta un fatto che era vero quando è stato scritto e non
+lo è più quando lo si consuma. Non è idempotenza: è **staleness**, e sono due
+proprietà diverse che si difendono in due punti diversi della stessa `WHERE`.
 
 ### 4. Il vincolo di identità è due cose, e separarle lo annullerebbe
 
@@ -211,6 +220,27 @@ L'elenco chiuso di §2.5 non ammette un e2e per la rilevazione dei Conflitti
 («qualunque asserzione di regola di dominio già coperta al livello sotto»), e la
 superficie che li mostrerà è della 2.7/2.8. Nessuno spec nuovo, nessuna
 estensione dei baseline: non c'è ancora niente da guardare nel browser.
+
+### D — I P2 del verdetto, non nel batch
+
+Murat li ha esclusi dal batch e non li ho toccati: la decisione è di Fahad.
+Li registro qui perché non si perdano fra un commento e l'altro.
+
+- **F4 — il decadimento cancella la memoria del `gestito`.** Portando a
+  `decaduto` anche un Conflitto `gestito`, la guardia anti-riapertura di `apri`
+  (`WHERE NOT EXISTS … stato = 'gestito'`) non vede più niente, e la rilevazione
+  successiva aprirebbe un `rilevato` nuovo senza la finestra configurabile e
+  senza il collegamento al precedente che la 2.7 AC 5 richiede. **Latente oggi**
+  (nessun percorso scrive `gestito`), trappola certa per chi implementa la 2.7.
+- **F6 — la guardia anti-riapertura non ha test**, perché nessun test della
+  suite può scrivere `gestito` senza violare l'invariante di AC 8. Arriva con la
+  2.7, insieme al percorso che la rende esercitabile.
+- **F7 — ordine di merge**: la PR #60 porta negli AC i quattro requisiti che
+  questa PR implementa ed è **ancora aperta**. Mergiare la #62 prima
+  lascerebbe su `main` il codice senza il contratto che lo giustifica.
+- **F8 — la guardia AST riconosce `StatoConflitto` per nome**: un
+  `import … as SC` o una `UPDATE` in SQL testuale le passerebbero sotto. È un
+  limite dichiarato del suo dominio, non un difetto.
 
 ## Dev Agent Record
 
@@ -355,6 +385,56 @@ quasi ogni scenario — e la colonna avrebbe smesso di significare ciò che il s
 nome dice, su una tabella append-only che nessuno riscrive. Le due liste sono
 tornate separate: il `sync_run` conta le scomparse, l'evento le racconta tutte.
 
+### Batch di correzione dopo il verdetto BOCCIA del 12/08
+
+Murat ha riprodotto la suite (824 passed) e poi ha mutato il codice: **8
+mutazioni, 6 catturate, 2 sopravvissute**. Le due sopravvissute sono la parte
+che conta, perché nessuna di esse era visibile leggendo i test.
+
+Applicato **fix-forward sulla stessa PR #62**, non su un ramo separato: la PR
+non è mergiata, quindi un secondo ramo dipenderebbe da codice che non esiste su
+`main` e Murat rivedrebbe due diff per una Story sola.
+
+| # | Finding | Cosa era | Cosa è ora |
+| :---: | --- | --- | --- |
+| **F1** | *correttezza* — un evento consegnato in ritardo spegne un Conflitto vivo | L'handler faceva decadere senza chiedere se la Prenotazione fosse ancora fuori da `attiva` **adesso** | `~ancora_attiva` dentro la `UPDATE` di `decadi_per_prenotazione` |
+| **F2** | *copertura* — l'AC 1 «quando termina un import» senza test | Ogni allestimento creava la manuale **dopo** il sync: il Conflitto lo apriva sempre il percorso manuale | `TestAperturaDelConflitto::test_e_l_IMPORT_a_rilevare_quando_arriva_la_seconda` |
+| **F3** | *copertura* — il lato `max` della coppia mai esercitato | `uuidv7` è monotono ⇒ la Prenotazione creata per prima è **sempre** il `min`, e tutte e tre le strade cancellavano quella | `TestLeDueMetaDellaCoppia`, che fa uscire la **seconda** e asserisce esplicitamente il lato |
+| **F5** | *codice morto* — `ConflittoRepository.by_id` senza chiamanti | E2-F23 riaperto nella stessa PR che lo chiude | rimosso |
+
+**F1 riprodotto prima di essere corretto** (regola del 27/07). Il rosso, sul
+codice consegnato:
+
+```
+AssertionError: un evento consegnato in ritardo ha spento un Conflitto fra due
+Prenotazioni ancora `attiva` e ancora sovrapposte (stato: StatoConflitto.DECADUTO)
+```
+
+L'allestimento è il percorso reale, non una forzatura: il portale annulla
+(evento scritto, **non ancora consegnato** — è la finestra in cui vive il
+difetto), poi ritira l'annullamento e la Prenotazione torna `attiva`. Il
+secondo test della classe guarda ciò che resta a valle anche dopo che la
+rilevazione successiva ha risanato lo stato: `outbox` è append-only, e un
+`conflitto.decaduto` di troppo nella 2.6 è una seconda notifica per lo stesso
+fatto.
+
+**Le tre mutazioni, dopo il batch** — perimetro Conflitti + sync, 146 test:
+
+| Mutazione | Prima | Ora |
+| --- | :---: | --- |
+| Decadimento cercato solo nella colonna `min` (M3 di Murat) | sopravvissuta | **1 failed** — `TestLeDueMetaDellaCoppia::test_decade_anche_quando_la_prenotazione_e_il_lato_max` |
+| Rilevazione tolta da `esegui_sync` (M5 di Murat) | sopravvissuta | **1 failed** — `TestAperturaDelConflitto::test_e_l_IMPORT_a_rilevare_quando_arriva_la_seconda` |
+| Condizione «ancora attiva» rimossa dal decadimento (il rimedio di F1) | — | **2 failed** — entrambi i test di `TestEventoInRitardo` |
+
+**Un test esistente è stato corretto, non adattato.**
+`test_un_conflitto_decaduto_non_impedisce_di_riaprirne_uno` faceva decadere un
+Conflitto fra due Prenotazioni **ancora `attiva`**: uno stato che il prodotto
+non produce, e che dopo F1 non è più raggiungibile. L'allestimento ora esegue
+la transizione prima del decadimento. Se avessi allentato il rimedio per farlo
+passare, avrei riaperto F1 dalla porta di servizio.
+
+Suite completa dopo il batch: **828 passed** (824 + 4 test nuovi).
+
 ### Note di consegna
 
 - CI e Sonar verdi prima della richiesta di verdetto (regola del 25/07): la PR è
@@ -370,3 +450,4 @@ tornate separate: il `sync_run` conta le scomparse, l'evento le racconta tutte.
 | Data | Cosa |
 | --- | --- |
 | 2026-08-12 | Prima stesura completa: funzione pura, tabella `conflitto` + migrazione 0015, apertura atomica, decadimento per evento con le tre strade di MYL-69, `GET /api/v1/conflitti`, gara A3-4, guardia anti-auto-chiusura, GS-2/GS-6/GS-7 aggiornate. Consegnata per il verdetto di Murat. |
+| 2026-08-12 | **Verdetto BOCCIA** (2 mutazioni sopravvissute su 8). Batch fix-forward sulla stessa PR: **F1** staleness del decadimento (riprodotto rosso, poi corretto dentro la `UPDATE`), **F2** test dell'innesco «import», **F3** test del lato `max` della coppia, **F5** rimozione di `by_id` senza chiamanti. F4, F6, F7, F8 restano a Fahad. 828 test verdi. |
