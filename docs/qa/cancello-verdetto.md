@@ -1,6 +1,9 @@
 # Il cancello del verdetto — `verdetto-murat`
 
 _MYL-73 · 30/07/2026 · Murat, Test Architect_
+_Aggiornato il 12/08/2026 (MYL-97): il cancello è vincolante, vedi l'ultima
+sezione. Le parti che lo davano per «informativo» erano false dalle 13:46 del
+12/08 e sono state corrette in loco, non affiancate._
 
 ## Da dove nasce
 
@@ -146,9 +149,9 @@ allargato i permessi da solo.
 
 **Il permesso c'è dal 2026-08-12**, verificato non con una prova sintetica ma
 con il primo verdetto vero (sopra): `POST /statuses/{sha}` accettato, `201`,
-rilettura `verde`. Con il limite 1 caduto, il **punto 2** di «Cosa manca» —
-rendere `verdetto-murat` un check obbligatorio — non ha più un prerequisito
-tecnico: è solo la decisione di Fahad.
+rilettura `verde`. Caduto il limite 1, restava solo la decisione di Fahad sul
+**punto 2** — rendere `verdetto-murat` un check obbligatorio. **È stata presa
+alle 13:46 dello stesso giorno**: vedi «Il cancello è vincolante» qui sotto.
 
 ### 2. Un account non può approvare le proprie PR
 
@@ -181,24 +184,62 @@ SHA), non dalla fortuna. È l'argomento più forte a favore dello stato di commi
 rispetto a qualunque presidio che ragioni «sulla PR».
 `test_la_head_in_ritardo_non_apre_il_cancello_sulla_head_vera` lo tiene fermo.
 
-## Cosa manca, e spetta all'umano
+## Il cancello è vincolante — dalle 13:46 del 2026-08-12
 
-Il meccanismo esiste; **renderlo vincolante no**, ed è deliberato: la
-protezione del ramo riguarda anche i merge di Fahad.
+Fino a quel momento questo documento chiudeva dicendo che il cancello era
+**informativo** e che «un merge su uno SHA senza verdetto è ancora possibile».
+Da quell'ora **è falso**, e la riga qui sotto è la correzione: Fahad ha acceso la
+protezione del ramo su `main`.
+
+Non lo deduco dalla comunicazione della decisione — lo interrogo, che è la
+lezione stessa di questo documento. `GET /repos/{o}/{r}/branches/main`:
+
+```
+protected: true
+required_status_checks.enforcement_level: non_admins
+contexts: backend, frontend, e2e, api-contract, base-della-pr,
+          copertura, SonarCloud Code Analysis, verdetto-murat
+```
+
+E il cancello si verifica **rompendo ciò che difende**: sulle PR aperte il
+12/08, quelle senza lo stato sullo SHA non sono mergiabili — non «segnalate»,
+non mergiabili.
+
+| PR | `verdetto-murat` sullo SHA | `mergeable_state` |
+|---|---|---|
+| #64, #65, #67, #68 | `success` | `clean` |
+| #63, #66 | **assente** | `blocked` |
+
+Due conseguenze operative, entrambe già viste sul campo:
+
+- **Un push richiude il cancello.** Lo stato è legato allo SHA, quindi un
+  verdetto «vecchio di un push» non vale più e la PR torna `blocked` da sola.
+- **Approvare sul thread di Multica non basta più.** La PR #66 era approvata a
+  voce e `blocked` in GitHub, perché lo stato non era stato pubblicato: il
+  verdetto esiste per chi mergia solo se sta sul commit.
+
+### Cosa resta all'umano
 
 1. ~~Concedere al token degli agenti il permesso di scrittura sugli **stati di
    commit** (limite 1).~~ **Fatto: verificato il 2026-08-12 sulla PR #60.**
-2. Rendere `verdetto-murat` un **check obbligatorio** nella branch protection di
-   `main` (Settings → Branches → `main` → *Require status checks to pass*).
-   Da quel momento una PR senza verdetto sullo SHA corrente non è mergiabile.
-3. Valutare, insieme, *Require branches to be up to date before merging*: è la
-   condizione che avrebbe intercettato anche la collisione di migrazioni che ha
-   lasciato `main` rosso il 30/07, in cui due PR verdi separatamente hanno
-   prodotto un `main` rotto una volta unite.
+2. ~~Rendere `verdetto-murat` un **check obbligatorio** nella branch protection
+   di `main`.~~ **Fatto alle 13:46 del 2026-08-12, misurato qui sopra.**
+3. *Require branches to be up to date before merging* — la condizione che
+   avrebbe intercettato la collisione di migrazioni che ha lasciato `main`
+   rosso il 30/07, in cui due PR verdi separatamente hanno prodotto un `main`
+   rotto una volta unite. Risulta **attivata insieme al resto**, ma è l'unica
+   voce che **non ho potuto misurare**: sta solo in `/branches/main/protection`,
+   che risponde `403` al token degli agenti. Resta agli atti di Fahad, non a una
+   mia verifica — e finché è così va letta come dichiarata, non come provata.
 
-Finché il punto 2 non è fatto, il cancello è **informativo**: comparirà sulla
-pagina della PR, ma non impedirà nulla. **Dal 2026-08-12 il punto 2 è l'unica
-cosa che separa il verdetto dall'essere vincolante**: il prerequisito tecnico
-(punto 1) è caduto, e sulla PR #60 il pallino `verdetto-murat` è comparso verde
-accanto agli altri sette check. Oggi un merge su uno SHA senza verdetto è
-ancora possibile — visibile, ma possibile.
+Due riserve che il documento deve portare esplicite, perché «vincolante» non
+vuol dire «inaggirabile»:
+
+- `enforcement_level: non_admins`: **Fahad, come amministratore, può mergiare
+  oltre il cancello.** È una via di fuga lasciata aperta di proposito, non una
+  falla — ma un merge senza verdetto resta possibile per lui, e questo documento
+  non deve far credere il contrario.
+- *Require approvals* è **spenta di proposito**: le PR degli agenti risultano
+  aperte dal token di Fahad e GitHub vieta di approvare una PR propria
+  (limite 2), quindi obbligarla bloccherebbe ogni merge. È la stessa causa che
+  degrada le review formali in review di tipo `COMMENT`.
