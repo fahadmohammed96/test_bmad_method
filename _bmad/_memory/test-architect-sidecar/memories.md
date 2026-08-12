@@ -167,3 +167,21 @@ _Fatti durevoli e decisioni apprese durante il progetto HostPilot. Un fatto per 
   #53). Nessun cancello di PR può vedere questa classe di difetto, perché nasce dall'**unione**
   di due rami sani. I presidi sono due, entrambi da attivare: *Require branches to be up to
   date before merging* e una guardia che imponga un'unica head Alembic.
+- 2026-08-12 — **Il permesso `statuses: write` c'è: il cancello `verdetto-murat` è in
+  servizio.** La voce del 30/07 qui sopra è **superata**: sulla PR #60 (SHA `9857aac`) il
+  primo verdetto non di prova è stato pubblicato e riletto `verde`, `POST /statuses/{sha}`
+  accettato. Resta aperto **solo** il punto 2 di `docs/qa/cancello-verdetto.md` (renderlo un
+  check obbligatorio in branch protection), che è una decisione di Fahad, non un limite
+  tecnico. Da riusare: un limite d'ambiente registrato in un documento **non scade da solo**
+  quando l'ambiente cambia — se non lo rilegge chi lo ha scritto, resta lì a dire «non si può
+  fare» e blocca una decisione umana che nessuno sa più di poter prendere. Il momento in cui
+  lo strumento funziona per la prima volta è il momento in cui si aggiorna il documento.
+- 2026-08-12 — **Una ratifica che riguarda due Story va scritta in tutte e due.** La PR #60
+  ha portato negli AC la ratifica di test design §4.2-6 (una Prenotazione manuale non ha un
+  timestamp di sync: fonte = Canale «Manuale», timestamp = data d'inserimento, **con etichetta
+  che dichiara che non è un dato sincronizzato**). Il dato è della 2.5, l'etichetta è della
+  2.7: scritta solo nella 2.5, chi implementa la 2.7 legge i propri AC e non la vede — e la
+  Finestra di riconciliazione mostra due colonne simmetriche di cui una mente. Stessa forma
+  del difetto MYL-69 che avevo isolato io (un fatto che vale per tre strade, implementato su
+  una): quando una decisione tocca **N** siti, il controllo di review è contare i siti nel
+  documento, non rileggere il testo del sito che si ha davanti.
