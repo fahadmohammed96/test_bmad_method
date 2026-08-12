@@ -910,7 +910,31 @@ class ConflittoRepository:
         La coppia non è ordinata: la Prenotazione può essere il `min` o il
         `max`, e cercare in una sola delle due colonne lascerebbe metà dei
         Conflitti accesi su una Prenotazione che non esiste più.
+
+        **La Prenotazione deve essere fuori da `attiva` ADESSO** (F1). Non è
+        una ripetizione dell'idempotenza, che regge da sola: è la difesa
+        contro un fatto **vero quando è stato scritto e falso quando lo si
+        consuma**. La consegna è asincrona, e fra le due cose lo stato può
+        essere tornato indietro — una `cancellata` che il portale ritira
+        torna `attiva`, perché la clausola che blocca il ritorno nell'upsert
+        protegge solo `rimossa_dal_feed`. Senza questa condizione un evento
+        in ritardo spegne un Conflitto fra due Prenotazioni ancora vive e
+        ancora sovrapposte: l'AC 11 dal lato opposto, con un
+        `conflitto.decaduto` di troppo che `outbox` conserva per sempre.
+
+        Sta **dentro** la `UPDATE` per la stessa ragione di tutto il resto in
+        questo modulo: fuori sarebbe un check-then-write, e la rilevazione
+        che riporta `attiva` la Prenotazione gira in un'altra transazione.
         """
+        ancora_attiva = (
+            select(Prenotazione.id)
+            .where(
+                Prenotazione.host_id == host_id,
+                Prenotazione.id == prenotazione_id,
+                Prenotazione.stato == StatoPrenotazione.ATTIVA,
+            )
+            .exists()
+        )
         istruzione = (
             update(Conflitto)
             .where(
@@ -923,6 +947,7 @@ class ConflittoRepository:
                 # entrambi — una sovrapposizione che cessa dopo che l'Host
                 # l'ha gestita è comunque cessata.
                 Conflitto.stato != StatoConflitto.DECADUTO,
+                ~ancora_attiva,
             )
             .values(stato=StatoConflitto.DECADUTO, decaduto_il=adesso)
             .returning(Conflitto.id, Conflitto.struttura_id)
@@ -959,12 +984,10 @@ class ConflittoRepository:
             )
         )
 
-    def by_id(self, host_id: uuid.UUID, conflitto_id: uuid.UUID) -> Conflitto | None:
-        return self._db.scalars(
-            select(Conflitto).where(
-                Conflitto.host_id == host_id, Conflitto.id == conflitto_id
-            )
-        ).one_or_none()
+    # Qui c'era un `by_id` senza chiamanti, in `app/` come in `tests/`: E2-F23
+    # riaperto nella stessa PR che lo chiude, e nella stessa forma. È stato
+    # rimosso invece di essere «tenuto per la 2.7»: un metodo di repository
+    # arriva con il percorso che lo usa, o non arriva.
 
 
 class AzzeramentoAuditRepository:

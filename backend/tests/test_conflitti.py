@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.calendario import service
 from app.calendario.models import CanaleFeed, Conflitto, StatoConflitto
-from app.calendario.repository import ConflittoRepository
+from app.calendario.repository import ConflittoRepository, PrenotazioneRepository
 from app.core.date_range import utcnow
 from tests.calendario import (
     Contesto,
@@ -29,6 +29,7 @@ from tests.calendario import (
     crea_manuale,
     crea_prenotazione,
     crea_struttura,
+    prenotazioni,
     sincronizza,
     vevent,
 )
@@ -113,6 +114,50 @@ class TestAperturaDelConflitto:
             db_session.commit()
 
         assert len(_rilevati(db_session, contesto)) == 1
+
+    def test_e_l_IMPORT_a_rilevare_quando_arriva_la_seconda(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        """AC 1, metà «quando termina un import» (F2).
+
+        L'ordine è il test. Ogni altro caso di questa suite crea la manuale
+        **dopo** il sync, quindi al termine dell'import la sovrapposizione non
+        esiste ancora e il Conflitto lo apre sempre il percorso manuale: la
+        rilevazione dentro `esegui_sync` si poteva togliere e 142 test
+        restavano verdi. Qui la manuale c'è già e la seconda Prenotazione
+        arriva dal portale — che è il trigger più frequente nella vita reale,
+        perché le prenotazioni arrivano dai portali.
+        """
+        manuale = crea_manuale(
+            db_session, contesto, check_in=PRIMO_ARRIVO, check_out=PRIMA_PARTENZA
+        )
+        assert conflitti(db_session, contesto) == []
+
+        url = server_feed.prepara(
+            "/calendario.ics",
+            RispostaPreparata(
+                corpo=corpo_ical(
+                    vevent("in-arrivo@example.com", dal="20261004", al="20261008")
+                )
+            ),
+        )
+        feed = collega(db_session, contesto, url)
+        sincronizza(db_session, feed, client())
+
+        aperti = _rilevati(db_session, contesto)
+        assert len(aperti) == 1, (
+            "l'import è terminato con una sovrapposizione e non ha rilevato "
+            "niente: è il trigger dell'AC 1 che nessun altro test esercita"
+        )
+        da_feed = next(
+            riga
+            for riga in prenotazioni(db_session, feed)
+            if riga.ical_uid == "in-arrivo@example.com"
+        )
+        assert {aperti[0].prenotazione_min_id, aperti[0].prenotazione_max_id} == {
+            manuale.id,
+            da_feed.id,
+        }
 
     def test_tre_sovrapposte_a_due_a_due_aprono_tre_conflitti(
         self, db_session: Session, contesto: Contesto
@@ -253,6 +298,14 @@ class TestIdentitaImpostaDalDatabase:
             prenotazione_min_id=minore,
             prenotazione_max_id=maggiore,
             adesso=utcnow(),
+        )
+        # La transizione PRIMA del decadimento, e non è cerimonia: dal fix di
+        # F1 un Conflitto decade solo se la Prenotazione è davvero fuori da
+        # `attiva` adesso. L'allestimento precedente decadeva un Conflitto fra
+        # due Prenotazioni vive — cioè costruiva uno stato che il prodotto non
+        # produce, ed è esattamente il difetto che F1 ha chiuso.
+        PrenotazioneRepository(db_session).marca_cancellata(
+            contesto.host_id, prenotazione_id=prima.id, adesso=utcnow()
         )
         conflitti_repo.decadi_per_prenotazione(
             contesto.host_id, prenotazione_id=prima.id, adesso=utcnow()

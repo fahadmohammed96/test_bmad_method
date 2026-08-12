@@ -159,6 +159,51 @@ class TestLeTreStradeArrivanoAlloStessoEsito:
         assert conflitto.stato is StatoConflitto.DECADUTO
 
 
+class TestLeDueMetaDellaCoppia:
+    """F3: la Prenotazione che esce può essere il `min` **o** il `max`.
+
+    La coppia è canonicalizzata per identificatore, e `uuidv7` è monotono nel
+    tempo: **la Prenotazione creata per prima è sempre il `min`**. Tutte e tre
+    le strade di questo file cancellano la prima creata, quindi la colonna
+    `max` non era il lato che esce in nessun test della suite — e riducendo il
+    predicato di `decadi_per_prenotazione` alla sola `prenotazione_min_id`
+    restavano 142 test verdi.
+
+    Un ordine di creazione che sembra irrilevante fissa quale metà del codice
+    viene esercitata. Qui esce la **seconda**, e l'asserzione sul lato è
+    esplicita: senza, un cambio di generazione delle chiavi riporterebbe il
+    test a esercitare di nuovo il `min` senza che nessuno se ne accorga.
+    """
+
+    def test_decade_anche_quando_la_prenotazione_e_il_lato_max(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        crea_manuale(
+            db_session,
+            contesto,
+            check_in=date(2026, 10, 1),
+            check_out=date(2026, 10, 5),
+        )
+        seconda = crea_manuale(
+            db_session, contesto, check_in=ARRIVO_MANUALE, check_out=PARTENZA_MANUALE
+        )
+        (conflitto,) = conflitti(db_session, contesto)
+        assert conflitto.prenotazione_max_id == seconda.id, (
+            "l'allestimento non esercita il lato che deve: la Prenotazione "
+            "che sta per uscire non è il `max` della coppia"
+        )
+
+        service.cancella_prenotazione(db_session, contesto.host_id, seconda.id)
+        consegna_eventi(db_session)
+
+        (conflitto,) = conflitti(db_session, contesto)
+        assert conflitto.stato is StatoConflitto.DECADUTO, (
+            "la Prenotazione uscita da `attiva` era il `max` della coppia e il "
+            "Conflitto è rimasto acceso: metà del predicato non è presidiata"
+        )
+        assert conflitto.decaduto_il is not None
+
+
 class TestUnaVoltaSola:
     """L'evento si emette alla TRANSIZIONE, non a ogni sync."""
 
@@ -240,6 +285,85 @@ class TestUnaVoltaSola:
         (conflitto,) = conflitti(db_session, contesto)
         assert conflitto.decaduto_il == decaduto_il
         assert _eventi(db_session, service.EVENTO_CONFLITTO_DECADUTO) == 1
+
+
+class TestEventoInRitardo:
+    """F1: un fatto vero quando è stato scritto, e falso quando lo si consuma.
+
+    Non è un problema di idempotenza — quella regge, ed è provata sopra. È
+    **staleness**: la consegna è asincrona (AD-10), e fra la scrittura
+    dell'evento e la sua consegna lo stato può essere tornato indietro. Il
+    percorso di ritorno esiste ed è reale: nell'upsert la clausola che
+    protegge lo stato copre solo `rimossa_dal_feed`, quindi una `cancellata`
+    che il portale **ritira** torna `attiva` (test design §4.2-2 riguarda il
+    ritorno da `rimossa_dal_feed`, non questo).
+
+    L'effetto è l'AC 11 dal lato opposto: un Conflitto che si spegne da solo
+    su una doppia prenotazione ancora in piedi. Si risana alla rilevazione
+    successiva, ma dentro quella finestra l'Host vede pulito — e a valle
+    restano un `conflitto.decaduto` e un `conflitto.rilevato` di troppo, che
+    nella 2.6 sono una seconda notifica per lo stesso fatto e in SM-C1 sono
+    rumore.
+    """
+
+    def _prenotazione_che_torna(
+        self, db: Session, contesto: Contesto, server: ServerFeed
+    ):
+        """Il portale annulla e poi ritira l'annullamento, senza consegne."""
+        feed = _con_conflitto_da_feed(db, contesto, server)
+        server.prepara(
+            PERCORSO,
+            RispostaPreparata(
+                corpo=corpo_ical(
+                    vevent(UID, dal=DAL, al=AL, extra="STATUS:CANCELLED\r\n")
+                )
+            ),
+        )
+        sincronizza(db, feed, client())
+        # L'evento è scritto ma NON consegnato: è la finestra in cui vive il
+        # difetto, ed è la finestra reale — il worker consegna al tick
+        # successivo, non nello stesso istante.
+        assert _eventi(db, service.EVENTO_PRENOTAZIONE_CESSATA) == 1
+
+        server.prepara(
+            PERCORSO,
+            RispostaPreparata(corpo=corpo_ical(vevent(UID, dal=DAL, al=AL))),
+        )
+        sincronizza(db, feed, client())
+        tornata = next(riga for riga in prenotazioni(db, feed) if riga.ical_uid == UID)
+        assert tornata.stato is StatoPrenotazione.ATTIVA, (
+            "l'allestimento non riproduce il caso: la Prenotazione doveva "
+            "tornare `attiva` quando il portale ritira l'annullamento"
+        )
+        return feed
+
+    def test_un_evento_in_ritardo_non_spegne_un_conflitto_ancora_vivo(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        self._prenotazione_che_torna(db_session, contesto, server_feed)
+
+        consegna_eventi(db_session)
+
+        (conflitto,) = conflitti(db_session, contesto)
+        assert conflitto.stato is StatoConflitto.RILEVATO, (
+            "un evento consegnato in ritardo ha spento un Conflitto fra due "
+            "Prenotazioni ancora `attiva` e ancora sovrapposte "
+            f"(stato: {conflitto.stato})"
+        )
+        assert conflitto.decaduto_il is None
+
+    def test_un_evento_in_ritardo_non_produce_eventi_di_conflitto(
+        self, db_session: Session, contesto: Contesto, server_feed: ServerFeed
+    ) -> None:
+        # La metà che si vede a valle: il decadimento sbagliato si risana alla
+        # rilevazione successiva, ma `outbox` è append-only e i due eventi di
+        # troppo restano — una seconda notifica nella 2.6, rumore in SM-C1.
+        self._prenotazione_che_torna(db_session, contesto, server_feed)
+
+        consegna_eventi(db_session)
+
+        assert _eventi(db_session, service.EVENTO_CONFLITTO_DECADUTO) == 0
+        assert _eventi(db_session, service.EVENTO_CONFLITTO_RILEVATO) == 1
 
 
 class TestTracciaturaEmisura:
