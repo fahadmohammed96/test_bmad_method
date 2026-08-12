@@ -54,7 +54,9 @@ def canali_da_servire(preferito: CanaleNotifica) -> tuple[CanaleConsegna, ...]:
     Quello che la preferenza governa davvero è ciò che esce dal prodotto e
     arriva addosso all'Host: con `in_app` scelto, nessuna email parte.
     """
-    return (CanaleConsegna.IN_APP, CanaleConsegna.EMAIL)
+    if preferito is CanaleNotifica.EMAIL:
+        return (CanaleConsegna.IN_APP, CanaleConsegna.EMAIL)
+    return (CanaleConsegna.IN_APP,)
 
 
 def richiedi(

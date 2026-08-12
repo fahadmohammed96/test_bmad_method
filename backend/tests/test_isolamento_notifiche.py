@@ -45,6 +45,15 @@ class TestLaGuardiaSulCanale:
         assert not issubclass(TentativoDiInvioReale, Exception)
         assert not issubclass(TentativoDiInvioReale, ConsegnaFallitaError)
 
+    def test_senza_niente_installato_si_ricade_sul_canale_di_produzione(
+        self,
+    ) -> None:
+        # Il registro non è un elenco di canali obbligatori: è un innesto. Se
+        # nessuno installa niente — cioè in produzione — si prende quello
+        # vero, che senza SMTP configurato fallisce in modo esplicito.
+        canali.rimuovi(CanaleConsegna.EMAIL)
+        assert isinstance(canali.per(CanaleConsegna.EMAIL), CanaleEmailNonConfigurato)
+
     def test_il_canale_in_app_resta_disponibile(self) -> None:
         # La guardia riguarda ciò che ESCE dal prodotto: bloccare anche
         # l'in-app la renderebbe inservibile, perché quella consegna è una

@@ -52,6 +52,9 @@ def upgrade() -> None:
         sa.Column("creata_il", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["host_id"], ["host.id"]),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "host_id", "tipo", "riferimento_id", name="uq_notifica_per_riferimento"
+        ),
     )
     op.create_index("ix_notifica_host_id", "notifica", ["host_id"])
 
@@ -73,6 +76,9 @@ def upgrade() -> None:
             name="ck_notifica_consegna_inviata_ha_istante",
         ),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "notifica_id", "canale", name="uq_notifica_consegna_per_canale"
+        ),
     )
     op.create_index("ix_notifica_consegna_host_id", "notifica_consegna", ["host_id"])
     op.create_index(

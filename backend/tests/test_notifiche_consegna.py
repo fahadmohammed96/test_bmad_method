@@ -478,3 +478,51 @@ class TestPreferenzeIgnorate:
         in_app = consegna_su(db_session, contesto.host_id, CanaleConsegna.IN_APP)
         assert in_app is not None
         assert in_app.stato is StatoConsegna.INVIATA
+
+
+class TestConfiniDiTenancy:
+    """NFR-14, AD-2: una consegna vale solo dentro il suo Host."""
+
+    def test_una_consegna_inesistente_solleva_invece_di_tacere(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        import uuid
+
+        from app.notifiche import service as notifiche_service
+
+        with pytest.raises(notifiche_service.ConsegnaNonTrovataError):
+            notifiche_service.consegna(db_session, contesto.host_id, uuid.uuid4())
+
+    def test_la_notifica_di_un_altro_host_non_e_leggibile(
+        self, db_session: Session, contesto: Contesto
+    ) -> None:
+        # Il job porta `host_id` e `consegna_id`: se la lettura della notifica
+        # non fosse scopata all'Host, un `host_id` sbagliato comporrebbe il
+        # testo sui dati di qualcun altro. Qui la riga non si trova, e il
+        # percorso si ferma invece di raccontare il Conflitto di un estraneo.
+        import uuid
+
+        from app.cablaggio import TIPO_NOTIFICA_CONFLITTO_RILEVATO
+        from app.notifiche import service as notifiche_service
+        from app.notifiche.models import NotificaConsegna
+        from app.notifiche.repository import ConsegnaRepository, NotificaRepository
+        from tests.calendario import crea_host
+
+        notifica_id = NotificaRepository(db_session).apri(
+            contesto.host_id,
+            tipo=TIPO_NOTIFICA_CONFLITTO_RILEVATO,
+            riferimento_id=uuid.uuid4(),
+            adesso=utcnow(),
+        )
+        assert notifica_id is not None
+        estraneo = crea_host(db_session, "estraneo@example.com")
+        intrusa = ConsegnaRepository(db_session).aggiungi(
+            estraneo.id, notifica_id=notifica_id, canale=CanaleConsegna.IN_APP
+        )
+        db_session.commit()
+
+        with pytest.raises(notifiche_service.NotificaNonTrovataError):
+            notifiche_service.consegna(db_session, estraneo.id, intrusa.id)
+        riga = db_session.get(NotificaConsegna, intrusa.id)
+        assert riga is not None
+        assert riga.stato is StatoConsegna.IN_ATTESA

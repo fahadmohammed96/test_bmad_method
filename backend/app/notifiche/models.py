@@ -37,6 +37,7 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -80,6 +81,20 @@ class Notifica(Base):
     """Una notifica dovuta all'Host, identificata dal fatto che l'ha generata."""
 
     __tablename__ = "notifica"
+    __table_args__ = (
+        # L'identità della notifica, imposta dal DATABASE. «Alla PRIMA
+        # rilevazione, non a ogni sync» (AC 2) è un check-then-write: due
+        # consegne concorrenti di `conflitto.rilevato`, o un secondo sync che
+        # rileva lo stesso Conflitto, passerebbero entrambe un controllo
+        # applicativo. Qui la seconda `INSERT` non tocca niente.
+        #
+        # UNIQUE PIENO e non parziale, al contrario di `conflitto`: lì la
+        # stessa coppia può tornare a sovrapporsi e un secondo Conflitto è
+        # legittimo; qui il riferimento È il Conflitto, che è già unico.
+        UniqueConstraint(
+            "host_id", "tipo", "riferimento_id", name="uq_notifica_per_riferimento"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
     host_id: Mapped[uuid.UUID] = mapped_column(
@@ -106,6 +121,12 @@ class NotificaConsegna(Base):
 
     __tablename__ = "notifica_consegna"
     __table_args__ = (
+        # Un canale servito una volta sola per notifica. È il vincolo che
+        # rende impossibile la seconda email allo stesso Host per lo stesso
+        # fatto anche se la richiesta viene rieseguita.
+        UniqueConstraint(
+            "notifica_id", "canale", name="uq_notifica_consegna_per_canale"
+        ),
         # Nessuno stato di successo senza il suo istante, e nessun istante
         # senza lo stato: l'implicazione vale nei due sensi, come per
         # `conflitto.decaduto_il`. Una consegna «inviata» senza quando è un

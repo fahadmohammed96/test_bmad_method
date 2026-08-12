@@ -80,9 +80,6 @@ class CompositoriNotifica:
                 "(AD-17) e la notifica non avrebbe testo"
             ) from None
 
-    def tipi(self) -> tuple[str, ...]:
-        return tuple(self._compositori)
-
 
 # Registro di produzione: la radice di composizione registra qui all'avvio del
 # worker, con lo stesso effetto-di-import degli handler di job.

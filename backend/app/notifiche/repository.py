@@ -21,7 +21,8 @@ invisibile allo stato persistito e visibile solo a valle.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.db import new_uuid7
@@ -53,38 +54,27 @@ class NotificaRepository:
         così che «alla prima rilevazione, non a ogni sync» smette di essere
         una promessa del codice.
         """
-        # Prima stesura: si guarda se esiste, e se non esiste si scrive.
-        esistente = self.per_riferimento(
-            host_id, tipo=tipo, riferimento_id=riferimento_id
+        nuovo_id = new_uuid7()
+        istruzione = (
+            pg_insert(Notifica)
+            .values(
+                id=nuovo_id,
+                host_id=host_id,
+                tipo=tipo,
+                riferimento_id=riferimento_id,
+                creata_il=adesso,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["host_id", "tipo", "riferimento_id"]
+            )
+            .returning(Notifica.id)
         )
-        if esistente is not None:
-            return None
-        notifica = Notifica(
-            id=new_uuid7(),
-            host_id=host_id,
-            tipo=tipo,
-            riferimento_id=riferimento_id,
-            creata_il=adesso,
-        )
-        self._db.add(notifica)
-        self._db.flush()
-        return notifica.id
+        return None if self._db.execute(istruzione).first() is None else nuovo_id
 
     def by_id(self, host_id: uuid.UUID, notifica_id: uuid.UUID) -> Notifica | None:
         return self._db.scalars(
             select(Notifica).where(
                 Notifica.host_id == host_id, Notifica.id == notifica_id
-            )
-        ).one_or_none()
-
-    def per_riferimento(
-        self, host_id: uuid.UUID, *, tipo: str, riferimento_id: uuid.UUID
-    ) -> Notifica | None:
-        return self._db.scalars(
-            select(Notifica).where(
-                Notifica.host_id == host_id,
-                Notifica.tipo == tipo,
-                Notifica.riferimento_id == riferimento_id,
             )
         ).one_or_none()
 
@@ -116,20 +106,6 @@ class ConsegnaRepository:
             )
         ).one_or_none()
 
-    def della_notifica(
-        self, host_id: uuid.UUID, notifica_id: uuid.UUID
-    ) -> list[NotificaConsegna]:
-        return list(
-            self._db.scalars(
-                select(NotificaConsegna)
-                .where(
-                    NotificaConsegna.host_id == host_id,
-                    NotificaConsegna.notifica_id == notifica_id,
-                )
-                .order_by(NotificaConsegna.canale, NotificaConsegna.id)
-            )
-        )
-
     def marca_inviata(
         self,
         host_id: uuid.UUID,
@@ -154,12 +130,19 @@ class ConsegnaRepository:
         Il testo si scrive QUI, nello stesso istante: è ciò che l'Host ha
         ricevuto davvero, e per il canale in-app è la notifica stessa.
         """
-        riga = self.by_id(host_id, consegna_id)
-        if riga is None or riga.stato is not StatoConsegna.IN_ATTESA:
-            return False
-        riga.stato = StatoConsegna.INVIATA
-        riga.oggetto = messaggio.oggetto
-        riga.corpo = messaggio.corpo
-        riga.inviata_il = adesso
-        self._db.flush()
-        return True
+        istruzione = (
+            update(NotificaConsegna)
+            .where(
+                NotificaConsegna.host_id == host_id,
+                NotificaConsegna.id == consegna_id,
+                NotificaConsegna.stato == StatoConsegna.IN_ATTESA,
+            )
+            .values(
+                stato=StatoConsegna.INVIATA,
+                oggetto=messaggio.oggetto,
+                corpo=messaggio.corpo,
+                inviata_il=adesso,
+            )
+            .returning(NotificaConsegna.id)
+        )
+        return self._db.execute(istruzione).first() is not None
