@@ -4,7 +4,7 @@ status: approved
 gate: G3
 gate_status: 'approvata da Fahad al gate G3 (2026-07-24). Decisioni §10 [G3-1…5] ratificate; stack registrato in docs/project-context.md §6.'
 created: 2026-07-24
-updated: 2026-07-27
+updated: 2026-08-12
 author: Winston — System Architect
 phase: '3 · Solutioning'
 depends_on:
@@ -144,7 +144,7 @@ fetch (ETag/If-Modified-Since) → parse VEVENT → normalizza → upsert idempo
 
 - La rilevazione è una **funzione pura** dell'insieme delle Prenotazioni in stato `attiva` di una Struttura (sovrapposizione secondo AD-3, ciclo di vita AD-19), rieseguita dopo ogni import e ogni inserimento manuale (FR-7). Identità stabile del Conflitto = `(struttura_id, coppia di prenotazioni)`: mai due Conflitti aperti per la stessa coppia, mai Conflitti persi (FR-5: "esattamente un Conflitto").
 - **Uscita pulita quando il conflitto cessa da solo**: se una delle due Prenotazioni esce dallo stato `attiva` (cancellata sull'OTA, rimossa dal feed), il Conflitto passa a `decaduto` — transizione di sistema tracciata, distinta da `gestito`. Evita rumore permanente in Dashboard e rende **misurabile SM-C1** (i falsi conflitti da lag dei Feed sono esattamente i `decaduto` mai gestiti). `decaduto` estende il Glossario del PRD: da registrare con John (§9.3). La cessazione propaga anche ai derivati: Turni di pulizia e Messaggi futuri della Prenotazione cessata vengono annullati, mai lasciati orfani (AD-19).
-- Il Conflitto registra fonte e timestamp di sync di ciascuna Prenotazione coinvolta — esattamente ciò che la Finestra di riconciliazione mostra affiancato (UX UJ-2).
+- Il Conflitto **espone** fonte e timestamp di sync di ciascuna Prenotazione coinvolta **derivandoli alla lettura** dallo stato corrente, senza colonne-fotografia sulla riga `conflitto` — stessa disciplina per cui l'«ultimo sync riuscito» si deriva dalla traccia append-only dei `SYNC_RUN` invece di essere una colonna del Feed: un Conflitto vive giorni, e un timestamp copiato invecchia continuando a dichiararsi fresco (NFR-2). È esattamente ciò che la Finestra di riconciliazione mostra affiancato (UX UJ-2). *(Allineato a `docs/epics.md` §Story 2.5 e a `docs/prd.md` FR-5 — [DECISIONE ratificata MYL-90, 2026-08-12].)*
 - **Risoluzione solo umana**: `rilevato → gestito` avviene esclusivamente per azione esplicita dell'Host, con istruzioni guidate per bloccare le date sull'altro Canale. Il sistema **non scrive mai verso le OTA** e non modifica/cancella mai Prenotazioni autonomamente (FR-6 Out of Scope, Non-Goal §8).
 - **Ri-verifica dopo `gestito`** (raccomandazione UX UJ-2 accolta): se la sovrapposizione persiste nei sync successivi oltre una finestra configurabile (default proposto: 24h), si apre un **nuovo** Conflitto collegato al precedente — il sistema non si fida ciecamente della conferma umana, contenendo i falsi negativi (SM-1) senza gonfiare il rumore (SM-C1).
 - Un Conflitto `rilevato` resta in evidenza in Dashboard finché non gestito (FR-6); la notifica parte alla prima sincronizzazione in cui emerge (FR-5) via job durevole (mai silenziosa — NFR-3).

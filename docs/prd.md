@@ -4,7 +4,7 @@ status: approved
 gate: G2
 gate_status: 'approvato da Fahad al gate G3 (2026-07-24), insieme a UX Spec, Architettura, Epics/Stories e Readiness. Esiti [DECISIONE G2] registrati in §14. Ultimi punti aperti (set G2-B, owner R-5) chiusi da Fahad il 2026-07-25 — §14.1. Anagrafica Ospite (opzione B) decisa il 2026-07-26 — §14.2, con estensione del mandato R-5.'
 created: 2026-07-24
-updated: 2026-07-26
+updated: 2026-08-12
 author: John — Product Manager
 phase: '2 · Planning'
 depends_on:
@@ -179,7 +179,7 @@ Il sistema rileva ogni sovrapposizione di date sulla stessa Struttura e la marca
 - **Consequences (testable):**
   - Due Prenotazioni sovrapposte sulla stessa Struttura generano esattamente un Conflitto con stato `rilevato`.
   - L'Host riceve una notifica alla prima sincronizzazione in cui il Conflitto emerge.
-  - Il Conflitto registra la fonte e il timestamp di sincronizzazione di ciascuna Prenotazione coinvolta.
+  - Per ciascuna Prenotazione coinvolta il Conflitto espone la fonte e il timestamp di sincronizzazione **aggiornati al momento in cui l'Host guarda**, mai congelati all'istante in cui il Conflitto è nato: un avviso resta aperto per giorni, e un orario fotografato invecchierebbe dichiarandosi fresco (NFR-2). [DECISIONE ratificata MYL-90, 2026-08-12 — dettaglio e casi limite in `docs/epics.md` §Story 2.5]
 
 #### FR-6: Finestra di riconciliazione
 L'Host risolve un Conflitto scegliendo quale Prenotazione tenere e ricevendo istruzioni guidate per bloccare le date sull'altro Canale. Realizza UJ-2.
