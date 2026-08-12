@@ -795,6 +795,10 @@ class ConflittoRepository:
     esplicita dell'Host e arriva con la Story 2.7. Nessun metodo cancella:
     `decaduto` è una transizione tracciata, e la riga resta nello storico
     (AD-20, GS-6).
+
+    Nessun metodo **azzera** `gestito_il`, ed è l'altra metà della stessa
+    regola: il decadimento spegne l'avviso, non la decisione che l'Host aveva
+    preso (F4).
     """
 
     def __init__(self, db: Session) -> None:
@@ -820,26 +824,37 @@ class ConflittoRepository:
         - `ON CONFLICT DO NOTHING` sull'indice UNIQUE parziale ferma il
           secondo `rilevato` per la stessa coppia. È l'invariante di AD-5, e
           vive nello schema perché sotto concorrenza il codice perde;
-        - il `WHERE NOT EXISTS` sullo stato `gestito` impedisce di riaprire
-          da sé un Conflitto che l'Host ha già chiuso. La riapertura dopo
-          `gestito` esiste (AD-5) ma ha una finestra configurabile e un
-          collegamento al precedente: è materia della Story 2.7, e una
-          rilevazione che aprisse un `rilevato` nuovo al primo sync
-          successivo la scavalcherebbe silenziosamente.
+        - il `WHERE NOT EXISTS` su `gestito_il` impedisce di riaprire da sé un
+          Conflitto che l'Host ha già chiuso. La riapertura dopo `gestito`
+          esiste (AD-5) ma ha una finestra configurabile e un collegamento al
+          precedente: è materia della Story 2.7, e una rilevazione che aprisse
+          un `rilevato` nuovo al primo sync successivo la scavalcherebbe
+          silenziosamente.
+
+        **Su `gestito_il` e non sullo stato corrente** (F4). Un Conflitto
+        `gestito` decade quando una delle due Prenotazioni esce da `attiva`, e
+        una guardia che leggesse `stato = 'gestito'` da quel momento non
+        troverebbe più niente da proteggere: basta che la Prenotazione torni
+        `attiva` — il portale che ritira un annullamento, percorso reale e già
+        provato in `TestEventoInRitardo` — perché la coppia si riapra come se
+        l'Host non avesse mai deciso. Lo stato dice cosa il Conflitto è
+        ADESSO; `gestito_il` dice che una decisione c'è stata, ed è quello che
+        serve qui. Il CHECK `ck_conflitto_gestito_ha_istante` rende la lettura
+        completa: non esiste un `gestito` senza il suo istante.
 
         Il chiamante decide dal ritorno: chi ottiene un id ha aperto il
         Conflitto ed emette l'evento, chi ottiene `None` ha trovato il lavoro
         già fatto e non emette nulla — la stessa forma di `marca_cancellata`.
         """
         nuovo_id = new_uuid7()
-        gia_gestito = (
+        gia_deciso_dall_host = (
             select(Conflitto.id)
             .where(
                 Conflitto.host_id == host_id,
                 Conflitto.struttura_id == struttura_id,
                 Conflitto.prenotazione_min_id == prenotazione_min_id,
                 Conflitto.prenotazione_max_id == prenotazione_max_id,
-                Conflitto.stato == StatoConflitto.GESTITO,
+                Conflitto.gestito_il.is_not(None),
             )
             .exists()
         )
@@ -851,7 +866,7 @@ class ConflittoRepository:
             literal(prenotazione_max_id, Uuid),
             literal(StatoConflitto.RILEVATO, Conflitto.__table__.c.stato.type),
             literal(adesso, DateTime(timezone=True)),
-        ).where(~gia_gestito)
+        ).where(~gia_deciso_dall_host)
         istruzione = (
             pg_insert(Conflitto)
             .from_select(
@@ -945,7 +960,9 @@ class ConflittoRepository:
                 ),
                 # `rilevato` E `gestito`: AD-5 ammette il decadimento da
                 # entrambi — una sovrapposizione che cessa dopo che l'Host
-                # l'ha gestita è comunque cessata.
+                # l'ha gestita è comunque cessata. Ciò che NON cessa con lei è
+                # `gestito_il`, che questa `UPDATE` non tocca: lo stato passa,
+                # la decisione resta (F4).
                 Conflitto.stato != StatoConflitto.DECADUTO,
                 ~ancora_attiva,
             )

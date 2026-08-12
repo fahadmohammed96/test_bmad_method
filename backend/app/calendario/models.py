@@ -422,6 +422,11 @@ class Conflitto(Base):
     **Non si cancella mai**, nemmeno quando decade (AD-20, GS-6): `decaduto` è
     una transizione tracciata, con il suo istante, e la riga resta nello
     storico. È ciò che rende misurabile SM-C1.
+
+    **Lo stato è uno solo, la memoria no** (F4): `gestito_il` conserva il fatto
+    che l'Host abbia deciso anche dopo che il Conflitto è decaduto. Sono due
+    cose diverse — «è gestito ADESSO» e «è stato gestito» — e tenerle sulla
+    stessa colonna significa perdere la seconda ogni volta che cambia la prima.
     """
 
     __tablename__ = "conflitto"
@@ -455,6 +460,17 @@ class Conflitto(Base):
             "(stato = 'decaduto') = (decaduto_il IS NOT NULL)",
             name="ck_conflitto_decaduto_ha_istante",
         ),
+        # L'IMPLICAZIONE, non l'equivalenza — ed è tutta la differenza (F4).
+        # `gestito` senza il suo istante sarebbe una decisione senza il quando,
+        # cioè la finestra della 2.7 senza il punto da cui si misura; ma
+        # l'inverso deve restare ammesso, perché `gestito_il` valorizzato su un
+        # Conflitto `decaduto` è esattamente ciò che questa colonna esiste per
+        # rappresentare. Scriverla come `=`, per simmetria con la riga sopra,
+        # renderebbe impossibile lo stato che si vuole ottenere.
+        CheckConstraint(
+            "stato <> 'gestito' OR gestito_il IS NOT NULL",
+            name="ck_conflitto_gestito_ha_istante",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid7)
@@ -487,6 +503,18 @@ class Conflitto(Base):
     # `NULL` finché il Conflitto non decade. Non è `aggiornato_il`: qui serve
     # l'istante della transizione, che non si muove più.
     decaduto_il: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # **La memoria della decisione dell'Host, e non il suo stato** (F4). Uno
+    # stato non può essere insieme `decaduto` e `gestito`, ma «è decaduto ed
+    # era stato gestito» è un fatto che si può conservare — e va conservato,
+    # perché è quello su cui poggiano la guardia anti-riapertura di `apri` e
+    # la finestra configurabile della Story 2.7, che si misura proprio da
+    # QUANDO l'Host ha deciso.
+    #
+    # Si scrive una volta e non si azzera mai: il decadimento successivo
+    # riguarda la sovrapposizione, non la decisione.
+    gestito_il: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
